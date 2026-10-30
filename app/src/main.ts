@@ -20,7 +20,7 @@ import {
 } from "./core/geometry";
 import { snapMove, type Guide } from "./core/snapping";
 import {
-  connectorEditPoints,connectorInsertWaypoint,connectorPointAt,
+  connectorEditPoints,connectorInsertWaypoint,connectorPointAt,connectorClosestFraction,
   connectorMidpoint,
   resolveEndpoint,
   connectorBounds,
@@ -39,6 +39,7 @@ import { BoardScene } from "./render/scene";
 
 import { installImages } from "./images";
 import { installEditorUI } from "./editor-ui";
+import { installConnectorCompletion } from "./connector-completion";
 import {installBoardHome} from "./board-home";
 import {ensureFonts,loadBoardFont,embedSvgFonts} from "./fonts";
 import {installIcons} from "./icons";
@@ -49,6 +50,9 @@ import {groupLeaves,memberSelection,enclosingGroup,groupSelection,ungroupSelecti
 import {eraseStrokePoints} from "./core/eraser";
 import {lassoHits} from "./core/lasso";
 import { installDrawingUI } from "./drawing-ui";
+import { capGeometry } from "./core/line-decoration";
+import { installBackground } from "./background";
+import { DEFAULT_BACKGROUND, validateBoardBackground, type BoardBackground } from "./core/background";
 
 await ensureFonts();
 const host = document.getElementById("app")!;
@@ -77,6 +81,7 @@ let home:ReturnType<typeof installBoardHome>|undefined;
 const storageKey=()=>home?.currentKey()??STORAGE_KEY;
 
 interface SavedBoard {
+  background?: BoardBackground;
   savedAt?:number;
   title?:string;
   widgets: unknown[];
@@ -96,11 +101,13 @@ function loadBoard(stored?:SavedBoard): boolean {
     if (!stored&&!raw) return false;
     const data = stored ?? JSON.parse(raw!) as SavedBoard;
     state.widgets.clear();state.order=[];state.connectors.clear();state.connectorOrder=[];state.strokes.clear();state.strokeOrder=[];state.groups.clear();state.selection.clear();
+    state.background={...DEFAULT_BACKGROUND};
     if(data.title)document.getElementById("board-title")!.textContent=data.title;
 
     // journal reconstroi estado E pilhas de undo/redo
     if (data.journal && Array.isArray(data.journal.applied)) {
       bus.restore(data.journal.applied, data.journal.undone ?? []);
+      state.background=validateBoardBackground(data.background)??state.background;
       if (data.camera) {
         camera.x = data.camera.x;
         camera.y = data.camera.y;
@@ -116,6 +123,7 @@ function loadBoard(stored?:SavedBoard): boolean {
     for (const s of data.strokes) state.strokes.set((s as Stroke).id, s as Stroke);
     state.strokeOrder = data.strokeOrder ?? [];
     for (const [id, items] of data.groups ?? []) state.groups.set(id, items);
+    state.background=validateBoardBackground(data.background)??{...DEFAULT_BACKGROUND};
     if (data.camera) {
       camera.x = data.camera.x;
       camera.y = data.camera.y;
@@ -128,12 +136,13 @@ function loadBoard(stored?:SavedBoard): boolean {
 }
 
 let saveTimer:ReturnType<typeof setTimeout>|null=null;
-function savedBoard():SavedBoard{return structuredClone({savedAt:Date.now(),title:document.getElementById("board-title")!.textContent??"Board",widgets:[...state.widgets.values()],order:state.order,connectors:[...state.connectors.values()],connectorOrder:state.connectorOrder,strokes:[...state.strokes.values()],strokeOrder:state.strokeOrder,groups:[...state.groups.entries()],journal:bus.snapshot(),camera:{x:camera.x,y:camera.y,scale:camera.scale}});}
+function savedBoard():SavedBoard{return structuredClone({savedAt:Date.now(),title:document.getElementById("board-title")!.textContent??"Board",background:state.background??{...DEFAULT_BACKGROUND},widgets:[...state.widgets.values()],order:state.order,connectors:[...state.connectors.values()],connectorOrder:state.connectorOrder,strokes:[...state.strokes.values()],strokeOrder:state.strokeOrder,groups:[...state.groups.entries()],journal:bus.snapshot(),camera:{x:camera.x,y:camera.y,scale:camera.scale}});}
 async function persistBoard(){if(home&&!home.currentId())return;try{await writeStoredBoard(storageKey(),savedBoard());document.getElementById("save-warning")?.remove();}catch{let notice=document.getElementById("save-warning");if(!notice){notice=document.createElement("div");notice.id="save-warning";notice.style.cssText="position:fixed;bottom:60px;left:50%;transform:translateX(-50%);z-index:80;background:#fff9b1;padding:12px 18px;border-radius:8px;font:13px Segoe UI";document.body.append(notice);}notice.textContent="Não foi possível salvar automaticamente. Use Salvar arquivo para guardar seu trabalho.";}}
 function scheduleSave(){if(home&&!home.currentId())return;if(saveTimer)clearTimeout(saveTimer);saveTimer=setTimeout(()=>{void persistBoard();},400);}
 window.addEventListener("pagehide",()=>{void persistBoard();});
 
 const state: BoardState = {
+  background: {...DEFAULT_BACKGROUND},
   widgets: new Map(),
   order: [],
   connectors: new Map(),
@@ -153,10 +162,15 @@ const bus = new CommandBus(state, () => {
 
 let images: ReturnType<typeof installImages> | undefined;
 let editorUI: ReturnType<typeof installEditorUI> | undefined;
+let connectorCompletion: ReturnType<typeof installConnectorCompletion> | undefined;
 let drawingUI: ReturnType<typeof installDrawingUI> | undefined;
+let backgroundUI: ReturnType<typeof installBackground> | undefined;
+let lastBackground:BoardBackground|undefined;
 function syncScene(): void {
+  if(lastBackground!==state.background){lastBackground=state.background;gridDirty=true;}
   scene.sync(state, camera.visibleWorldRect(), camera.scale);
   images?.sync();
+  backgroundUI?.sync();
 }
 
 function syncSize(): void {
@@ -181,6 +195,7 @@ function drawGrid(): void {
   const cell = gridState.visualCell;
   const stepPx = cell * camera.scale;
   gridLayer.clear();
+  if(state.background?.grid===false)return;
   if (stepPx < 6) return;
 
   const radius = Math.min(2, Math.max(0.75, stepPx / 40));
@@ -199,7 +214,9 @@ function drawGrid(): void {
     }
     if (count > maxDots) break;
   }
-  gridLayer.fill({ color: 0xc9c8c3, alpha });
+  const rgb=Number.parseInt((state.background?.color??DEFAULT_BACKGROUND.color).slice(1),16);
+  const dark=((rgb>>16)*.2126+((rgb>>8)&255)*.7152+(rgb&255)*.0722)<110;
+  gridLayer.fill({ color: dark?0x767b88:0xc9c8c3, alpha:dark?alpha*.45:alpha });
 }
 
 // ------------------------------------------------------------- selection
@@ -270,14 +287,16 @@ function drawConnectPreview(): void {
   if (!connectPreview) return;
   const active=gesture.kind==="connect" ? gesture : pendingConnection;
   const source=active ? state.widgets.get(active.fromWidget) : undefined;
-  const target=connectionTarget(connectPreview.to);
-  const fromAnchor=source ? (active?.fixed ? active.fromAnchor : {kind:"anchor" as const,widgetId:source.id,...facingAnchor(source,connectPreview.to)}) : {kind:"point" as const,...connectPreview.from};
-  const toAnchor=target && target.id!==source?.id ? {kind:"anchor" as const,widgetId:target.id,...nearestAnchor(target,connectPreview.to)} : {kind:"point" as const,...connectPreview.to};
+  const cursor=active?.current??connectPreview.to;
+  const candidate=connectionTarget(cursor),target=candidate?.id!==source?.id?candidate:undefined;
+  const fromAnchor=source ? (active?.fixed ? active.fromAnchor : {kind:"anchor" as const,widgetId:source.id,...facingAnchor(source,target?widgetCenter(target):cursor)}) : {kind:"point" as const,...connectPreview.from};
+  const toAnchor=target ? {kind:"anchor" as const,widgetId:target.id,...nearestAnchor(target,cursor)} : {kind:"point" as const,...cursor};
   const geometry=connectorGeometry({id:"preview",type:"connector",start:fromAnchor!,end:toAnchor,shape:connectorDefault.shape,style:{strokeColor:"#3859ff",strokeWidth:2},z:0},state.widgets);
   const path=(geometry?.points ?? [connectPreview.from,connectPreview.to]).map(p=>camera.worldToScreen(p));
   const a=path[0]!,b=path[path.length-1]!;
   overlay.moveTo(a.x,a.y);for(const p of path.slice(1))overlay.lineTo(p.x,p.y);
   overlay.stroke({ width: 2, color: 0x3859ff, alpha: 0.8 });
+  if(connectorDefault.arrow&&path.length>1){const cap=capGeometry("arrow",path[path.length-2]!,b,2);for(const line of cap.lines){overlay.moveTo(line[0]!.x,line[0]!.y);for(const p of line.slice(1))overlay.lineTo(p.x,p.y);overlay.stroke({width:2,color:0x3859ff});}}
   overlay.circle(a.x, a.y, 4).fill({ color: 0x3859ff });
   overlay.circle(b.x, b.y, 4).stroke({ width: 1.5, color: 0x3859ff });
   const hit = target;
@@ -425,6 +444,7 @@ function endEdit(commit: boolean): void {
 
 function drawSelection(): void {
   overlay.clear();
+  if(tool==="hand")return;
   if (state.selection.size === 0) {
     drawGuides();
     drawConnectPreview();
@@ -503,15 +523,19 @@ const creationStyles:Partial<Record<WidgetType,Partial<Style>>>={};
 let selectedShape: ShapeWidget["shape"] = "rectangle";
 
 function setTool(next: Tool): void {
+  connectorCompletion?.close();
   tool = next;
-  if(next !== "connector") pendingConnection=null;
+  if(next !== "connector") { pendingConnection=null; connectPreview=null; }
   if (next !== "shape") editorUI?.closePanels();
   for (const btn of toolbar.querySelectorAll<HTMLButtonElement>("button[data-tool]")) {
     btn.classList.toggle("active", btn.dataset.tool === next);
+    if(btn.dataset.tool==="select"){btn.setAttribute("aria-pressed",String(next==="select"));btn.dataset.label=next==="select"?"Desativar seleção e navegar":"Selecionar e mover objetos (V)";}
   }
+  document.body.classList.toggle("navigation-mode",next==="hand");
   updateCursor();
   editorUI?.refresh();
   drawingUI?.refresh();
+  drawSelection();
 }
 
 function updateCursor(): void {
@@ -525,6 +549,7 @@ toolbar.addEventListener("click", (e) => {
   if (btn.dataset.tool === "image") { imagePicker.click(); return; }
   if (btn.dataset.tool === "shape") { editorUI?.openShapes(); return; }
   if (btn.dataset.tool === "connector") { editorUI?.openConnectors(); return; }
+  if (btn.dataset.tool === "select") {setTool(tool==="select"?"hand":"select");return;}
   setTool(btn.dataset.tool as Tool);
 });
 
@@ -766,9 +791,28 @@ function rotateHandleAtScreen(s: Vec): boolean {
 app.canvas.addEventListener("contextmenu", (e) => e.preventDefault());
 
 app.canvas.addEventListener("dblclick", (e) => {
+  if(tool==="hand")return;
   const p = camera.screenToWorld({ x: e.offsetX, y: e.offsetY });
   const hit = topmostAt(p);
-  if (!hit) { const c=connectorAt(p,8/camera.scale);if(c){bus.exec({op:"SELECTION_SET",payload:[c.id]});(document.querySelector('[data-connector="caption"]') as HTMLInputElement)?.focus();} return; }
+  if (!hit) {
+    const c=connectorAt(p,8/camera.scale);
+    if(c&&!c.locked){
+      const geometry=connectorGeometry(c,state.widgets);
+      const fraction=geometry?connectorClosestFraction(geometry,p):.5;
+      const captions=[...(c.captions??[])],positions=captions.map((_,i)=>c.captionPositions?.[i]??(i+1)/(captions.length+1));
+      let index=positions.findIndex(position=>Math.abs(position-fraction)<.08);
+      if(index<0){index=captions.length;captions.push("");positions.push(Math.max(.02,Math.min(.98,fraction)));}
+      bus.exec({op:"BATCH",payload:{label:"Editar texto da conexão",commands:[
+        {op:"CONNECTOR_UPDATE",payload:{id:c.id,patch:{captions,captionPositions:positions}}},
+        {op:"SELECTION_SET",payload:[c.id]},
+      ]}});
+      const panel=document.getElementById("selection-properties")!;
+      panel.dataset.openMenu="captions";
+      const menu=panel.querySelector<HTMLDetailsElement>('details[data-menu="captions"]');if(menu)menu.open=true;
+      panel.querySelector<HTMLInputElement>(`[data-caption-index="${index}"]`)?.focus();
+    }
+    return;
+  }
 
   // duplo clique em objeto que não é grupo abre o editor
   const inGroup = enclosingGroup(state,hit.id,isolatedGroup);
@@ -777,7 +821,7 @@ app.canvas.addEventListener("dblclick", (e) => {
     return;
   }
 
-  if(inGroup){isolatedGroup=inGroup;bus.exec({op:"SELECTION_SET",payload:groupLeaves(state,inGroup)});refreshChrome();}
+  if(inGroup){isolatedGroup=inGroup;bus.exec({op:"SELECTION_SET",payload:memberSelection(state,hit.id,inGroup)});refreshChrome();}
 
 });
 
@@ -794,6 +838,7 @@ app.canvas.addEventListener("pointerdown", (e) => {
   cursorWorld = p;
 
   if (e.button === 2) return;
+  connectorCompletion?.close();
   editorUI?.closePanels();
   if (e.button === 1 || spaceDown || tool === "hand") {
     gesture = { kind: "pan", pointerId: e.pointerId };
@@ -1091,20 +1136,7 @@ app.canvas.addEventListener("pointermove", (e) => {
     }
     case "connect": {
       gesture.current = p;
-      const fromWidget = state.widgets.get(gesture.fromWidget);
-      const from = fromWidget
-        ? anchorWorldOf(fromWidget, { x: (gesture.fromAnchor as { x: number; y: number }).x, y: (gesture.fromAnchor as { x: number; y: number }).y })
-        : null;
-      const target = topmostAt(p);
-      const fromAnchor = fromWidget ? (gesture.fixed ? gesture.fromAnchor : facingAnchor(fromWidget, p)) : null;
-      connectPreview = {
-        from: fromWidget && fromAnchor ? anchorWorldOf(fromWidget, fromAnchor) ?? p : {x:gesture.fromAnchor.x,y:gesture.fromAnchor.y},
-        to: p,
-      };
-      if (target && target.id !== gesture.fromWidget && fromWidget) {
-        const anchor = facingAnchor(target, widgetCenter(fromWidget));
-        connectPreview.to = anchorWorldOf(target, anchor) ?? p;
-      }
+      connectPreview = {from:resolveEndpoint(gesture.fromAnchor,state.widgets)??p,to:p};
       drawSelection();
       return;
     }
@@ -1178,6 +1210,10 @@ function endGesture(e: PointerEvent): void {
   pointers.delete(e.pointerId);
   if (pointers.size < 2) lastPinch = null;
 
+  if(e.type==="pointercancel"){
+    bus.endTransaction();gesture={kind:"none"};pendingConnection=null;connectPreview=null;activeGuides=[];drawSelection();updateCursor();return;
+  }
+  let completionId:string|undefined;
   switch (gesture.kind) {
     case "create": {
       if (e.type === "pointercancel") break;
@@ -1214,14 +1250,22 @@ function endGesture(e: PointerEvent): void {
       drawSelection();
       break;
     }
-    case "reconnect":
+    case "reconnect": {
+      const c=state.connectors.get(gesture.id);
+      if(c&&c[gesture.which].kind==="point"&&c[gesture.which==="start"?"end":"start"].kind==="anchor")completionId=c.id;
       break;
+    }
     case "connect": {
       const originPoint=resolveEndpoint(gesture.fromAnchor,state.widgets)!;
       const startedAt=gesture.startedAt ?? originPoint;
       if(Math.hypot(gesture.current.x-startedAt.x,gesture.current.y-startedAt.y)*camera.scale<5 && tool==="connector") {pendingConnection={...gesture};gesture={kind:"none"};return;}
-      const target = connectionTarget(gesture.current);
       const source = state.widgets.get(gesture.fromWidget);
+      if(source&&gesture.fixed&&Math.hypot(gesture.current.x-startedAt.x,gesture.current.y-startedAt.y)*camera.scale<5){
+        const center=widgetCenter(source),dx=originPoint.x-center.x,dy=originPoint.y-center.y,length=Math.hypot(dx,dy)||1;
+        const distance=Math.max(180,Math.min(320,180/camera.scale));
+        gesture.current={x:originPoint.x+dx/length*distance,y:originPoint.y+dy/length*distance};
+      }
+      const target = connectionTarget(gesture.current);
       const origin = gesture.fromAnchor;
       const startPoint = source ? widgetCenter(source) : {x:origin.x,y:origin.y};
       const finish = gesture.current;
@@ -1233,8 +1277,11 @@ function endGesture(e: PointerEvent): void {
             start:source && startAnchor ? {kind:"anchor",widgetId:source.id,...startAnchor} : origin,
             end:target && endAnchor ? {kind:"anchor",widgetId:target.id,...endAnchor} : {kind:"point",...finish},
             shape:connectorDefault.shape,style:{strokeColor:"#1a1a1a",strokeWidth:2,endCap:connectorDefault.arrow?"arrow":"none"},z:0};
-          bus.exec({op:"CONNECTOR_CREATE",payload:connector});
-          bus.exec({op:"SELECTION_SET",payload:[connector.id]});
+          bus.exec({op:"BATCH",payload:{label:"Criar conexão",commands:[
+            {op:"CONNECTOR_CREATE",payload:connector},
+            {op:"SELECTION_SET",payload:[connector.id]},
+          ]}});
+          if(source&&!target)completionId=connector.id;
         }
       }
       connectPreview = null;
@@ -1260,6 +1307,7 @@ function endGesture(e: PointerEvent): void {
   activeGuides = [];
   connectPreview = null;
   drawSelection();
+  if(completionId)connectorCompletion?.show(completionId);
 }
 app.canvas.addEventListener("pointerup", endGesture);
 app.canvas.addEventListener("pointercancel", endGesture);
@@ -1268,6 +1316,7 @@ app.canvas.addEventListener(
   "wheel",
   (e) => {
     e.preventDefault();
+    connectorCompletion?.close();
     if (e.ctrlKey || !e.shiftKey) {
       camera.zoomAt({ x: e.offsetX, y: e.offsetY }, Math.exp(-e.deltaY * 0.0025));
     } else {
@@ -1283,6 +1332,9 @@ app.canvas.addEventListener(
 
 window.addEventListener("keydown", (e) => {
   if(document.body.classList.contains("home-visible"))return;
+  if(e.key==="Escape"&&document.querySelector('#selection-properties details[open],#shape-picker:not([hidden]),#connector-picker:not([hidden]),#editor-context:not([hidden])')){
+    e.preventDefault();editorUI?.closePanels();return;
+  }
   // enquanto o usuário digita (editor inline, prompt, input), atalhos globais não valem
   const target = e.target as HTMLElement | null;
   if (
@@ -1305,6 +1357,7 @@ window.addEventListener("keydown", (e) => {
 
   if (mod && key === "z") {
     e.preventDefault();
+    connectorCompletion?.close();
     if (e.shiftKey) bus.redo();
     else bus.undo();
     return;
@@ -1437,6 +1490,7 @@ window.addEventListener("keydown", (e) => {
       bus.exec({ op: "SELECTION_SET", payload: [] });
       setTool("select");
       isolatedGroup = null;
+      drawSelection();
       break;
   }
 });
@@ -1462,6 +1516,8 @@ async function copySelectionImage(){
 const lassoButton=document.createElement("button");lassoButton.dataset.tool="lasso";lassoButton.dataset.label="Selecionar com laço (L)";lassoButton.setAttribute("aria-label","Laço");lassoButton.title="Laço (L)";lassoButton.innerHTML='<svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M8 17c-9-1-7-13 4-13 11 0 13 11 3 13-6 2-11 0-8-3 3-2 7 3 3 7"/></svg>';toolbar.querySelector('[data-tool="eraser"]')?.after(lassoButton);
 // Local editor controls
 images = installImages({state,bus,camera,app,world,nodeAt:id=>scene.nodeAt(id),onChange:()=>{syncScene();refreshChrome();}});
+backgroundUI=installBackground({state,bus,camera,app,world,onChange:()=>{gridDirty=true;syncScene();refreshChrome();}});
+connectorCompletion=installConnectorCompletion({state,bus,camera});
 const imagePicker = document.createElement("input");
 imagePicker.type="file"; imagePicker.accept="image/*"; imagePicker.multiple=true;
 imagePicker.addEventListener("change",()=>{if(imagePicker.files) void images?.importFiles(imagePicker.files); imagePicker.value="";});
@@ -1470,8 +1526,14 @@ editorUI = installEditorUI({state,bus,camera,setTool:t=>setTool(t as Tool),getTo
   onStyleDefaults:(type,patch)=>{creationStyles[type]={...creationStyles[type],...patch};},
   setShape:s=>{selectedShape=s;},getShape:()=>selectedShape,onImage:()=>imagePicker.click(),
   onCrop:()=>images?.cropSelected(),onResetCrop:()=>images?.resetCrop(),
+  onCircleCrop:()=>images?.circleCropSelected(),onEditText:()=>{const w=state.widgets.get([...state.selection][0]!);if(w&&!w.locked&&w.type!=="image")beginEdit(w);},
+  onImageActualSize:()=>{
+    const w=state.widgets.get([...state.selection][0]!);if(w?.type!=="image"||w.locked||state.selection.size!==1)return;
+    const width=w.naturalWidth*(w.crop?.width??1),height=w.naturalHeight*(w.crop?.height??1);
+    bus.exec({op:"WIDGET_UPDATE",payload:{id:w.id,patch:{x:w.x+(w.width-width)/2,y:w.y+(w.height-height)/2,width,height}}});
+  },
   onReplaceImage:()=>images?.replaceSelected(),onFlipImage:axis=>images?.flipSelected(axis),onDownloadImage:()=>images?.downloadSelected(),
-  getGroupScope:()=>isolatedGroup,onExitGroup:()=>{isolatedGroup=null;refreshChrome();},
+  getGroupScope:()=>isolatedGroup,onExitGroup:()=>{const group=isolatedGroup;isolatedGroup=null;if(group)bus.exec({op:"SELECTION_SET",payload:groupLeaves(state,group)});refreshChrome();},
   onAddWaypoint:()=>editWaypoint(false),onRemoveWaypoint:()=>editWaypoint(true),onCopyImage:()=>{void copySelectionImage();}});
 installIcons();
 drawingUI=installDrawingUI({getTool:()=>tool,setTool:t=>setTool(t as Tool)});

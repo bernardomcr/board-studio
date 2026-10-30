@@ -8,4 +8,10 @@ Cada board tem uma chave independente no IndexedDB. A biblioteca inicial mantém
 
 As formas compartilham contornos entre canvas, hit-test, ícones e SVG. Conectores compartilham geometria de trajetórias, padrões e terminações. Imagens preservam bytes originais e armazenam recorte e transformação separadamente. O SVG inclui máscaras e fontes locais incorporadas quando exportado pela interface.
 
+Os menus são construídos por capacidade da seleção: texto, forma, imagem, quadro, conector, traço ou seleção mista. Cada barra tem estrutura própria de ícones e um submenu aberto por vez; posição e limites são calculados a partir da seleção e da viewport. Organizar transforma as raízes da seleção, preservando a estrutura interna dos grupos.
+
+O módulo `connector-completion.ts` oferece um destino após criar ou reconectar uma ponta no vazio. Criar o objeto e anexar a ponta usa um comando composto reversível; dispensar o menu mantém a ponta livre. Prévia e confirmação usam a mesma escolha de âncoras. O recorte de imagem mantém o original e registra máscara, região e geometria em uma única ação.
+
+O fundo é um campo do board, separado dos objetos selecionáveis. Um comando reversível altera cor, grade e imagem posicionada no mundo. A camada de cenário fica atrás do conteúdo; salvamento e arquivos editáveis preservam o original incorporado. SVG usa o fundo por padrão, e a opção `background: 'none'` o exclui da geometria e da exportação. O botão de seleção desativado usa navegação com mão, mantendo os objetos intactos.
+
 O projeto não contém endpoints de sincronização, autenticação ou armazenamento remoto. Publicar o código no GitHub não publica os boards mantidos no navegador.

@@ -46,6 +46,55 @@ export function transformSnapshot(s:BoardState,snapshot:EntitySnapshot,dx:number
   for(const st of snapshot.strokes){if(st.locked)continue;cmds.push({op:'STROKE_UPDATE',payload:{id:st.id,patch:{points:st.points.map(p=>({...point(p),r:p.r*Math.sqrt(Math.abs(sx*sy))}))}}});}
   return cmds;
 }
+
+export type ArrangeMode='left'|'hcenter'|'right'|'top'|'vcenter'|'bottom'|'dist-x'|'dist-y';
+
+/** An isolated group exposes its children as roots, while nested groups stay intact. */
+export function arrangementRoots(s:BoardState,scope:string|null=null):string[] {
+  if(!scope||!s.groups.has(scope))return selectionRoots(s);
+  const visit=(id:string):string[]=>{
+    const leaves=groupLeaves(s,id),chosen=leaves.filter(leaf=>s.selection.has(leaf));
+    if(!chosen.length)return [];
+    if(chosen.length===leaves.length)return [id];
+    return s.groups.has(id)?s.groups.get(id)!.flatMap(visit):chosen;
+  };
+  return s.groups.get(scope)!.flatMap(visit);
+}
+
+/** Align complete selection roots using their visible geometry and one undo step. */
+export function arrangeSelection(s:BoardState,bus:CommandBus,mode:ArrangeMode,scope:string|null=null):boolean {
+  const roots=arrangementRoots(s,scope).map(id=>{
+    const leaves=groupLeaves(s,id),bounds=selectedBounds(s,leaves);
+    return bounds?{id,leaves,bounds,snapshot:captureSelection(s,leaves)}:null;
+  }).filter((root):root is NonNullable<typeof root>=>!!root);
+  const distribute=mode==='dist-x'||mode==='dist-y';
+  if(roots.length<(distribute?3:2)||roots.some(root=>root.leaves.some(id=>itemLocked(s,id))))return false;
+  const minX=Math.min(...roots.map(r=>r.bounds.minX)),maxX=Math.max(...roots.map(r=>r.bounds.maxX));
+  const minY=Math.min(...roots.map(r=>r.bounds.minY)),maxY=Math.max(...roots.map(r=>r.bounds.maxY));
+  const translations=new Map<string,Vec>();
+  if(distribute){
+    const horizontal=mode==='dist-x',start=horizontal?'minX':'minY',end=horizontal?'maxX':'maxY';
+    const sorted=[...roots].sort((a,b)=>a.bounds[start]-b.bounds[start]);
+    const span=sorted.at(-1)!.bounds[end]-sorted[0]!.bounds[start];
+    const gap=(span-sorted.reduce((sum,root)=>sum+root.bounds[end]-root.bounds[start],0))/(sorted.length-1);
+    let cursor=sorted[0]!.bounds[start];
+    for(const root of sorted){const delta=cursor-root.bounds[start];translations.set(root.id,horizontal?{x:delta,y:0}:{x:0,y:delta});cursor+=root.bounds[end]-root.bounds[start]+gap;}
+  }else for(const root of roots){
+    const b=root.bounds;
+    const dx=mode==='left'?minX-b.minX:mode==='right'?maxX-b.maxX:mode==='hcenter'?(minX+maxX-b.minX-b.maxX)/2:0;
+    const dy=mode==='top'?minY-b.minY:mode==='bottom'?maxY-b.maxY:mode==='vcenter'?(minY+maxY-b.minY-b.maxY)/2:0;
+    translations.set(root.id,{x:dx,y:dy});
+  }
+  const commands:Command[]=[];
+  for(const root of roots){
+    const delta=translations.get(root.id)!;if(Math.abs(delta.x)+Math.abs(delta.y)<1e-8)continue;
+    // A separately selected connector is its own root, even when both anchors are selected.
+    root.snapshot.connectors=root.snapshot.connectors.filter(c=>!s.selection.has(c.id)||root.leaves.includes(c.id));
+    commands.push(...transformSnapshot(s,root.snapshot,delta.x,delta.y));
+  }
+  if(!commands.length)return false;
+  bus.exec({op:'BATCH',payload:{label:distribute?'Distribuir seleção':'Alinhar seleção',commands}});return true;
+}
 export function duplicateSnapshot(s:BoardState,bus:CommandBus,snapshot:EntitySnapshot,dx=24,dy=24){
   const map=new Map<string,string>();for(const item of [...snapshot.widgets,...snapshot.connectors,...snapshot.strokes])map.set(item.id,nextId(item.type));for(const [id] of snapshot.groups)map.set(id,nextId('group'));
   const point=(p:Vec)=>({x:p.x+dx,y:p.y+dy});const ids:string[]=[];bus.beginTransaction('Duplicar seleção');

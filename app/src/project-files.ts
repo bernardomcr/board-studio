@@ -4,12 +4,14 @@ import { MIN_SCALE, MAX_SCALE } from "./core/camera";
 import { SHAPE_OPTIONS, type Widget } from "./core/model";
 import type { Connector, Endpoint } from "./core/connectors";
 import type { Stroke } from "./core/strokes";
+import { DEFAULT_BACKGROUND, validateBoardBackground, type BoardBackground } from "./core/background";
 
 interface BoardFile {
   format: "local-board"; version: 1; title: string;
   widgets: Widget[]; order: string[]; connectors: Connector[]; connectorOrder: string[];
   strokes: Stroke[]; strokeOrder: string[]; groups: Array<[string, string[]]>;
   camera: { x: number; y: number; scale: number };
+  background?: BoardBackground;
 }
 const fail = (message: string): never => { throw new Error(message); };
 function record(value: unknown): Record<string, unknown> {
@@ -116,7 +118,10 @@ export function validateBoardFile(value: unknown): BoardFile {
   for(const [gid,members] of groups){if(seen.has(gid))fail('Identificador de grupo repetido.');for(const member of members){if(!seen.has(member)&&!groupMap.has(member))fail('Membro de grupo ausente.');if(parented.has(member))fail('Objeto em múltiplos grupos.');parented.add(member);}}
   const visiting=new Set<string>(),visited=new Set<string>();const visit=(id:string)=>{if(visiting.has(id))fail('Grupo circular inválido.');if(visited.has(id))return;visiting.add(id);for(const member of groupMap.get(id)??[])if(groupMap.has(member))visit(member);visiting.delete(id);visited.add(id);};for(const id of groupMap.keys())visit(id);
   const camera = record(data.camera);
+  const background=data.background===undefined?{...DEFAULT_BACKGROUND}:validateBoardBackground(data.background);
+  if(!background)fail("Fundo do board inválido.");
   return { format: "local-board", version: 1, title: str(data.title, 1000), widgets, connectors, strokes, groups,
+    background: background!,
     order: order(data.order, widgets), connectorOrder: order(data.connectorOrder, connectors), strokeOrder: order(data.strokeOrder, strokes),
     camera: { x: number(camera.x), y: number(camera.y), scale: number(camera.scale, MIN_SCALE, MAX_SCALE) } };
 }
@@ -134,6 +139,7 @@ export function installProjectFiles(api: { state: BoardState; bus: CommandBus; c
   const input = document.createElement("input"); input.type = "file"; input.accept = ".board.json,.json,application/json"; input.hidden = true; document.body.append(input);
   saveButton.onclick = () => {
     const data: BoardFile = { format: "local-board", version: 1, title: document.getElementById("board-title")?.textContent ?? "Board",
+      background:state.background??{...DEFAULT_BACKGROUND},
       widgets: [...state.widgets.values()], order: [...state.order], connectors: [...state.connectors.values()], connectorOrder: [...state.connectorOrder],
       strokes: [...state.strokes.values()], strokeOrder: [...state.strokeOrder], groups: [...state.groups.entries()], camera: { x: camera.x, y: camera.y, scale: camera.scale } };
     const url = URL.createObjectURL(new Blob([JSON.stringify(data)], { type: "application/json" }));
@@ -151,6 +157,7 @@ export function installProjectFiles(api: { state: BoardState; bus: CommandBus; c
       const connectorById = new Map(data.connectors.map(c => [c.id, c]));
       const strokeById = new Map(data.strokes.map(s => [s.id, s]));
       const baseline: Command[] = [
+        {op:"BACKGROUND_UPDATE",payload:data.background??{...DEFAULT_BACKGROUND}},
         ...data.order.map(id => ({ op: "WIDGET_CREATE" as const, payload: widgetById.get(id)! })),
         ...data.order.map(id => ({ op: "WIDGET_UPDATE" as const, payload: { id, patch: { z: widgetById.get(id)!.z } } })),
         ...data.connectorOrder.map(id => ({ op: "CONNECTOR_CREATE" as const, payload: connectorById.get(id)! })),
@@ -159,6 +166,7 @@ export function installProjectFiles(api: { state: BoardState; bus: CommandBus; c
       ];
       state.widgets = new Map(); state.order = []; state.connectors = new Map(); state.connectorOrder = [];
       state.strokes = new Map(); state.strokeOrder = []; state.groups = new Map(); state.selection = new Set();
+      state.background={...DEFAULT_BACKGROUND};
       // Persist the validated snapshot as commands so reload reconstructs imported content.
       bus.restore(baseline, []);
       camera.x = data.camera.x; camera.y = data.camera.y; camera.scale = data.camera.scale;

@@ -17,11 +17,13 @@ No Windows, `TESTAR.cmd` compila e abre a versão de produção em `http://local
 ## Recursos
 
 - Biblioteca inicial com projetos, busca, ordenação, grade/lista, favoritos, duplicação e lixeira recuperável.
-- 77 entradas de formas básicas e fluxograma, com busca, geometrias próprias e exportação SVG.
-- Conectores retos, curvos e em cotovelo; pontos intermediários, seis terminações, tracejado/pontilhado e múltiplos rótulos posicionáveis.
-- Imagens com original preservado, substituição, máscaras retangular/elíptica/arredondada, espelhamento, opacidade e recorte não destrutivo.
+- Criação de boards em branco, sem templates. O botão de seleção liga/desliga: desligado, arrastar navega pelo canvas; Espaço também permite navegar temporariamente.
+- Controle Fundo na parte inferior: claro, escuro, cor personalizada, grade opcional e imagem de fundo com tamanho proporcional e opacidade, salvo por board e no arquivo editável.
+- Menu rápido de formas e biblioteca expandida em “Mais formas”, com 77 entradas pesquisáveis, geometrias próprias e exportação SVG.
+- Conectores retos, curvos e em cotovelo; pontos intermediários, seis terminações, inversão da direção, tracejado/pontilhado e múltiplos rótulos posicionáveis. Uma ponta solta pode criar um objeto conectado ou continuar livre.
+- Imagens com original preservado, substituição, tamanho original, máscaras retangular/elíptica/arredondada, espelhamento, opacidade e recorte não destrutivo. Recorte circular com prévia e borda personalizada independente da foto.
 - Grupos aninhados com formas, imagens, conectores e traços; movimentação, escala, rotação, duplicação e bloqueio.
-- 25 famílias tipográficas locais, formatação de texto, cores, bordas e menus junto à seleção.
+- 25 famílias tipográficas locais, formatação de texto, paletas com transparente e barras de ícones específicas para cada seleção.
 - Caneta, marca-texto, borracha de traço inteiro/precisão e seleção com laço.
 - Desfazer/refazer, exportação PNG/SVG e arquivos editáveis `.board.json`.
 

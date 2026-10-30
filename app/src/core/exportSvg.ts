@@ -17,6 +17,7 @@ import type { Style, Widget } from "./model";
 import { parseRich } from "./richtext";
 import { strokeBounds, strokeOutline, type Stroke } from "./strokes";
 import { borderPattern, canonicalShape, shapeDetails, shapePolygon } from "./shapes";
+import { DEFAULT_BACKGROUND } from "./background";
 
 const escapeXml = (value: string): string =>
   value
@@ -27,12 +28,16 @@ const escapeXml = (value: string): string =>
 
 interface Options {
   padding?: number;
+  /** none omits all scenery; an explicit color replaces both board color and image. */
   background?: string;
 }
 
 export function boardToSvg(state: BoardState, options: Options = {}): string {
   const padding = options.padding ?? 80;
   const rects: Rect[] = [];
+  const background = state.background ?? DEFAULT_BACKGROUND;
+  const scenery = options.background === undefined ? background.image : undefined;
+  if (scenery) rects.push({ minX: scenery.x, minY: scenery.y, maxX: scenery.x + scenery.width, maxY: scenery.y + scenery.height });
 
   for (const w of state.widgets.values()) rects.push(widgetAABB(w));
   for (const c of state.connectors.values()) {
@@ -53,7 +58,8 @@ export function boardToSvg(state: BoardState, options: Options = {}): string {
       `viewBox="${minX} ${minY} ${width} ${height}">`,
   );
   if (options.background !== "none") {
-    parts.push(`<rect x="${minX}" y="${minY}" width="${width}" height="${height}" fill="${options.background ?? "#fbfaf7"}"/>`);
+    parts.push(`<rect x="${minX}" y="${minY}" width="${width}" height="${height}" fill="${escapeXml(options.background ?? background.color)}"/>`);
+    if (scenery) parts.push(`<image data-board-background="true" href="${escapeXml(scenery.src)}" x="${scenery.x}" y="${scenery.y}" width="${scenery.width}" height="${scenery.height}" opacity="${scenery.opacity}" preserveAspectRatio="none"/>`);
   }
 
   // Frame backgrounds precede ink and connections, as in the Pixi scene.
@@ -90,11 +96,13 @@ function widgetSvg(w: Widget): string {
     const crop = w.crop ?? { x: 0, y: 0, width: 1, height: 1 };
     const width = w.width / Math.max(.0001, crop.width);
     const height = w.height / Math.max(.0001, crop.height);
-    // A nested SVG viewport clips the source, including rotated cropped images.
+    // Clip the photograph, then draw its independently styled outline above it.
     const clipId='image-mask-'+w.id.replace(/[^a-zA-Z0-9_-]/g,'');
-    const mask=w.maskShape==='ellipse'?`<ellipse cx="${w.width/2}" cy="${w.height/2}" rx="${w.width/2}" ry="${w.height/2}"/>`:`<rect width="${w.width}" height="${w.height}" rx="${w.maskShape==='round_rectangle'?Math.min(w.width,w.height)*.12:0}"/>`;
+    const radius=Math.max(0,Math.min(w.style.cornerRadius??Math.min(w.width,w.height)*.12,Math.min(w.width,w.height)/2));
+    const mask=w.maskShape==='ellipse'?`<ellipse cx="${w.width/2}" cy="${w.height/2}" rx="${w.width/2}" ry="${w.height/2}"/>`:`<rect width="${w.width}" height="${w.height}" rx="${w.maskShape==='round_rectangle'?radius:0}"/>`;
     const flip=`translate(${w.flipX?w.width:0},${w.flipY?w.height:0}) scale(${w.flipX?-1:1},${w.flipY?-1:1})`;
-    return `<g transform="${transform}" opacity="${w.opacity??1}"><defs><clipPath id="${clipId}">${mask}</clipPath></defs><g clip-path="url(#${clipId})"><g transform="${flip}"><image href="${escapeXml(w.src)}" x="${-crop.x * width}" y="${-crop.y * height}" width="${width}" height="${height}" preserveAspectRatio="none"/></g></g></g>`;
+    const outline = w.style.borderWidth > 0 ? mask.replace(/\/>$/, ` fill="none"${borderSvg(w.style)}/>` ) : '';
+    return `<g transform="${transform}"><defs><clipPath id="${clipId}">${mask}</clipPath></defs><g clip-path="url(#${clipId})" opacity="${Math.max(0,Math.min(1,w.opacity??1))}"><g transform="${flip}"><image href="${escapeXml(w.src)}" x="${-crop.x * width}" y="${-crop.y * height}" width="${width}" height="${height}" preserveAspectRatio="none"/></g></g>${outline}</g>`;
   }
 
   if (w.type === "frame") {

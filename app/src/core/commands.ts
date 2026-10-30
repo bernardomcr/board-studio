@@ -13,9 +13,11 @@ import {
   type Endpoint,
 } from "./connectors";
 import type { Stroke } from "./strokes";
+import { DEFAULT_BACKGROUND, validateBoardBackground, type BoardBackground, type BackgroundPatch } from "./background";
 
 export type CommandOp =
   | "BATCH"
+  | "BACKGROUND_UPDATE"
   | "WIDGET_CREATE"
   | "WIDGET_UPDATE"
   | "WIDGET_REMOVE"
@@ -37,6 +39,8 @@ export type AlignMode = "left" | "hcenter" | "right" | "top" | "vcenter" | "bott
 export type DistributeAxis = "x" | "y";
 
 export interface BoardState {
+  /** Optional for projects saved before background controls existed. */
+  background?: BoardBackground;
   widgets: Map<string, Widget>;
   order: string[];
   connectors: Map<string, Connector>;
@@ -124,6 +128,12 @@ export class CommandBus {
     const s = this.state;
 
     switch (command.op) {
+      case "BACKGROUND_UPDATE": {
+        const before = s.background ? structuredClone(s.background) : undefined;
+        const after = validateBoardBackground({ ...(s.background ?? DEFAULT_BACKGROUND), ...(command.payload as BackgroundPatch) });
+        if (!after) return null;
+        return { command, label: "Alterar fundo", redo: () => { s.background = structuredClone(after); }, undo: () => { if (before) s.background = structuredClone(before); else delete s.background; } };
+      }
       case "BATCH": {
         const { label, commands } = command.payload as { label?: string; commands: Command[] };
         let entries: ExecutedCommand[] | null = null;
