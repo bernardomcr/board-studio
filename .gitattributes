@@ -1,0 +1,4 @@
+* text=auto eol=lf
+*.woff2 binary
+app/public/fonts/*-LICENSE.txt -text -whitespace
+TESTAR.cmd text eol=crlf

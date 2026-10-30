@@ -1,0 +1,18 @@
+app/node_modules/
+app/dist/
+app/.vite/
+app/test-results/
+app/playwright-report/
+work/
+outputs/
+*.board.json
+*.log
+.env
+.env.*
+!.env.example
+.DS_Store
+Thumbs.db
+# Local reverse-engineering notes and captures stay on this computer.
+docs/*
+!docs/architecture.md
+!docs/verification.md

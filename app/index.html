@@ -1,0 +1,300 @@
+<!doctype html>
+<html lang="pt-BR">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no" />
+    <title>Board Studio</title>
+    <style>
+      /* ---- design tokens extraídos do Miro (library-design-tokens) ---- */
+      :root {
+        --blue-500: #3859ff;
+        --blue-450: #5b76fe;
+        --blue-100: #f2f4fc;
+        --blue-50: #f7f8fc;
+        --cloud-50: #fbfaf7;
+        --cloud-100: #f4f4f1;
+        --cloud-200: #e7e7e5;
+        --cloud-300: #d5d5d2;
+        --cloud-400: #a4a39e;
+        --cloud-500: #73726c;
+        --cloud-600: #55544e;
+        --cloud-700: #42413a;
+        --cloud-800: #2a2923;
+        --cloud-900: #191812;
+        --alpha-black-100: #0000001a;
+        --alpha-black-200: #00000033;
+
+        /* raios e espaçamento do token set */
+        --r-100: 8px;
+        --r-150: 12px;
+        --r-200: 16px;
+        --r-round: 999px;
+        --sp-100: 8px;
+        --sp-150: 12px;
+        --sp-200: 16px;
+        --sp-300: 24px;
+
+        --font: "Noto Sans", Inter, "Segoe UI", system-ui, Arial, sans-serif;
+        --shadow-1: 0 1px 2px var(--alpha-black-100), 0 2px 8px var(--alpha-black-100);
+      }
+
+      * { box-sizing: border-box; }
+      html, body { margin: 0; height: 100%; overflow: hidden; background: var(--cloud-50); }
+      body { font-family: var(--font); color: var(--cloud-900); -webkit-font-smoothing: antialiased; }
+      #app { position: fixed; inset: 0; }
+      canvas { display: block; touch-action: none; }
+
+      /* ---------------- topbar ---------------- */
+      #topbar {
+        position: fixed; top: var(--sp-150); left: var(--sp-150);
+        display: flex; align-items: center; gap: var(--sp-100);
+        z-index: 10;
+      }
+
+      .chip {
+        display: flex; align-items: center; gap: 6px;
+        height: 40px; padding: 0 var(--sp-150);
+        background: #fff; border: 1px solid var(--cloud-200);
+        border-radius: var(--r-100); box-shadow: var(--shadow-1);
+        font-size: 14px; font-weight: 600; color: var(--cloud-900);
+        user-select: none;
+      }
+
+      .chip button {
+        display: grid; place-items: center;
+        width: 28px; height: 28px; padding: 0;
+        border: 0; border-radius: 6px; background: transparent;
+        color: var(--cloud-700); cursor: pointer;
+      }
+      .chip button:hover { background: var(--cloud-100); }
+      .chip button:disabled { color: var(--cloud-300); cursor: default; }
+      .chip button:disabled:hover { background: transparent; }
+
+      /* ---------------- toolbar esquerda ---------------- */
+      #toolbar {
+        position: fixed; top: 50%; left: var(--sp-150); transform: translateY(-50%);
+        display: flex; flex-direction: column; gap: 2px;
+        padding: 6px; z-index: 10;
+        background: #fff; border: 1px solid var(--cloud-200);
+        border-radius: var(--r-150); box-shadow: var(--shadow-1);
+      }
+
+      #toolbar button {
+        display: grid; place-items: center;
+        width: 44px; height: 44px; padding: 0;
+        border: 0; border-radius: var(--r-100); background: transparent;
+        color: var(--cloud-700); cursor: pointer;
+        position: relative;
+        transition: background 120ms ease, color 120ms ease;
+      }
+      #toolbar button:hover:not(:disabled) { background: var(--cloud-100); }
+      #toolbar button.active { background: var(--blue-50); color: var(--blue-500); }
+      #toolbar button:disabled { color: var(--cloud-300); cursor: default; }
+      #toolbar .sep { height: 1px; margin: 4px 6px; background: var(--cloud-200); }
+
+      /* tooltip do Miro: cápsula escura acima do botão */
+      #toolbar button::after {
+        content: attr(data-label);
+        position: absolute; left: 52px; top: 50%; transform: translateY(-50%);
+        padding: 5px 8px; border-radius: 6px;
+        background: var(--cloud-900); color: #fff;
+        font-size: 12px; font-weight: 500; white-space: nowrap;
+        opacity: 0; pointer-events: none; transition: opacity 100ms ease;
+        z-index: 20;
+      }
+      #toolbar button:hover::after { opacity: 1; }
+      #toolbar button .key {
+        position: absolute; right: 5px; bottom: 4px;
+        font-size: 9px; font-weight: 600; color: var(--cloud-400);
+      }
+
+      /* ---------------- zoom ---------------- */
+      #zoombar {
+        position: fixed; right: var(--sp-150); bottom: var(--sp-150);
+        display: flex; align-items: center; gap: 2px;
+        padding: 4px; z-index: 10;
+        background: #fff; border: 1px solid var(--cloud-200);
+        border-radius: var(--r-100); box-shadow: var(--shadow-1);
+      }
+      #zoombar button {
+        min-width: 32px; height: 32px; padding: 0 8px;
+        border: 0; border-radius: 6px; background: transparent;
+        color: var(--cloud-700); font: 600 13px var(--font); cursor: pointer;
+      }
+      #zoombar button:hover { background: var(--cloud-100); }
+
+      /* ---------------- barra de alinhamento (contextual) ---------------- */
+      #alignbar {
+        position: fixed; z-index: 12; display: none; gap: 2px;
+        padding: 4px; background: #fff;
+        border: 1px solid var(--cloud-200); border-radius: var(--r-100);
+        box-shadow: var(--shadow-1);
+      }
+      #alignbar.visible { display: flex; }
+      #alignbar button {
+        display: grid; place-items: center; width: 30px; height: 30px; padding: 0;
+        border: 0; border-radius: 6px; background: transparent;
+        color: var(--cloud-700); cursor: pointer;
+      }
+      #alignbar button:hover { background: var(--cloud-100); }
+      #alignbar .sep { width: 1px; margin: 4px 2px; background: var(--cloud-200); }
+
+      /* ---------------- painel de atalhos ---------------- */
+      #help-panel {
+        position: fixed; inset: 0; z-index: 40;
+        display: grid; place-items: center;
+        background: rgba(15, 17, 21, 0.35);
+      }
+      #help-panel[hidden] { display: none; }
+      #help-panel .card {
+        width: min(560px, calc(100vw - 48px));
+        max-height: calc(100vh - 96px); overflow: auto;
+        padding: 22px 24px; background: #fff;
+        border: 1px solid var(--cloud-200); border-radius: var(--r-150);
+        box-shadow: 0 12px 40px rgba(0, 0, 0, 0.18);
+      }
+      #help-panel h2 { margin: 0 0 4px; font-size: 16px; color: var(--cloud-900); }
+      #help-panel p.sub { margin: 0 0 16px; font-size: 13px; color: var(--cloud-500); }
+      #help-panel dl {
+        display: grid; grid-template-columns: auto 1fr; gap: 8px 16px;
+        margin: 0; font-size: 13px; color: var(--cloud-800);
+      }
+      #help-panel dt { text-align: right; }
+      #help-panel dd { margin: 0; color: var(--cloud-600); }
+      #help-panel kbd {
+        display: inline-block; min-width: 20px; padding: 2px 6px;
+        border: 1px solid var(--cloud-300); border-bottom-width: 2px; border-radius: 5px;
+        background: var(--cloud-50); font: 600 11px/1.4 ui-monospace, monospace; color: var(--cloud-700);
+        text-align: center;
+      }
+      #help-panel .close { margin-top: 18px; font-size: 12px; color: var(--cloud-500); }
+      /* ---------------- hud (dev) ---------------- */
+      #hud {
+        position: fixed; right: var(--sp-150); bottom: var(--sp-150);
+        padding: 8px 10px; z-index: 10;
+        font: 11px/1.5 ui-monospace, Menlo, monospace;
+        color: var(--cloud-600); background: #ffffffe6;
+        border: 1px solid var(--cloud-200); border-radius: var(--r-100);
+        white-space: pre; pointer-events: none;
+      }
+      #hud[hidden] { display: none; }
+    </style>
+  </head>
+  <body>
+    <div id="app"></div>
+
+    <header id="topbar">
+      <div class="chip" id="board-title">Board sem título</div>
+      <div class="chip">
+        <button id="undo" title="Desfazer (Ctrl+Z)" aria-label="Desfazer">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 14 4 9l5-5"/><path d="M4 9h10a6 6 0 0 1 0 12h-3"/></svg>
+        </button>
+        <button id="export" title="Exportar PNG" aria-label="Exportar PNG">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v12"/><path d="m7 10 5 5 5-5"/><path d="M5 21h14"/></svg>
+        </button>
+        <button id="help" title="Atalhos (?)" aria-label="Atalhos">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M9.5 9a2.5 2.5 0 0 1 5 0c0 1.5-2.5 2-2.5 3.5"/><path d="M12 17h.01"/></svg>
+        </button>
+        <button id="export-svg" title="Exportar SVG" aria-label="Exportar SVG">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 4h16v16H4z"/><path d="M8 15l4-6 4 6"/><path d="M8 15h8"/></svg>
+        </button>
+        <button id="redo" title="Refazer (Ctrl+Shift+Z)" aria-label="Refazer">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m15 14 5-5-5-5"/><path d="M20 9H10a6 6 0 0 0 0 12h3"/></svg>
+        </button>
+      </div>
+    </header>
+
+    <nav id="toolbar" aria-label="Ferramentas">
+      <button data-tool="select" class="active" data-label="Selecionar" aria-label="Selecionar">
+        <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"><path d="M5 3l14 7-6 2-2 6-6-15z"/></svg>
+        <span class="key">V</span>
+      </button>
+      <button data-tool="hand" data-label="Mover tela (espaço)" aria-label="Mover tela">
+        <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M9 11V6a1.5 1.5 0 0 1 3 0v5"/><path d="M12 11V5a1.5 1.5 0 0 1 3 0v6"/><path d="M15 11V7a1.5 1.5 0 0 1 3 0v7a6 6 0 0 1-6 6h-1a6 6 0 0 1-6-6v-3a1.5 1.5 0 0 1 3 0"/></svg>
+      </button>
+      <div class="sep"></div>
+      <button data-tool="sticky_note" data-label="Nota adesiva" aria-label="Nota adesiva">
+        <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"><path d="M4 4h16v11l-5 5H4z"/><path d="M15 20v-5h5"/></svg>
+        <span class="key">S</span>
+      </button>
+      <button data-tool="shape" data-label="Formas" aria-label="Formas">
+        <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="3" y="3" width="9" height="9" rx="1.5"/><circle cx="16" cy="16" r="5"/></svg>
+        <span class="key">R</span>
+      </button>
+      <button data-tool="connector" data-label="Conector" aria-label="Conector">
+        <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M4 20 20 4"/><path d="M14 4h6v6"/></svg>
+      </button>
+      <button data-tool="text" data-label="Texto" aria-label="Texto">
+        <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M5 5h14"/><path d="M12 5v14"/><path d="M8 19h8"/></svg>
+        <span class="key">T</span>
+      </button>
+      <button data-tool="pen" data-label="Caneta" aria-label="Caneta">
+        <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"><path d="M4 20l4-1 10-10a2 2 0 0 0-3-3L5 16z"/><path d="M14 6l4 4"/></svg>
+      </button>
+      <button data-tool="eraser" data-label="Borracha" aria-label="Borracha">
+        <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"><path d="M4 16l6-6 8 8H6z"/><path d="M14 6l4 4"/><path d="M9 21h11"/></svg>
+      </button>
+      <div class="sep"></div>
+      <button data-tool="frame" data-label="Quadro" aria-label="Quadro">
+        <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M7 3v18"/><path d="M17 3v18"/><path d="M3 7h18"/><path d="M3 17h18"/></svg>
+      </button>
+      <button data-tool="image" data-label="Adicionar imagem" aria-label="Imagem">
+        <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"><rect x="3" y="4" width="18" height="16" rx="2"/><circle cx="8.5" cy="9.5" r="1.5"/><path d="m4 18 5-5 4 4 3-3 4 4"/></svg>
+      </button>
+    </nav>
+
+    <div id="alignbar">
+      <button data-align="left" data-label="left" title="left"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M4 3v18"/><rect x="7" y="6" width="12" height="4" rx="1"/><rect x="7" y="14" width="8" height="4" rx="1"/></svg></button>
+      <button data-align="hcenter" data-label="hcenter" title="hcenter"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M12 3v18"/><rect x="4" y="6" width="16" height="4" rx="1"/><rect x="7" y="14" width="10" height="4" rx="1"/></svg></button>
+      <button data-align="right" data-label="right" title="right"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M20 3v18"/><rect x="5" y="6" width="12" height="4" rx="1"/><rect x="9" y="14" width="8" height="4" rx="1"/></svg></button>
+      <button data-align="top" data-label="top" title="top"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M3 4h18"/><rect x="6" y="7" width="4" height="12" rx="1"/><rect x="14" y="7" width="4" height="8" rx="1"/></svg></button>
+      <button data-align="vcenter" data-label="vcenter" title="vcenter"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M3 12h18"/><rect x="6" y="4" width="4" height="16" rx="1"/><rect x="14" y="7" width="4" height="10" rx="1"/></svg></button>
+      <button data-align="bottom" data-label="bottom" title="bottom"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M3 20h18"/><rect x="6" y="5" width="4" height="12" rx="1"/><rect x="14" y="9" width="4" height="8" rx="1"/></svg></button>
+      <div class="sep"></div>
+      <button data-align="dist-x" title="Distribuir na horizontal"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><rect x="3" y="6" width="4" height="12" rx="1"/><rect x="10" y="6" width="4" height="12" rx="1"/><rect x="17" y="6" width="4" height="12" rx="1"/></svg></button>
+      <button data-align="dist-y" title="Distribuir na vertical"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><rect x="6" y="3" width="12" height="4" rx="1"/><rect x="6" y="10" width="12" height="4" rx="1"/><rect x="6" y="17" width="12" height="4" rx="1"/></svg></button>    </div>
+    <div id="zoombar">
+      <button data-zoom="out" aria-label="Diminuir zoom">−</button>
+      <button data-zoom="reset" id="zoom-value">100%</button>
+      <button data-zoom="in" aria-label="Aumentar zoom">+</button>
+      <button data-zoom="fit" aria-label="Ajustar à tela" title="Ajustar à tela (Shift+1)">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 9V4h5"/><path d="M20 9V4h-5"/><path d="M4 15v5h5"/><path d="M20 15v5h-5"/></svg>
+      </button>
+    </div>
+
+    <div id="hud"></div>
+    <div id="help-panel" hidden>
+      <div class="card">
+        <h2>Atalhos</h2>
+        <p class="sub">Este board é 100% local — nada sai do seu computador.</p>
+        <dl>
+          <dt><kbd>V</kbd></dt><dd>selecionar</dd>
+          <dt><kbd>S</kbd></dt><dd>nota adesiva</dd>
+          <dt><kbd>R</kbd></dt><dd>forma</dd>
+          <dt><kbd>T</kbd></dt><dd>texto</dd>
+          <dt><kbd>F</kbd></dt><dd>quadro (frame)</dd>
+          <dt><kbd>C</kbd></dt><dd>conector</dd>
+          <dt><kbd>P</kbd> <kbd>H</kbd> <kbd>E</kbd></dt><dd>caneta · marca-texto · borracha</dd>
+          <dt><kbd>Enter</kbd></dt><dd>editar texto (duplo clique também)</dd>
+          <dt><kbd>Ctrl</kbd>+<kbd>B</kbd>/<kbd>I</kbd>/<kbd>U</kbd></dt><dd>negrito · itálico · sublinhado no editor</dd>
+          <dt><kbd>Del</kbd></dt><dd>apagar seleção</dd>
+          <dt><kbd>Ctrl</kbd>+<kbd>Z</kbd></dt><dd>desfazer (sobrevive ao reload)</dd>
+          <dt><kbd>Ctrl</kbd>+<kbd>G</kbd></dt><dd>agrupar / desagrupar (Shift)</dd>
+          <dt><kbd>Ctrl</kbd>+<kbd>C</kbd>/<kbd>V</kbd></dt><dd>copiar · colar</dd>
+          <dt><kbd>Ctrl</kbd>+<kbd>]</kbd>/<kbd>[</kbd></dt><dd>trazer para frente · enviar para trás</dd>
+          <dt><kbd>setas</kbd></dt><dd>mover 1 u (Shift = 10 u)</dd>
+          <dt><kbd>espaço</kbd>+arrastar</dt><dd>mover a tela</dd>
+          <dt><kbd>roda</kbd></dt><dd>zoom no cursor</dd>
+          <dt><kbd>Shift</kbd>+<kbd>1</kbd></dt><dd>enquadrar tudo</dd>
+          <dt><kbd>Alt</kbd></dt><dd>desliga o snap enquanto arrasta</dd>
+          <dt><kbd>I</kbd></dt><dd>painel de depuração</dd>
+          <dt><kbd>?</kbd></dt><dd>este painel</dd>
+        </dl>
+        <div class="close">Esc fecha · clique fora também</div>
+      </div>
+    </div>
+
+
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>

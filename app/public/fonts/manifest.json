@@ -1,0 +1,521 @@
+[
+  {
+    "family": "Noto Sans",
+    "label": "Noto Sans",
+    "category": "sans",
+    "slug": "notosans",
+    "css": "/fonts/notosans.css",
+    "source": "https://fonts.googleapis.com/css2?family=Noto+Sans:ital,wght@0,400;0,500;0,600;0,700;1,400;1,700&display=swap",
+    "license": "https://raw.githubusercontent.com/google/fonts/main/ofl/notosans/OFL.txt",
+    "files": [
+      "notosans-888f6ee5af2a.woff2",
+      "notosans-0f5e368641b3.woff2",
+      "notosans-5a379cbe14bf.woff2",
+      "notosans-4f362b4526c5.woff2"
+    ],
+    "sha256": {
+      "notosans-888f6ee5af2a.woff2": "7eccdb25aca0edb020461eff7ce779debc787c08b1e7d2abbd7d1c4ee18ff816",
+      "notosans-0f5e368641b3.woff2": "b21ff49befe2af5b88a3b622b3446e83199229f15ea7571a9313b15ed706298b",
+      "notosans-5a379cbe14bf.woff2": "6d5a79315528df191b9d86f97b0c4272a8b588fcb166773fe6588ac795de0613",
+      "notosans-4f362b4526c5.woff2": "51ca196f49a33e79e7870ff88ebd2829a3f627a51e7d690986618f0e7ad2b52d"
+    }
+  },
+  {
+    "family": "Inter",
+    "label": "Inter",
+    "category": "sans",
+    "slug": "inter",
+    "css": "/fonts/inter.css",
+    "source": "https://fonts.googleapis.com/css2?family=Inter:ital,wght@0,400;0,500;0,600;0,700;1,400;1,700&display=swap",
+    "license": "https://raw.githubusercontent.com/google/fonts/main/ofl/inter/OFL.txt",
+    "files": [
+      "inter-880a00f9760a.woff2",
+      "inter-cb87a644b18b.woff2",
+      "inter-a9d11b3ffe7a.woff2",
+      "inter-e3237528af75.woff2"
+    ],
+    "sha256": {
+      "inter-880a00f9760a.woff2": "71254244ccb1ec21e14db3480fef6f6826d1136dc4aca1c7d3ca7ce31294fcce",
+      "inter-cb87a644b18b.woff2": "7291b5970da2237441273c03b424a504b70b18f09791473fab99687dcc314720",
+      "inter-a9d11b3ffe7a.woff2": "34b9c504cab7a73e37b746343a449132e56cf7b5481af2cb81dc74dcff25c956",
+      "inter-e3237528af75.woff2": "3100e775e8616cd2611beecfa23a4263d7037586789b43f035236a2e6fbd4c62"
+    }
+  },
+  {
+    "family": "Figtree",
+    "label": "Figtree",
+    "category": "sans",
+    "slug": "figtree",
+    "css": "/fonts/figtree.css",
+    "source": "https://fonts.googleapis.com/css2?family=Figtree:ital,wght@0,400;0,500;0,600;0,700;1,400;1,700&display=swap",
+    "license": "https://raw.githubusercontent.com/google/fonts/main/ofl/figtree/OFL.txt",
+    "files": [
+      "figtree-3a81e92fdc03.woff2",
+      "figtree-d2319cd6398b.woff2",
+      "figtree-995e5521d3ff.woff2",
+      "figtree-2e4538dc4eb3.woff2"
+    ],
+    "sha256": {
+      "figtree-3a81e92fdc03.woff2": "a0cc105b3241fe952fd58ba226633f8ba733b16fd5419affbda6c8cc5c627a0b",
+      "figtree-d2319cd6398b.woff2": "7242fa62d13d46172816b266f03c027999faa3755a52c2124bc2c440f6f4b983",
+      "figtree-995e5521d3ff.woff2": "bf7828e2c258cffcfa50a048ee388a36b95bc16b452e8d36fa797635dbe15965",
+      "figtree-2e4538dc4eb3.woff2": "4ba7d3d096695818fe0686be4f1e82c6b05134e18a22260336130335027462dd"
+    }
+  },
+  {
+    "family": "Open Sans",
+    "label": "Open Sans",
+    "category": "sans",
+    "slug": "opensans",
+    "css": "/fonts/opensans.css",
+    "source": "https://fonts.googleapis.com/css2?family=Open+Sans:ital,wght@0,400;0,500;0,600;0,700;1,400;1,700&display=swap",
+    "license": "https://raw.githubusercontent.com/google/fonts/main/ofl/opensans/OFL.txt",
+    "files": [
+      "opensans-cc521688ee99.woff2",
+      "opensans-a58a209c5168.woff2",
+      "opensans-15e4e18f7f0b.woff2",
+      "opensans-b877d7636354.woff2"
+    ],
+    "sha256": {
+      "opensans-cc521688ee99.woff2": "a6fa0e8ac2a665c121a19c2e2434fb286e3afdef7b9288739a73c7cb6849108c",
+      "opensans-a58a209c5168.woff2": "186836b74ceac07b2764c07c0379420e3014efb30fe918461c235e0ef6cbc4a2",
+      "opensans-15e4e18f7f0b.woff2": "d5bab8e28732fe3d10dcef4f77b9c248605bbb2a87d289a2539251ceafab536a",
+      "opensans-b877d7636354.woff2": "d8e4fe0452aa2076429a9bb5d8757d00a994dd95986cf950e9a1a371b9a072a0"
+    }
+  },
+  {
+    "family": "Roboto",
+    "label": "Roboto",
+    "category": "sans",
+    "slug": "roboto",
+    "css": "/fonts/roboto.css",
+    "source": "https://fonts.googleapis.com/css2?family=Roboto:ital,wght@0,400;0,500;0,600;0,700;1,400;1,700&display=swap",
+    "license": "https://raw.githubusercontent.com/google/fonts/main/ofl/roboto/OFL.txt",
+    "files": [
+      "roboto-63a1866c4702.woff2",
+      "roboto-c97752dd1e64.woff2",
+      "roboto-4e54fc361061.woff2",
+      "roboto-890de452eac5.woff2"
+    ],
+    "sha256": {
+      "roboto-63a1866c4702.woff2": "7f21d061a9de1ea78a858938ff3b8e677869656b10bad470fc6039f8f3daf329",
+      "roboto-c97752dd1e64.woff2": "14f23757c6b41b4b6c0b967ca3fa74ff47a868728158373461c4e6e4b6368f19",
+      "roboto-4e54fc361061.woff2": "cedb374b05a35034cf96db185db4eeb8f8ce49e1a56197673702ff11b5533d6e",
+      "roboto-890de452eac5.woff2": "1404ca348bd75ef836f4dd8b6f2cc719458642d1237c368296b2fc652dca47dc"
+    }
+  },
+  {
+    "family": "Roboto Condensed",
+    "label": "Roboto Condensed",
+    "category": "sans",
+    "slug": "robotocondensed",
+    "css": "/fonts/robotocondensed.css",
+    "source": "https://fonts.googleapis.com/css2?family=Roboto+Condensed:ital,wght@0,400;0,500;0,600;0,700;1,400;1,700&display=swap",
+    "license": "https://raw.githubusercontent.com/google/fonts/main/ofl/robotocondensed/OFL.txt",
+    "files": [
+      "robotocondensed-8dd746f379a2.woff2",
+      "robotocondensed-6a8970724bfa.woff2",
+      "robotocondensed-631b48cfe0e6.woff2",
+      "robotocondensed-400bd1380b35.woff2"
+    ],
+    "sha256": {
+      "robotocondensed-8dd746f379a2.woff2": "39ece86ab43c49fd4b7845316062cb64cecb914f0e66eeb0fc482e3e79fb32f3",
+      "robotocondensed-6a8970724bfa.woff2": "c2867c1f84c8f2985f1fe41463b353d38aaf9528f55d475a6adca30ebd3c797f",
+      "robotocondensed-631b48cfe0e6.woff2": "4a44e6b11ccc88bc6a1cb2abb313d99dea08824417d05e0e171d06ef26ee381b",
+      "robotocondensed-400bd1380b35.woff2": "8d230115e58faa2ed303bee567b91d1a792e0c958a0118998b53648b2ab7c057"
+    }
+  },
+  {
+    "family": "Roboto Slab",
+    "label": "Roboto Slab",
+    "category": "serif",
+    "slug": "robotoslab",
+    "css": "/fonts/robotoslab.css",
+    "source": "https://fonts.googleapis.com/css2?family=Roboto+Slab:wght@400;700&display=swap",
+    "license": "https://raw.githubusercontent.com/google/fonts/main/apache/robotoslab/LICENSE.txt",
+    "files": [
+      "robotoslab-5aeab3ebadff.woff2",
+      "robotoslab-eb4a90383659.woff2"
+    ],
+    "sha256": {
+      "robotoslab-5aeab3ebadff.woff2": "8ed24f94c25ecf99a50b806ef6ca02988cf8c1d443228ddbd6a8ac99c99df81e",
+      "robotoslab-eb4a90383659.woff2": "50cf7d32c18e1001749b51f1565ef745bc0687b0297b2b13465ed577cc20a8ff"
+    }
+  },
+  {
+    "family": "Roboto Mono",
+    "label": "Roboto Mono",
+    "category": "mono",
+    "slug": "robotomono",
+    "css": "/fonts/robotomono.css",
+    "source": "https://fonts.googleapis.com/css2?family=Roboto+Mono:ital,wght@0,400;0,500;0,600;0,700;1,400;1,700&display=swap",
+    "license": "https://raw.githubusercontent.com/google/fonts/main/ofl/robotomono/OFL.txt",
+    "files": [
+      "robotomono-89e0d6992a2e.woff2",
+      "robotomono-7dee29c4a830.woff2",
+      "robotomono-5a183aea8406.woff2",
+      "robotomono-daba0ce5c75f.woff2"
+    ],
+    "sha256": {
+      "robotomono-89e0d6992a2e.woff2": "f206990c959d138c477ec5a669f3a9703017799480a2531a4ba006be7ef3a332",
+      "robotomono-7dee29c4a830.woff2": "ae82dafb6340b538592b30dc18a367f56de3840b20669767adc011966405f6cf",
+      "robotomono-5a183aea8406.woff2": "4cc0d52e0fa37c28084e0cbce3589a8ab32dd21e6ea619489c5f7c6e8c43b922",
+      "robotomono-daba0ce5c75f.woff2": "b81cd55177300649be8f95b3b747d721ce607e8ed2856e25bd0c630cfd631faf"
+    }
+  },
+  {
+    "family": "PT Sans",
+    "label": "PT Sans",
+    "category": "sans",
+    "slug": "ptsans",
+    "css": "/fonts/ptsans.css",
+    "source": "https://fonts.googleapis.com/css2?family=PT+Sans:ital,wght@0,400;0,500;0,600;0,700;1,400;1,700&display=swap",
+    "license": "https://raw.githubusercontent.com/google/fonts/main/ofl/ptsans/OFL.txt",
+    "files": [
+      "ptsans-22dcc95e93f5.woff2",
+      "ptsans-37ad2ec9d2fa.woff2",
+      "ptsans-cd0ab5abf866.woff2",
+      "ptsans-4ac57ec7692e.woff2",
+      "ptsans-cb415bb04c91.woff2",
+      "ptsans-46a61d71599b.woff2",
+      "ptsans-7854587683e8.woff2",
+      "ptsans-57fda182a7b2.woff2"
+    ],
+    "sha256": {
+      "ptsans-22dcc95e93f5.woff2": "bba5da2e7ad198d906825a4fd919b22497744ee029f010b21add115dd73c28da",
+      "ptsans-37ad2ec9d2fa.woff2": "1f275d522571c81eb7d02d47015bf4eb1c60ab7520477bd40ba39425c1df49f2",
+      "ptsans-cd0ab5abf866.woff2": "1c861558c6ea049bc792a0fd8c4c257db5637cb371d9369b40da9fb84445c97f",
+      "ptsans-4ac57ec7692e.woff2": "064f8ebfc7134cdf0da9f34199ae15cbe100ef406d85c0187246a7bd7c57d5b6",
+      "ptsans-cb415bb04c91.woff2": "94dc178a50c462bb9b38f4927cdbb17834993053c9d491690d72c3f2092c00e1",
+      "ptsans-46a61d71599b.woff2": "2dea6190c113af617923c6b71f7f10ffbdf72074556f79963610254fe40e49be",
+      "ptsans-7854587683e8.woff2": "7e3cada9d8a24e34ffc07f3e8f5c864cc64d1555bce5153f42af8801e8cbe48a",
+      "ptsans-57fda182a7b2.woff2": "05ea99a48ece3c624fd9df15f5cf4e1d94703bde9ed2b384495900f55e28befe"
+    }
+  },
+  {
+    "family": "PT Sans Narrow",
+    "label": "PT Sans Narrow",
+    "category": "sans",
+    "slug": "ptsansnarrow",
+    "css": "/fonts/ptsansnarrow.css",
+    "source": "https://fonts.googleapis.com/css2?family=PT+Sans+Narrow:wght@400;700&display=swap",
+    "license": "https://raw.githubusercontent.com/google/fonts/main/ofl/ptsansnarrow/OFL.txt",
+    "files": [
+      "ptsansnarrow-dafbe5ed2a20.woff2",
+      "ptsansnarrow-bb62bc648167.woff2",
+      "ptsansnarrow-de59bd7cb626.woff2",
+      "ptsansnarrow-b739ae890468.woff2"
+    ],
+    "sha256": {
+      "ptsansnarrow-dafbe5ed2a20.woff2": "6ee1f5416e595c4c712c31f60f40d16d46f651b8ae77354ca53cd1381552b6cd",
+      "ptsansnarrow-bb62bc648167.woff2": "4b6275c7977f0cd7698d38c7726149bbb2a9902d33e7dd48a192a889c19f5ab6",
+      "ptsansnarrow-de59bd7cb626.woff2": "95a6a85e22dd80ba187d6b0d853dd922ca51074915c6e811d20c2a06be730e5e",
+      "ptsansnarrow-b739ae890468.woff2": "c9881931311b77f935225d7eeb7ebd0395480a7737a56d427778c98534ade38a"
+    }
+  },
+  {
+    "family": "PT Serif",
+    "label": "PT Serif",
+    "category": "serif",
+    "slug": "ptserif",
+    "css": "/fonts/ptserif.css",
+    "source": "https://fonts.googleapis.com/css2?family=PT+Serif:ital,wght@0,400;0,500;0,600;0,700;1,400;1,700&display=swap",
+    "license": "https://raw.githubusercontent.com/google/fonts/main/ofl/ptserif/OFL.txt",
+    "files": [
+      "ptserif-f7a9aa883c14.woff2",
+      "ptserif-cfe2037d8130.woff2",
+      "ptserif-53297f6a0c2e.woff2",
+      "ptserif-dfe09ff66903.woff2",
+      "ptserif-f9e1eedd25dc.woff2",
+      "ptserif-f2192e0bc6a5.woff2",
+      "ptserif-6dfcce49bfd4.woff2",
+      "ptserif-43a83c95d5de.woff2"
+    ],
+    "sha256": {
+      "ptserif-f7a9aa883c14.woff2": "e03d9090077c76165d69af4d266eccb7bad28091d03244a31def2a711d597062",
+      "ptserif-cfe2037d8130.woff2": "cb373bde18855c82a0ebf2946ea661ebd0be58a7fbabdf20f7744ecd9c0a9cfd",
+      "ptserif-53297f6a0c2e.woff2": "1798f8e1f6f84c3ade658b73de077c97c187d0076efc75e47eac0420d98c8536",
+      "ptserif-dfe09ff66903.woff2": "3cb3cfab3c562cbbb5a53accf433f65ed1cd0403ea3bdd6ceeb73bf87f23521c",
+      "ptserif-f9e1eedd25dc.woff2": "2d7cdb9a975f016db59cb42a61df1b21889842b3ed4e2226f270f4b1349cf704",
+      "ptserif-f2192e0bc6a5.woff2": "4271064a37f3ffc0aac5f3806db8a72acc23e19447d1804e4e80d8796cbf6330",
+      "ptserif-6dfcce49bfd4.woff2": "94cdabe31b8195f0691d18eda86ea1fed049be7cd21eea22c858ad6dd6cc306b",
+      "ptserif-43a83c95d5de.woff2": "bf23a7a4eebedbb87d4084a69496b29815914a18e339a00f5dc73a03c9c9328f"
+    }
+  },
+  {
+    "family": "IBM Plex Sans",
+    "label": "IBM Plex Sans",
+    "category": "sans",
+    "slug": "ibmplexsans",
+    "css": "/fonts/ibmplexsans.css",
+    "source": "https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:ital,wght@0,400;0,500;0,600;0,700;1,400;1,700&display=swap",
+    "license": "https://raw.githubusercontent.com/google/fonts/main/ofl/ibmplexsans/OFL.txt",
+    "files": [
+      "ibmplexsans-cea3461d677c.woff2",
+      "ibmplexsans-ab4216bb04c8.woff2",
+      "ibmplexsans-f582230492bf.woff2",
+      "ibmplexsans-6d5e7fb80500.woff2"
+    ],
+    "sha256": {
+      "ibmplexsans-cea3461d677c.woff2": "bf44b77cc751203b2f0ce95c048a9d8f984313f84b58106c7c4410ca50314016",
+      "ibmplexsans-ab4216bb04c8.woff2": "4363757d2695c7633f98472855849f7c30528eba869d7968ee35b58c87cf14c1",
+      "ibmplexsans-f582230492bf.woff2": "d160e20920ae4d6556518d352d3af27a74e9b0de3d8fe17b1c1044fc75aa2f81",
+      "ibmplexsans-6d5e7fb80500.woff2": "e2291e842cf5af167122a22881a740c7f2dda7716f1e8cd76680264f4a859470"
+    }
+  },
+  {
+    "family": "IBM Plex Serif",
+    "label": "IBM Plex Serif",
+    "category": "serif",
+    "slug": "ibmplexserif",
+    "css": "/fonts/ibmplexserif.css",
+    "source": "https://fonts.googleapis.com/css2?family=IBM+Plex+Serif:ital,wght@0,400;0,500;0,600;0,700;1,400;1,700&display=swap",
+    "license": "https://raw.githubusercontent.com/google/fonts/main/ofl/ibmplexserif/OFL.txt",
+    "files": [
+      "ibmplexserif-ffbab8c810ac.woff2",
+      "ibmplexserif-027218ff6128.woff2",
+      "ibmplexserif-d260b9a52b57.woff2",
+      "ibmplexserif-55d5d67a5d8a.woff2",
+      "ibmplexserif-1d6be1677ca0.woff2",
+      "ibmplexserif-a74af1be85a5.woff2",
+      "ibmplexserif-9b18736d4cda.woff2",
+      "ibmplexserif-3c67feca3a3c.woff2",
+      "ibmplexserif-1b29ee27def1.woff2",
+      "ibmplexserif-0cd309c36e93.woff2",
+      "ibmplexserif-34e573403235.woff2",
+      "ibmplexserif-35ce0413da93.woff2"
+    ],
+    "sha256": {
+      "ibmplexserif-ffbab8c810ac.woff2": "68091cb647810f7ac24fb72fe7ac506ffc4769ef51435a87969345249fc7f035",
+      "ibmplexserif-027218ff6128.woff2": "d3f861b1ca55e50ca94de4c1756cb0d67c73de615172adf6b5b2078d939c723a",
+      "ibmplexserif-d260b9a52b57.woff2": "683b44b3a162d257171b19d98a66abd27ba811c2eafd94cb39b484f875746ebb",
+      "ibmplexserif-55d5d67a5d8a.woff2": "8cf0a1103f7785a0b457568d47467d40f2283c9f743a82a80c77b8acf6e7db47",
+      "ibmplexserif-1d6be1677ca0.woff2": "8b4077bd28d36819590924090252e811d4d0b2c78cb4bf1e4abe46d7428a2781",
+      "ibmplexserif-a74af1be85a5.woff2": "cb2c5eee2c0a43ff30d2365407c7bc8b20e3bd90720a4a64102ba0b328022a02",
+      "ibmplexserif-9b18736d4cda.woff2": "37b706aeca5c5d9689c69795c24b819c1828c672a525f32d345c87e05b30ed8b",
+      "ibmplexserif-3c67feca3a3c.woff2": "677082fc2e9ee60701b874fe5983c98ea9fb3b588cc1b02058ff9bf29ea783e4",
+      "ibmplexserif-1b29ee27def1.woff2": "3c56fe27718921294dd8573acbe5a2822d34dd55f5313437514e8bb33e00a6b7",
+      "ibmplexserif-0cd309c36e93.woff2": "e279e4f8baa0d4634d98868092f2198ae0dcd9e142c935822c385b9843352a9b",
+      "ibmplexserif-34e573403235.woff2": "4c47e5be83b18b0851ffb58d6ec94ef439bd52a190b66ea479cfb19298720f68",
+      "ibmplexserif-35ce0413da93.woff2": "886ea167faf6610c3448a7dd058dbe7c7438f710229c9ff52343ef006960939c"
+    }
+  },
+  {
+    "family": "IBM Plex Mono",
+    "label": "IBM Plex Mono",
+    "category": "mono",
+    "slug": "ibmplexmono",
+    "css": "/fonts/ibmplexmono.css",
+    "source": "https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:ital,wght@0,400;0,500;0,600;0,700;1,400;1,700&display=swap",
+    "license": "https://raw.githubusercontent.com/google/fonts/main/ofl/ibmplexmono/OFL.txt",
+    "files": [
+      "ibmplexmono-b92344444642.woff2",
+      "ibmplexmono-ab481d840a70.woff2",
+      "ibmplexmono-8cac23cf092a.woff2",
+      "ibmplexmono-a3ee8751b3b4.woff2",
+      "ibmplexmono-ae5fc1eadb05.woff2",
+      "ibmplexmono-7e3d7e3c7de8.woff2",
+      "ibmplexmono-203ce92810c0.woff2",
+      "ibmplexmono-eb889034c083.woff2",
+      "ibmplexmono-796754f6fa2c.woff2",
+      "ibmplexmono-86628368fe0c.woff2",
+      "ibmplexmono-be7e618c1b6f.woff2",
+      "ibmplexmono-677d93cfc151.woff2"
+    ],
+    "sha256": {
+      "ibmplexmono-b92344444642.woff2": "1b07eee6df7d26b31864581c2365131d384077605e0b63ae67c4a0a64363a6de",
+      "ibmplexmono-ab481d840a70.woff2": "0840095faae86403735a8c04014b72cb29e7923646b222b360b7e8252932e4e3",
+      "ibmplexmono-8cac23cf092a.woff2": "18c8dc28d75ecbda23c88fb11126852b2232916ec2e6d6dc0225def886a0cc98",
+      "ibmplexmono-a3ee8751b3b4.woff2": "2bb0d4c82652472446ed1a5a89a0553f2db1e4ea17cbda66a45e690899d83e91",
+      "ibmplexmono-ae5fc1eadb05.woff2": "6bc0f226a5b7884a8170e3f62c63d7675609d4631bdc5931b5cdab81821f00eb",
+      "ibmplexmono-7e3d7e3c7de8.woff2": "08949f728dc52d528e69b1667d15c89a5686a4ee9a296ff90983985f99c380f7",
+      "ibmplexmono-203ce92810c0.woff2": "6bb06407c97584b0867a959e05e8874693bfeb8c317de190811c51598f2d99ea",
+      "ibmplexmono-eb889034c083.woff2": "01d285447409c8a588692162439a038b8cbd7871309ee20267b0d2d91c6e8e22",
+      "ibmplexmono-796754f6fa2c.woff2": "32057cf50dd14bdb21a2c93766c4a2c43e4abe688ea3922df3203cac7751a98b",
+      "ibmplexmono-86628368fe0c.woff2": "0d1f0b8d0722224e32e9f28261bdc86c79115be73444ae5eceb73976a1bcdf83",
+      "ibmplexmono-be7e618c1b6f.woff2": "5b9b81f54dd69635c7adcaacd4c4545a73fe4809c528e22734b238a83a74135f",
+      "ibmplexmono-677d93cfc151.woff2": "4f84d86cfd060f4ded334358ff8a4c81d4db2ed5addd568359d693f44a87765a"
+    }
+  },
+  {
+    "family": "Caveat",
+    "label": "Caveat",
+    "category": "handwriting",
+    "slug": "caveat",
+    "css": "/fonts/caveat.css",
+    "source": "https://fonts.googleapis.com/css2?family=Caveat:wght@400;700&display=swap",
+    "license": "https://raw.githubusercontent.com/google/fonts/main/ofl/caveat/OFL.txt",
+    "files": [
+      "caveat-be7f9cabf437.woff2",
+      "caveat-947ed15831ba.woff2"
+    ],
+    "sha256": {
+      "caveat-be7f9cabf437.woff2": "f626b95c1efa95cf6b7c9b043d3bbe8862b6abbe5f55a082102f33f7de2fd4f9",
+      "caveat-947ed15831ba.woff2": "891951df5e8b5b0f0bc760d31375405e795c666b5add70437de12d4a6482b33f"
+    }
+  },
+  {
+    "family": "Permanent Marker",
+    "label": "Permanent Marker",
+    "category": "handwriting",
+    "slug": "permanentmarker",
+    "css": "/fonts/permanentmarker.css",
+    "source": "https://fonts.googleapis.com/css2?family=Permanent+Marker:wght@400&display=swap",
+    "license": "https://raw.githubusercontent.com/google/fonts/main/apache/permanentmarker/LICENSE.txt",
+    "files": [
+      "permanentmarker-58ea338e63c5.woff2"
+    ],
+    "sha256": {
+      "permanentmarker-58ea338e63c5.woff2": "4884fec2c73aa52a2461073c1b87d1ceb80f400520391b43f97ca7d3c39eeb24"
+    }
+  },
+  {
+    "family": "Abril Fatface",
+    "label": "Abril Fatface",
+    "category": "display",
+    "slug": "abrilfatface",
+    "css": "/fonts/abrilfatface.css",
+    "source": "https://fonts.googleapis.com/css2?family=Abril+Fatface:wght@400&display=swap",
+    "license": "https://raw.githubusercontent.com/google/fonts/main/ofl/abrilfatface/OFL.txt",
+    "files": [
+      "abrilfatface-7afebfe51185.woff2",
+      "abrilfatface-853549455113.woff2"
+    ],
+    "sha256": {
+      "abrilfatface-7afebfe51185.woff2": "c7cc6ab22643e87e9693f54ad411dde5012b5d4f96f53408f52c541144be9b6a",
+      "abrilfatface-853549455113.woff2": "edf7a1f3bc22e815ea426b102fa0493d20af482b242066e689a1263ebb2eeb68"
+    }
+  },
+  {
+    "family": "Bangers",
+    "label": "Bangers",
+    "category": "display",
+    "slug": "bangers",
+    "css": "/fonts/bangers.css",
+    "source": "https://fonts.googleapis.com/css2?family=Bangers:wght@400&display=swap",
+    "license": "https://raw.githubusercontent.com/google/fonts/main/ofl/bangers/OFL.txt",
+    "files": [
+      "bangers-925049cd1110.woff2",
+      "bangers-64f9b3159b47.woff2"
+    ],
+    "sha256": {
+      "bangers-925049cd1110.woff2": "2c9576bb1d612cf8750bf749689b5916287940fc99e1be5451b83d9fb6c4c5d9",
+      "bangers-64f9b3159b47.woff2": "04f54ff42ea2b8fc50b4259c29c60b1e05e606b769c2fb541c98624346c9767c"
+    }
+  },
+  {
+    "family": "EB Garamond",
+    "label": "EB Garamond",
+    "category": "serif",
+    "slug": "ebgaramond",
+    "css": "/fonts/ebgaramond.css",
+    "source": "https://fonts.googleapis.com/css2?family=EB+Garamond:ital,wght@0,400;0,500;0,600;0,700;1,400;1,700&display=swap",
+    "license": "https://raw.githubusercontent.com/google/fonts/main/ofl/ebgaramond/OFL.txt",
+    "files": [
+      "ebgaramond-bc819489f616.woff2",
+      "ebgaramond-3dd70ef0c3f2.woff2",
+      "ebgaramond-11435f203a2a.woff2",
+      "ebgaramond-318c441c5d8b.woff2"
+    ],
+    "sha256": {
+      "ebgaramond-bc819489f616.woff2": "fa866520f8b7fb646ebc730fd0d3cbf8945db74d92f25fdd6fee486808652fdf",
+      "ebgaramond-3dd70ef0c3f2.woff2": "c664773f7e1d42d36326aa457becf7674236168c74cf7d74e87e5778ef7640f9",
+      "ebgaramond-11435f203a2a.woff2": "f8d3fa06e20989a938972165406a1b731cdc7fe33ff2b0b6798c75aa63709901",
+      "ebgaramond-318c441c5d8b.woff2": "88603384163d301aebd5bd769832a8bfe3c9004ec24178417b9817f0ad32c63b"
+    }
+  },
+  {
+    "family": "Graduate",
+    "label": "Graduate",
+    "category": "display",
+    "slug": "graduate",
+    "css": "/fonts/graduate.css",
+    "source": "https://fonts.googleapis.com/css2?family=Graduate:wght@400&display=swap",
+    "license": "https://raw.githubusercontent.com/google/fonts/main/ofl/graduate/OFL.txt",
+    "files": [
+      "graduate-7feff31c1ea6.woff2"
+    ],
+    "sha256": {
+      "graduate-7feff31c1ea6.woff2": "be007a2cb32338395f23479de12114f74e3a2184aec585fd195514fb515a24cd"
+    }
+  },
+  {
+    "family": "Gravitas One",
+    "label": "Gravitas One",
+    "category": "display",
+    "slug": "gravitasone",
+    "css": "/fonts/gravitasone.css",
+    "source": "https://fonts.googleapis.com/css2?family=Gravitas+One:wght@400&display=swap",
+    "license": "https://raw.githubusercontent.com/google/fonts/main/ofl/gravitasone/OFL.txt",
+    "files": [
+      "gravitasone-140bbe4a41b5.woff2"
+    ],
+    "sha256": {
+      "gravitasone-140bbe4a41b5.woff2": "fa51975623660ec9fa3d378d51058fe5555f0fd3ab44188f7e8efde77a91e4d0"
+    }
+  },
+  {
+    "family": "Nixie One",
+    "label": "Nixie One",
+    "category": "display",
+    "slug": "nixieone",
+    "css": "/fonts/nixieone.css",
+    "source": "https://fonts.googleapis.com/css2?family=Nixie+One:wght@400&display=swap",
+    "license": "https://raw.githubusercontent.com/google/fonts/main/ofl/nixieone/OFL.txt",
+    "files": [
+      "nixieone-69f5ca64e41e.woff2"
+    ],
+    "sha256": {
+      "nixieone-69f5ca64e41e.woff2": "bad300608e17672dc65c062688aa4a7ab6d324fdd999e25a09c84e1cd99e9d8a"
+    }
+  },
+  {
+    "family": "Rammetto One",
+    "label": "Rammetto One",
+    "category": "display",
+    "slug": "rammettoone",
+    "css": "/fonts/rammettoone.css",
+    "source": "https://fonts.googleapis.com/css2?family=Rammetto+One:wght@400&display=swap",
+    "license": "https://raw.githubusercontent.com/google/fonts/main/ofl/rammettoone/OFL.txt",
+    "files": [
+      "rammettoone-3bcfbf6d200c.woff2",
+      "rammettoone-89952aa8c196.woff2"
+    ],
+    "sha256": {
+      "rammettoone-3bcfbf6d200c.woff2": "de8a7b6e330fd6220449b5ac4d623611a1104696f96399d7bfdda1cc611769fd",
+      "rammettoone-89952aa8c196.woff2": "2834f4c0a7ee3b2ce6da1c93463b8c720fbddddc444bd21881c1ada3c66966d9"
+    }
+  },
+  {
+    "family": "Titan One",
+    "label": "Titan One",
+    "category": "display",
+    "slug": "titanone",
+    "css": "/fonts/titanone.css",
+    "source": "https://fonts.googleapis.com/css2?family=Titan+One:wght@400&display=swap",
+    "license": "https://raw.githubusercontent.com/google/fonts/main/ofl/titanone/OFL.txt",
+    "files": [
+      "titanone-20ac868bf165.woff2",
+      "titanone-710f83dca3fa.woff2"
+    ],
+    "sha256": {
+      "titanone-20ac868bf165.woff2": "6980ee0dacf5865d3666004bb30174c4e028a1bfccbb752d98c11b7fa8a0ad1d",
+      "titanone-710f83dca3fa.woff2": "2f15f138af309ad659b62246999cccc2da21759ec8619d7e6ea759e8eb5a7a53"
+    }
+  },
+  {
+    "family": "Fredoka One",
+    "label": "Fredoka One",
+    "category": "display",
+    "slug": "fredokaone",
+    "css": "/fonts/fredokaone.css",
+    "source": "https://fonts.googleapis.com/css2?family=Fredoka+One:wght@400&display=swap",
+    "license": "https://raw.githubusercontent.com/google/fonts/be2838a23fd2918408e22b25c54135da76525ff6/ofl/fredokaone/OFL.txt",
+    "files": [
+      "fredokaone-1d92d7b00216.woff2"
+    ],
+    "sha256": {
+      "fredokaone-1d92d7b00216.woff2": "e9986c62b19bce3791c4c103a4aa87c91d22d9e1c9f252f7f802ea26d3405769"
+    }
+  }
+]
