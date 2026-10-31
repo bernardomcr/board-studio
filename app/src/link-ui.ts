@@ -41,6 +41,7 @@ export function installLinkUI(api:API){
   const restore=()=>{if(editing?.isConnected){editing.focus();if(range){const selection=window.getSelection();selection?.removeAllRanges();selection?.addRange(range);}}};
   function close(commit=false){const returnFocus=editing??previousFocus;dialog.close();restore();if(commit&&editing?.isConnected)api.commitEditor();editing=null;range=null;target=null;api.onChange();queueMicrotask(()=>{if(returnFocus?.isConnected)returnFocus.focus({preventScroll:true});else document.querySelector<HTMLElement>('#selection-properties [data-action="add-link"]')?.focus({preventScroll:true});});}
   function open(){
+    if(document.body.classList.contains('image-cropping'))return;
     if(dialog.open){input.focus();return;}
     if([...document.querySelectorAll<HTMLElement>('dialog[open],[role="dialog"][aria-modal="true"]')].some(modal=>!modal.hidden&&modal.getClientRects().length>0))return;
     const widget=api.state.selection.size===1?api.state.widgets.get([...api.state.selection][0]!):undefined;if(!widget||widget.locked)return;

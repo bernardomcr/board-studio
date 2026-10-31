@@ -73,7 +73,11 @@ import {mindNodeHidden,mindConnectorHidden,mindLayoutCommands,deleteMindSubtree,
 import {installLinkUI} from './link-ui';
 import {installAudio} from './audio';
 import {installStructuredTextUI} from './structured-text-ui';
+import {installInterface} from './interface';
+import {stickyPadPaper} from './core/stickies';
+import {scaledWidgetStyle} from './core/style-scale';
 
+installInterface();
 await ensureFonts();
 const host = document.getElementById("app")!;
 const hud = document.getElementById("hud")!;
@@ -174,9 +178,9 @@ function loadBoard(stored?:SavedBoard): boolean {
 
 let saveTimer:ReturnType<typeof setTimeout>|null=null;
 function savedBoard():SavedBoard{return structuredClone({layerOrderVersion:1 as const,userFonts:snapshotUserFonts(boardFontFamilies(state.widgets.values(),state.connectors.values())),savedAt:Date.now(),title:document.getElementById("board-title")!.textContent??"Board",background:state.background??{...DEFAULT_BACKGROUND},widgets:[...state.widgets.values()],order:state.order,connectors:[...state.connectors.values()],connectorOrder:state.connectorOrder,strokes:[...state.strokes.values()],strokeOrder:state.strokeOrder,groups:[...state.groups.entries()],journal:bus.snapshot(),camera:{x:camera.x,y:camera.y,scale:camera.scale}});}
-async function persistBoard(){if(home&&(!home.currentId()||home.transitioning()))return;try{await writeStoredBoard(storageKey(),savedBoard());document.getElementById("save-warning")?.remove();}catch{let notice=document.getElementById("save-warning");if(!notice){notice=document.createElement("div");notice.id="save-warning";notice.style.cssText="position:fixed;bottom:60px;left:50%;transform:translateX(-50%);z-index:80;background:#fff9b1;padding:12px 18px;border-radius:8px;font:13px Segoe UI";document.body.append(notice);}notice.textContent="Não foi possível salvar automaticamente. Use Salvar arquivo para guardar seu trabalho.";}}
+async function persistBoard(flushEditors=false){if(home&&(!home.currentId()||home.transitioning()))return;if(flushEditors){flushGestureUpdate();structuredUI?.finalizeInteractions();}try{await writeStoredBoard(storageKey(),savedBoard());document.getElementById("save-warning")?.remove();}catch{let notice=document.getElementById("save-warning");if(!notice){notice=document.createElement("div");notice.id="save-warning";notice.style.cssText="position:fixed;bottom:60px;left:50%;transform:translateX(-50%);z-index:80;background:#fff9b1;padding:12px 18px;border-radius:8px;font:13px Segoe UI";document.body.append(notice);}notice.textContent="Não foi possível salvar automaticamente. Use Salvar arquivo para guardar seu trabalho.";}}
 function scheduleSave(){if(home&&(!home.currentId()||home.transitioning()))return;if(saveTimer)clearTimeout(saveTimer);saveTimer=setTimeout(()=>{saveTimer=null;if(gesture.kind!=='none'){scheduleSave();return;}void persistBoard();},400);}
-window.addEventListener("pagehide",()=>{void persistBoard();});
+window.addEventListener("pagehide",()=>{void persistBoard(true);});
 
 const state: BoardState = {
   background: {...DEFAULT_BACKGROUND},
@@ -389,6 +393,7 @@ function positionEditor(w: Widget): void {
 
 /** Editor WYSIWYG: mostra o texto formatado, não a marcação. */
 function beginEdit(w: Widget): void {
+  if(w.type==='sticky_note'&&w.stickyPad)return;
   if(structuredUI?.edit(w))return;
   if (w.type === "image") { images?.cropSelected(); return; }
   endEdit(false);
@@ -499,6 +504,7 @@ function connectorControlVisible(c:Connector,geometry:NonNullable<ReturnType<typ
 }
 function drawSelection(): void {
   overlay.clear();
+  if(document.body.classList.contains('image-cropping'))return;
   if(['hand','brush','highlighter','eraser'].includes(tool))return;
   if(state.selection.size&&[...state.selection].every(entityHidden))return;
   const hover=hoveredConnectionWidget?state.widgets.get(hoveredConnectionWidget):undefined;
@@ -614,7 +620,7 @@ function setTool(next: Tool): void {
 }
 
 function updateCursor(): void {
-  if(gesture.kind==='pan'||gesture.kind==='drag'||gesture.kind==='bend'||gesture.kind==='reconnect'||gesture.kind==='caption-drag'){app.canvas.style.cursor='grabbing';return;}
+  if(gesture.kind==='pan'||gesture.kind==='drag'||gesture.kind==='sticky-pull'||gesture.kind==='bend'||gesture.kind==='reconnect'||gesture.kind==='caption-drag'){app.canvas.style.cursor='grabbing';return;}
   if(gesture.kind==='resize'||gesture.kind==='multi-resize'){app.canvas.style.cursor=resizeCursor(gesture.handle,gesture.kind==='resize'?gesture.startWidget.rotation:gesture.box.rotation);return;}
   if(gesture.kind==='rotate'||gesture.kind==='multi-rotate'){app.canvas.style.cursor=ROTATE_CURSOR;return;}
   if(gesture.kind==='connect'||pendingConnection){app.canvas.style.cursor='default';return;}
@@ -782,7 +788,8 @@ type Gesture =
   | { kind: "multi-resize"; handle:HandleId; box:Widget; items:Widget[]; initial:EntitySnapshot }
   | { kind: "create"; start: Vec; current: Vec; widget: Widget }
   | { kind: "pan"; pointerId: number }
-  | { kind: "drag"; ids: string[]; start: Vec; delta: Vec; initial:EntitySnapshot; bounds:Rect|null }
+  | { kind: "drag"; ids: string[]; start: Vec; delta: Vec; initial:EntitySnapshot; bounds:Rect|null;snapTargets?:Rect[] }
+  | {kind:'sticky-pull';start:Vec;current:Vec;widget:Extract<Widget,{type:'sticky_note'}>}
   | { kind: "marquee"; start: Vec; current: Vec }
   | { kind: "resize"; id: string; handle: HandleId; startWidget: Widget; moved: boolean }
   | { kind: "rotate"; id: string; startWidget: Widget; grabAngle: number; moved: boolean }
@@ -801,7 +808,7 @@ let cursorWorld: Vec = { x: 0, y: 0 };
 let clipboard: EntitySnapshot = {widgets:[],connectors:[],strokes:[],groups:[]};
 let clipboardToken='';
 const BOARD_CLIPBOARD_TYPE='application/x-board-studio';
-const canvasClipboardBlocked=()=>!!home?.transitioning()||document.body.classList.contains('home-visible')||[...document.querySelectorAll<HTMLElement>('dialog[open],[role="dialog"][aria-modal="true"]')].some(dialog=>!dialog.hidden&&dialog.getClientRects().length>0);
+const canvasClipboardBlocked=()=>!!home?.transitioning()||document.body.classList.contains('home-visible')||document.body.classList.contains('image-cropping')||[...document.querySelectorAll<HTMLElement>('dialog[open],[role="dialog"][aria-modal="true"]')].some(dialog=>!dialog.hidden&&dialog.getClientRects().length>0);
 function pasteSnapshot():void{
   const widgets=new Map(clipboard.widgets.map(w=>[w.id,w] as const)),rects:Rect[]=clipboard.widgets.map(widgetAABB);
   for(const c of clipboard.connectors){
@@ -968,6 +975,8 @@ function frontmostEntityAt(p:Vec){
 
 function handleAtScreen(s: Vec): HandleId | null {
   if (state.selection.size < 1||!selectionHandlesVisible()) return null;
+  const only=state.selection.size===1?state.widgets.get([...state.selection][0]!):undefined;
+  if(only?.type==='sticky_note'&&only.stickyPad){const local=worldToLocal(only,camera.screenToWorld(s));if(local.x>=only.width*.3&&local.x<=only.width*.7&&local.y>=only.height*.925&&local.y<=only.height*.99)return null;}
   for (const id of ["nw", "n", "ne", "e", "se", "s", "sw", "w"] as HandleId[]) {
     const p = handleScreen(id);
     if (p && Math.hypot(p.x - s.x, p.y - s.y) <= HANDLE_HIT) return id;
@@ -1159,6 +1168,7 @@ app.canvas.addEventListener("pointerdown", (e) => {
     const widget = createWidget(tool, { x: start.x, y: start.y, shape: selectedShape,
       content: tool === "text" ? "Texto" : tool === "frame" ? "Quadro" : "" });
     widget.style={...widget.style,...creationStyles[widget.type]};
+    if(widget.type==='sticky_note'){widget.width=160/camera.scale;widget.height=widget.width;widget.style.fontSize/=camera.scale;if(stickyStackMode){widget.stickyPad=true;widget.name='Bloco de notas';}}
     if(widget.type==='text')widget.style.fontSize=24/camera.scale;
     gesture = { kind: "create", start, current: p, widget };
     creationPreview.show(creationWidgetAt(widget,start,p,camera.scale));
@@ -1245,6 +1255,15 @@ if (state.selection.size > 1) {
     return;
   }
 
+  if(hit.type==='sticky_note'&&hit.stickyPad&&!hit.locked&&!e.altKey&&!e.shiftKey){
+    const paper=stickyPadPaper(hit),local=worldToLocal(hit,p);
+    if(local.x>=paper.x&&local.x<=paper.x+paper.width&&local.y>=paper.y&&local.y<=paper.y+paper.height){
+      const center=widgetCenter(hit),offset=rotate({x:paper.x+paper.width/2-hit.width/2,y:paper.y+paper.height/2-hit.height/2},hit.rotation);
+      const widget={...createWidget('sticky_note',{x:center.x+offset.x-paper.width/2,y:center.y+offset.y-paper.height/2,width:paper.width,height:paper.height,content:''}),type:'sticky_note' as const,shape:'square' as const,content:'',rotation:hit.rotation,style:scaledWidgetStyle(hit,paper.width/hit.width,paper.height/hit.height)};
+      bus.exec({op:'SELECTION_SET',payload:[hit.id]});gesture={kind:'sticky-pull',start:p,current:p,widget};updateCursor();return;
+    }
+  }
+
   if(selectClickedEntity(hit.id,e)){gesture={kind:'none'};return;}
 
   if(hit.link&&/^(https?:|mailto:)/i.test(hit.link)&&!e.altKey&&!e.shiftKey&&!e.ctrlKey&&!e.metaKey)clickedObjectLink={id:hit.id,url:hit.link,start:p};
@@ -1296,7 +1315,7 @@ app.canvas.addEventListener("pointermove", (e) => {
     const selected=state.selection.size===1?state.connectors.get([...state.selection][0]!):undefined,geometry=selected&&!selected.locked?connectorGeometry(selected,state.widgets):null;
     const grab=geometry&&(connectorCaptionAt(selected!,geometry,p,4/camera.scale)>=0||[geometry.points[0]!,geometry.points.at(-1)!,...connectorEditPoints(selected!,geometry)].some(point=>{if(!connectorControlVisible(selected!,geometry,point))return false;const s=camera.worldToScreen(point);return Math.hypot(s.x-screen.x,s.y-screen.y)<=10;}));
     const locked=[...state.selection].some(id=>itemLocked(state,id)),handle=!locked?handleAtScreen(screen):null,rotating=!locked&&rotateHandleAtScreen(screen),box=state.selection.size===1?state.widgets.get([...state.selection][0]!):selectionBox();
-    app.canvas.style.cursor=handle?resizeCursor(handle,box?.rotation??0):rotating?ROTATE_CURSOR:atDot?'pointer':grab?'grab':hoveredLink?'pointer':hoveredWidget?.locked?'not-allowed':hoveredWidget?(isFreeText(hoveredWidget)&&state.selection.has(hoveredWidget.id)?'text':'move'):tool==='shape'?'crosshair':'default';
+    app.canvas.style.cursor=handle?resizeCursor(handle,box?.rotation??0):rotating?ROTATE_CURSOR:atDot?'pointer':grab?'grab':hoveredLink?'pointer':hoveredWidget?.locked?'not-allowed':hoveredWidget?(hoveredWidget.type==='sticky_note'&&hoveredWidget.stickyPad?'grab':isFreeText(hoveredWidget)&&state.selection.has(hoveredWidget.id)?'text':'move'):tool==='shape'?'crosshair':'default';
   }
   if(gesture.kind==='none'&&tool==='connector'){const hover=hoverConnectionTarget(p),nextHover=hover?.id??null;if(nextHover!==hoveredConnectionWidget){hoveredConnectionWidget=nextHover;drawSelection();}app.canvas.style.cursor=!pendingConnection&&hover&&connectionHandles(hover).some(h=>Math.hypot(h.point.x-screen.x,h.point.y-screen.y)<=10)?'pointer':pendingConnection?'default':'crosshair';}
 
@@ -1323,6 +1342,10 @@ app.canvas.addEventListener("pointermove", (e) => {
       overlay.clear();creationPreview.show(creationWidgetAt(gesture.widget,gesture.start,gesture.current,camera.scale));
       return;
     }
+    case 'sticky-pull':{
+      gesture.current=p;const {widget,start}=gesture;
+      creationPreview.show({...widget,x:widget.x+p.x-start.x,y:widget.y+p.y-start.y});return;
+    }
     case "pan": {
       if (!prev) return;
       camera.panByScreen(e.clientX - prev.x, e.clientY - prev.y);
@@ -1331,37 +1354,24 @@ app.canvas.addEventListener("pointermove", (e) => {
       return;
     }
     case "drag": {
-      let dx = p.x - gesture.start.x;
-      let dy = p.y - gesture.start.y;
-
-      if (!e.altKey) {
-        const movingIds = new Set(gesture.ids);
-        const bounds = gesture.bounds;
-        const targets = state.order
-          .filter((id) => !movingIds.has(id))
-          .map((id) => state.widgets.get(id))
-          .filter((w): w is Widget => Boolean(w))
-          .map(widgetAABB);
-
-        if (bounds) {
-          const result = snapMove(
-            bounds,
-            targets,
-            { dx, dy },
-            Math.max(6 / camera.scale, gridState.snapThreshold * 0.5),
-            gridState.snapCell,
-          );
-          dx = result.dx;
-          dy = result.dy;
-          activeGuides = result.guides;
+      const moving=gesture,proposed={dx:p.x-moving.start.x,dy:p.y-moving.start.y},free=e.altKey,zoom=camera.scale;
+      // Native pointermove may arrive several times per rendered frame. Bounds
+      // and snap candidates are stable for this gesture; process only its latest
+      // proposed position, not every event that will be superseded before paint.
+      queueGestureUpdate(()=>{
+        let {dx,dy}=proposed;activeGuides=[];
+        if(!free&&moving.bounds){
+          if(!moving.snapTargets){const excluded=new Set(moving.initial.widgets.map(w=>w.id));moving.snapTargets=state.order.filter(id=>!excluded.has(id)).map(id=>state.widgets.get(id)).filter((w):w is Widget=>!!w&&!widgetHidden(w)).map(widgetAABB);}
+          // Alignment attraction has a fixed screen radius. Adaptive background
+          // cells must not quantize object motion (6.4px jumps at 2%, 10px at 1x).
+          const result=snapMove(moving.bounds,moving.snapTargets,proposed,6/zoom);
+          dx=result.dx;dy=result.dy;activeGuides=result.guides;
         }
-      } else {
-        activeGuides = [];
-      }
-
-      gesture.delta = { x: dx, y: dy };
-      const moving=gesture;
-      queueGestureUpdate(()=>{bus.exec({op:"BATCH",payload:{label:"Mover",commands:transformSnapshot(state,moving.initial,dx,dy)}});if(moving.ids.length===1&&state.widgets.get(moving.ids[0]!)?.mind&&Math.hypot(dx,dy)*camera.scale>5)mindmapUI?.previewDrop(moving.ids[0]!,p);});
+        if(moving.delta.x===dx&&moving.delta.y===dy){drawSelection();return;}
+        moving.delta={x:dx,y:dy};
+        bus.exec({op:"BATCH",payload:{label:"Mover",commands:transformSnapshot(state,moving.initial,dx,dy)}});
+        if(moving.ids.length===1&&state.widgets.get(moving.ids[0]!)?.mind&&Math.hypot(dx,dy)*zoom>5)mindmapUI?.previewDrop(moving.ids[0]!,p);
+      });
       return;
     }
     case "draw": {
@@ -1423,7 +1433,8 @@ app.canvas.addEventListener("pointermove", (e) => {
     }
     case "resize": {
       const start = gesture.startWidget;
-      const next = isFreeText(start)?resizeFreeText(start,gesture.handle,p):resizeWidget(start, gesture.handle, p, e.shiftKey);
+      const geometry = isFreeText(start)?resizeFreeText(start,gesture.handle,p):resizeWidget(start, gesture.handle, p, e.shiftKey);
+      const next=start.audio||start.table||start.checklist?{...geometry,style:scaledWidgetStyle(start,geometry.width/start.width,geometry.height/start.height)}:geometry;
       gesture.moved = true;
       const resizingId=gesture.id;queueGestureUpdate(()=>bus.exec({ op: "WIDGET_UPDATE", payload: { id: resizingId, patch: next } }));
 
@@ -1481,6 +1492,13 @@ function endGesture(e: PointerEvent): void {
   }
   let completionId:string|undefined;
   switch (gesture.kind) {
+    case 'sticky-pull':{
+      const {widget,start,current}=gesture;creationPreview.clear();
+      if(Math.hypot(current.x-start.x,current.y-start.y)*camera.scale>4){
+        bus.exec({op:'BATCH',payload:{label:'Puxar nota do bloco',commands:[{op:'WIDGET_CREATE',payload:{...widget,x:widget.x+current.x-start.x,y:widget.y+current.y-start.y}},{op:'SELECTION_SET',payload:[widget.id]}]}});
+      }
+      break;
+    }
     case 'brush-adjust':drawingUI?.commitSettings();brushCursor?.adjusting(false);break;
     case 'eraser-adjust':drawingUI?.adjustEraserRadius(drawingUI.eraserRadius());brushCursor?.adjusting(false);break;
     case "create": {
@@ -1488,7 +1506,7 @@ function endGesture(e: PointerEvent): void {
       const {widget,start,current} = gesture;
       const next=creationWidgetAt(widget,start,current,camera.scale);creationPreview.clear();
       bus.exec({op:'BATCH',payload:{label:'Criar objeto',commands:[{op:'WIDGET_CREATE',payload:next},{op:'SELECTION_SET',payload:[next.id]}]}});
-      setTool(next.type==='shape'?'shape':next.type==='sticky_note'&&stickyStackMode?'sticky_note':'select');
+      setTool(next.type==='shape'?'shape':'select');
       if (next.type === "text") beginEdit(state.widgets.get(next.id)!);
       break;
     }
@@ -1807,7 +1825,7 @@ async function copySelectionImage(){
   try{const img=new Image();img.src=url;await img.decode();const canvas=document.createElement("canvas"),scale=Math.min(2,4096/Math.max(img.width,img.height));canvas.width=Math.max(1,Math.ceil(img.width*scale));canvas.height=Math.max(1,Math.ceil(img.height*scale));canvas.getContext("2d")!.drawImage(img,0,0,canvas.width,canvas.height);const blob=await new Promise<Blob|null>(resolve=>canvas.toBlob(resolve));if(blob){try{await navigator.clipboard.write([new ClipboardItem({"image/png":blob})]);}catch{downloadBlob(blob,"selecao.png");}}}finally{URL.revokeObjectURL(url);}
 }
 // Local editor controls
-images = installImages({state,bus,camera,app,world,getBoardKey:mediaBoardKey,nodeAt:id=>scene.nodeAt(id),onChange:()=>{syncScene();refreshChrome();}});
+images = installImages({state,bus,camera,app,world,getBoardKey:mediaBoardKey,nodeAt:id=>scene.nodeAt(id),onChange:()=>{syncScene();drawSelection();refreshChrome();}});
 backgroundUI=installBackground({state,bus,camera,app,world,getBoardKey:mediaBoardKey,onChange:()=>{gridDirty=true;syncScene();refreshChrome();}});
 layersUI=installLayers({state,bus,camera,onSelect:()=>{isolatedGroup=null;setTool('select');},onChange:()=>{syncScene();drawSelection();refreshChrome();}});
 const mindImagePicker=document.createElement('input');mindImagePicker.type='file';mindImagePicker.accept='image/*';mindImagePicker.multiple=true;
@@ -1816,7 +1834,7 @@ mindImagePicker.addEventListener('change',()=>{const files=Array.from(mindImageP
 mindmapUI=installMindmapUI({state,bus,camera,setTool:t=>setTool(t),getTool:()=>tool,onEdit:id=>{const w=state.widgets.get(id);if(w&&!w.locked)beginEdit(w);},onLink:()=>linkUI?.open(),onImage:parentId=>{mindImageTarget={parentId,boardKey:mediaBoardKey()};mindImagePicker.click();},onChange:()=>{syncScene();drawSelection();refreshChrome();}});
 linkUI=installLinkUI({state,bus,camera,getBoardKey:mediaBoardKey,getEditor:()=>editor,commitEditor:()=>endEdit(true),onChange:()=>{syncScene();drawSelection();refreshChrome();}});
 audioUI=installAudio({state,bus,camera,getTool:()=>tool,setTool:t=>setTool(t),getBoardKey:mediaBoardKey,onChange:()=>{syncScene();drawSelection();refreshChrome();}});
-structuredUI=installStructuredTextUI({state,bus,camera,getTool:()=>tool,isInteracting:()=>gesture.kind!=='none'||momentum.active,setTool:t=>setTool(t as Tool),onChange:()=>{syncScene();drawSelection();refreshChrome();}});
+structuredUI=installStructuredTextUI({state,bus,camera,getTool:()=>tool,getBoardKey:mediaBoardKey,isInteracting:()=>gesture.kind!=='none'||momentum.active,setTool:t=>setTool(t as Tool),onChange:()=>{syncScene();drawSelection();refreshChrome();}});
 connectorCompletion=installConnectorCompletion({state,bus,camera});
 const imagePicker = document.createElement("input");
 let imagePickerBoardKey:string|null=null;
@@ -1836,7 +1854,7 @@ editorUI = installEditorUI({state,bus,camera,setTool:t=>setTool(t as Tool),getTo
   },
   onLink:()=>linkUI?.open(),
   setConnectorDefault:options=>{rememberConnectorDefaults({shape:options.shape,style:{endCap:options.arrow?'arrow':'none'}});},
-  onStyleDefaults:(type,patch)=>{creationStyles[type]={...creationStyles[type],...patch};},
+  onStyleDefaults:(type,patch)=>{const remembered=type==='sticky_note'&&patch.fontSize!==undefined?{...patch,fontSize:patch.fontSize*camera.scale}:patch;creationStyles[type]={...creationStyles[type],...remembered};},
   setStickyStackMode:enabled=>{stickyStackMode=enabled;},
   setShape:s=>{selectedShape=s;},getShape:()=>selectedShape,onImage:()=>{imagePickerBoardKey=mediaBoardKey();imagePicker.click();},
   onCrop:()=>images?.cropSelected(),onResetCrop:()=>images?.resetCrop(),
@@ -1854,7 +1872,7 @@ installIcons();
 drawingUI=installDrawingUI({getTool:()=>tool,setTool:t=>setTool(t as Tool),onChange:()=>brushCursor?.update()});
 brushCursor=installBrushCursor({camera,getTool:()=>tool,getSettings:()=>drawingUI!.settings(tool==='highlighter'?'highlighter':'brush'),getEraserRadius:()=>drawingUI?.eraserRadius()??12,temporaryHand:()=>spaceDown||gesture.kind==='pan'});
 app.canvas.addEventListener('pointerleave',()=>brushCursor?.leave());
-const projectFiles=installProjectFiles({state,bus,camera,getBoardKey:mediaBoardKey,sync:()=>{boardEpoch++;gridDirty=true;syncScene();drawSelection();refreshChrome();if(home&&!home.currentId())void home.adoptCurrent();else{home?.updateCurrent();scheduleSave();}}});
+const projectFiles=installProjectFiles({state,bus,camera,getBoardKey:mediaBoardKey,beforeOperation:()=>{flushGestureUpdate();structuredUI?.finalizeInteractions();endEdit(true);editorUI?.finalizePropertyGestures();bus.endTransaction();},sync:()=>{boardEpoch++;gridDirty=true;syncScene();drawSelection();refreshChrome();if(home&&!home.currentId())void home.adoptCurrent();else{home?.updateCurrent();scheduleSave();}}});
 const title=document.getElementById("board-title")!;
 title.contentEditable='plaintext-only';if(!title.isContentEditable)title.contentEditable='true';
 title.setAttribute('role','textbox');title.setAttribute('aria-label','Nome do board');title.setAttribute('spellcheck','false');
@@ -1930,7 +1948,7 @@ app.ticker.add(() => {
   ].join("\n");}
 });
 
-home=installBoardHome({capture:savedBoard,afterTransition:()=>refreshChrome(),beforeTransition:()=>{momentum.stop();audioUI?.pauseAll();flushGestureUpdate();endEdit(true);editorUI?.finalizePropertyGestures();bus.endTransaction();gesture={kind:'none'};pointers.clear();brushPreview.clear();creationPreview.clear();connectorCompletion?.close();},open:async data=>{
+home=installBoardHome({capture:savedBoard,afterTransition:()=>refreshChrome(),beforeTransition:()=>{momentum.stop();audioUI?.pauseAll();flushGestureUpdate();structuredUI?.finalizeInteractions();endEdit(true);editorUI?.finalizePropertyGestures();bus.endTransaction();gesture={kind:'none'};pointers.clear();brushPreview.clear();creationPreview.clear();connectorCompletion?.close();},open:async data=>{
   if(saveTimer){clearTimeout(saveTimer);saveTimer=null;}endEdit(true);bus.endTransaction();gesture={kind:"none"};isolatedGroup=null;
   await restoreUserFonts((data as SavedBoard).userFonts);
   await Promise.all(boardFontFamilies((data as SavedBoard).widgets as Widget[],(data as SavedBoard).connectors as Connector[]).map(loadBoardFont));
@@ -1953,7 +1971,7 @@ const bootPromise=home.start();
   eraseAt,
   navigation:{stop:()=>momentum.stop(),active:()=>momentum.active},
   load: loadBoard,
-  saveNow: persistBoard,
+  saveNow: ()=>persistBoard(true),
   booted: false,
 };
 

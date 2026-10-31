@@ -517,5 +517,307 @@
     "sha256": {
       "fredokaone-1d92d7b00216.woff2": "e9986c62b19bce3791c4c103a4aa87c91d22d9e1c9f252f7f802ea26d3405769"
     }
+  },
+  {
+    "family": "Bungee",
+    "label": "Bungee",
+    "category": "display",
+    "slug": "bungee",
+    "css": "/fonts/bungee.css",
+    "source": "https://fonts.googleapis.com/css2?family=Bungee:wght@400&display=swap",
+    "license": "https://raw.githubusercontent.com/google/fonts/main/ofl/bungee/OFL.txt",
+    "files": [
+      "bungee-e3f66f01dd8c.woff2",
+      "bungee-3aac0b24b00d.woff2"
+    ],
+    "sha256": {
+      "bungee-e3f66f01dd8c.woff2": "dff060f6e0f1d527570e707f5517a6332033030ea4619f4a86b39e10b66ecb74",
+      "bungee-3aac0b24b00d.woff2": "126eec706b7931682dbcf6c6efc274132c603f181fbf912678e6cfeb341e721b"
+    }
+  },
+  {
+    "family": "Bungee Shade",
+    "label": "Bungee Shade",
+    "category": "display",
+    "slug": "bungeeshade",
+    "css": "/fonts/bungeeshade.css",
+    "source": "https://fonts.googleapis.com/css2?family=Bungee+Shade:wght@400&display=swap",
+    "license": "https://raw.githubusercontent.com/google/fonts/main/ofl/bungeeshade/OFL.txt",
+    "files": [
+      "bungeeshade-0123509cdbca.woff2",
+      "bungeeshade-3fc0d114b2c0.woff2"
+    ],
+    "sha256": {
+      "bungeeshade-0123509cdbca.woff2": "b65ebc1bef14d7d2b900703027c959a52e23602053278ef8cba4da12bcf7cbac",
+      "bungeeshade-3fc0d114b2c0.woff2": "5ac7452cbe7996c88c84998b86227ffbee8afb7ab5bd0b2b2512229dcac7e315"
+    }
+  },
+  {
+    "family": "Monoton",
+    "label": "Monoton",
+    "category": "display",
+    "slug": "monoton",
+    "css": "/fonts/monoton.css",
+    "source": "https://fonts.googleapis.com/css2?family=Monoton:wght@400&display=swap",
+    "license": "https://raw.githubusercontent.com/google/fonts/main/ofl/monoton/OFL.txt",
+    "files": [
+      "monoton-d852de80bfd1.woff2",
+      "monoton-bb4d39cd122a.woff2"
+    ],
+    "sha256": {
+      "monoton-d852de80bfd1.woff2": "d6f53ac76febcc62e23552a2046c291fd6613b189de104c697ea110fd77a33a0",
+      "monoton-bb4d39cd122a.woff2": "54dd0ac1cf6c02e094ad114d3cc038baddc42e5d6ba1c0b74566cedaed765c4c"
+    }
+  },
+  {
+    "family": "Righteous",
+    "label": "Righteous",
+    "category": "display",
+    "slug": "righteous",
+    "css": "/fonts/righteous.css",
+    "source": "https://fonts.googleapis.com/css2?family=Righteous:wght@400&display=swap",
+    "license": "https://raw.githubusercontent.com/google/fonts/main/ofl/righteous/OFL.txt",
+    "files": [
+      "righteous-e63384994fd2.woff2",
+      "righteous-c74eeb062c39.woff2"
+    ],
+    "sha256": {
+      "righteous-e63384994fd2.woff2": "5cdd7df84db547c59608d392341fd82e334e04562c0826ab4451942da40a0c50",
+      "righteous-c74eeb062c39.woff2": "17055c538efddf7a754a98bb7db3d15405316dfb4645c287421ed3e7f8769144"
+    }
+  },
+  {
+    "family": "Black Ops One",
+    "label": "Black Ops One",
+    "category": "display",
+    "slug": "blackopsone",
+    "css": "/fonts/blackopsone.css",
+    "source": "https://fonts.googleapis.com/css2?family=Black+Ops+One:wght@400&display=swap",
+    "license": "https://raw.githubusercontent.com/google/fonts/main/ofl/blackopsone/OFL.txt",
+    "files": [
+      "blackopsone-326e32d18d57.woff2",
+      "blackopsone-e187aefaba84.woff2"
+    ],
+    "sha256": {
+      "blackopsone-326e32d18d57.woff2": "250b26304048adccd1db0acbca72896d6fbc3eec45521ed84bebffa91ba81bdc",
+      "blackopsone-e187aefaba84.woff2": "6e4c5eb97c2b5a41ebe33f4462385d551dabef7aa28cae7b3d6b77e63529eee5"
+    }
+  },
+  {
+    "family": "Cinzel Decorative",
+    "label": "Cinzel Decorative",
+    "category": "display",
+    "slug": "cinzeldecorative",
+    "css": "/fonts/cinzeldecorative.css",
+    "source": "https://fonts.googleapis.com/css2?family=Cinzel+Decorative:wght@400&display=swap",
+    "license": "https://raw.githubusercontent.com/google/fonts/main/ofl/cinzeldecorative/OFL.txt",
+    "files": [
+      "cinzeldecorative-12b92f3a1501.woff2",
+      "cinzeldecorative-b2b958c1090c.woff2"
+    ],
+    "sha256": {
+      "cinzeldecorative-12b92f3a1501.woff2": "57d6cf9d284ab796528836ae25094b144107bc087111fe539b7404e5fc338812",
+      "cinzeldecorative-b2b958c1090c.woff2": "97d28bf5a628c4f0305a6f837e85d5ae7dbf44485f04d2a4cada8d7810c9bb03"
+    }
+  },
+  {
+    "family": "Rubik Glitch",
+    "label": "Rubik Glitch",
+    "category": "display",
+    "slug": "rubikglitch",
+    "css": "/fonts/rubikglitch.css",
+    "source": "https://fonts.googleapis.com/css2?family=Rubik+Glitch:wght@400&display=swap",
+    "license": "https://raw.githubusercontent.com/google/fonts/main/ofl/rubikglitch/OFL.txt",
+    "files": [
+      "rubikglitch-efcd8d35090f.woff2",
+      "rubikglitch-b1c45a95acdb.woff2"
+    ],
+    "sha256": {
+      "rubikglitch-efcd8d35090f.woff2": "313f1c2c971f6e0b2661f082a295a70e89b1f0d17a4dcb0aedbe934325bb6923",
+      "rubikglitch-b1c45a95acdb.woff2": "ce7442b4b24dec89c46dee8926494d916d16c42ad038b9a14dceb96293773a5c"
+    }
+  },
+  {
+    "family": "Rubik Doodle Shadow",
+    "label": "Rubik Doodle Shadow",
+    "category": "display",
+    "slug": "rubikdoodleshadow",
+    "css": "/fonts/rubikdoodleshadow.css",
+    "source": "https://fonts.googleapis.com/css2?family=Rubik+Doodle+Shadow:wght@400&display=swap",
+    "license": "https://raw.githubusercontent.com/google/fonts/main/ofl/rubikdoodleshadow/OFL.txt",
+    "files": [
+      "rubikdoodleshadow-7547da38665e.woff2",
+      "rubikdoodleshadow-d83f95d1e5ee.woff2"
+    ],
+    "sha256": {
+      "rubikdoodleshadow-7547da38665e.woff2": "2277b3a0248d705e027550692006c5e2973326f612b8135957a57c451bcd080e",
+      "rubikdoodleshadow-d83f95d1e5ee.woff2": "e1676ad3af3f95a27950ad35d76fc9d8e536214ddb81f841628e64b39b5b1076"
+    }
+  },
+  {
+    "family": "Rubik Scribble",
+    "label": "Rubik Scribble",
+    "category": "display",
+    "slug": "rubikscribble",
+    "css": "/fonts/rubikscribble.css",
+    "source": "https://fonts.googleapis.com/css2?family=Rubik+Scribble:wght@400&display=swap",
+    "license": "https://raw.githubusercontent.com/google/fonts/main/ofl/rubikscribble/OFL.txt",
+    "files": [
+      "rubikscribble-7d2b6b30efca.woff2",
+      "rubikscribble-35656d17d870.woff2"
+    ],
+    "sha256": {
+      "rubikscribble-7d2b6b30efca.woff2": "90ce056d6df967b0c7bdcd893ab61197001a9cd87d857a73d1d849213ce63c01",
+      "rubikscribble-35656d17d870.woff2": "6b8d30b03cc681f0cbb63f998360af98062dbe5126ab4341d6af46130ff4bbfa"
+    }
+  },
+  {
+    "family": "Creepster",
+    "label": "Creepster",
+    "category": "display",
+    "slug": "creepster",
+    "css": "/fonts/creepster.css",
+    "source": "https://fonts.googleapis.com/css2?family=Creepster:wght@400&display=swap",
+    "license": "https://raw.githubusercontent.com/google/fonts/main/ofl/creepster/OFL.txt",
+    "files": [
+      "creepster-756fa990e73b.woff2"
+    ],
+    "sha256": {
+      "creepster-756fa990e73b.woff2": "899f0b2dd69f34439731f2726804a9593ba8161294e9b4a1ed4fd9f84e094470"
+    }
+  },
+  {
+    "family": "Press Start 2P",
+    "label": "Press Start 2P",
+    "category": "display",
+    "slug": "pressstart2p",
+    "css": "/fonts/pressstart2p.css",
+    "source": "https://fonts.googleapis.com/css2?family=Press+Start+2P:wght@400&display=swap",
+    "license": "https://raw.githubusercontent.com/google/fonts/main/ofl/pressstart2p/OFL.txt",
+    "files": [
+      "pressstart2p-1d8e55a773fd.woff2",
+      "pressstart2p-7a443241a287.woff2"
+    ],
+    "sha256": {
+      "pressstart2p-1d8e55a773fd.woff2": "3c7df3a15e173b8fa04ec9191171e72c314ddbac1b395e2b2e2092bb4f47cc8c",
+      "pressstart2p-7a443241a287.woff2": "afec86997fdaf54af1f59358fa2c1e2a0f1d04146edad18e5cd141d0384a7548"
+    }
+  },
+  {
+    "family": "Fredericka the Great",
+    "label": "Fredericka the Great",
+    "category": "display",
+    "slug": "frederickathegreat",
+    "css": "/fonts/frederickathegreat.css",
+    "source": "https://fonts.googleapis.com/css2?family=Fredericka+the+Great:wght@400&display=swap",
+    "license": "https://raw.githubusercontent.com/google/fonts/main/ofl/frederickathegreat/OFL.txt",
+    "files": [
+      "frederickathegreat-f088bb4d14df.woff2",
+      "frederickathegreat-207449e7ea93.woff2"
+    ],
+    "sha256": {
+      "frederickathegreat-f088bb4d14df.woff2": "998cb0576853b232f002cb7db02489d4529d38a1dca89de1a0c80ea88fb26a83",
+      "frederickathegreat-207449e7ea93.woff2": "1375ac69dc481d77cd150b7c72029c4e6383c5bd9751ca5b55993b0cccae2eb4"
+    }
+  },
+  {
+    "family": "Pacifico",
+    "label": "Pacifico",
+    "category": "handwriting",
+    "slug": "pacifico",
+    "css": "/fonts/pacifico.css",
+    "source": "https://fonts.googleapis.com/css2?family=Pacifico:wght@400&display=swap",
+    "license": "https://raw.githubusercontent.com/google/fonts/main/ofl/pacifico/OFL.txt",
+    "files": [
+      "pacifico-decf57453c06.woff2",
+      "pacifico-fe06ce57d8b7.woff2"
+    ],
+    "sha256": {
+      "pacifico-decf57453c06.woff2": "0e2fe23a0a87bf572e6463b29ea7782e1898d87d6399698ad9fb40b676e13758",
+      "pacifico-fe06ce57d8b7.woff2": "99ec044ad9040a708e38f90ebd5984ca03fc46afeee26d5c77c4769c66ed89e2"
+    }
+  },
+  {
+    "family": "Lobster",
+    "label": "Lobster",
+    "category": "handwriting",
+    "slug": "lobster",
+    "css": "/fonts/lobster.css",
+    "source": "https://fonts.googleapis.com/css2?family=Lobster:wght@400&display=swap",
+    "license": "https://raw.githubusercontent.com/google/fonts/main/ofl/lobster/OFL.txt",
+    "files": [
+      "lobster-31e7e92c0c75.woff2",
+      "lobster-f8b337b9f2ea.woff2"
+    ],
+    "sha256": {
+      "lobster-31e7e92c0c75.woff2": "51a1f5b28cbdc742ecaeeabf5fed74d0446b0b1cebdd6bbf6cd93ecc36b16629",
+      "lobster-f8b337b9f2ea.woff2": "aed68c73817364906ff95d97be87246d106bd38d5e4397e4866ec831ee22f7ba"
+    }
+  },
+  {
+    "family": "Dancing Script",
+    "label": "Dancing Script",
+    "category": "handwriting",
+    "slug": "dancingscript",
+    "css": "/fonts/dancingscript.css",
+    "source": "https://fonts.googleapis.com/css2?family=Dancing+Script:wght@400&display=swap",
+    "license": "https://raw.githubusercontent.com/google/fonts/main/ofl/dancingscript/OFL.txt",
+    "files": [
+      "dancingscript-f71550c68152.woff2",
+      "dancingscript-ec61460f20d8.woff2"
+    ],
+    "sha256": {
+      "dancingscript-f71550c68152.woff2": "f199ffcda75ec6da953ec8ed8477438f0b46236a052ee1e91a85a46001cc8810",
+      "dancingscript-ec61460f20d8.woff2": "570e4265bbcb453353ce2fdf63d179332d8daa92691d567547b8a383f3b46c3b"
+    }
+  },
+  {
+    "family": "Amatic SC",
+    "label": "Amatic SC",
+    "category": "handwriting",
+    "slug": "amaticsc",
+    "css": "/fonts/amaticsc.css",
+    "source": "https://fonts.googleapis.com/css2?family=Amatic+SC:wght@400&display=swap",
+    "license": "https://raw.githubusercontent.com/google/fonts/main/ofl/amaticsc/OFL.txt",
+    "files": [
+      "amaticsc-c640f042c1d3.woff2",
+      "amaticsc-0acfb193be77.woff2"
+    ],
+    "sha256": {
+      "amaticsc-c640f042c1d3.woff2": "4ca7885bff93f7348c682bb0f81c954ef881620b1ea79d0edc16c32d56a7d0d9",
+      "amaticsc-0acfb193be77.woff2": "9ee1dd0b37fcea476e4142696cb034a466ad84101dff157b5dde311a02c8c35b"
+    }
+  },
+  {
+    "family": "Special Elite",
+    "label": "Special Elite",
+    "category": "display",
+    "slug": "specialelite",
+    "css": "/fonts/specialelite.css",
+    "source": "https://fonts.googleapis.com/css2?family=Special+Elite:wght@400&display=swap",
+    "license": "https://raw.githubusercontent.com/google/fonts/main/apache/specialelite/LICENSE.txt",
+    "files": [
+      "specialelite-98379468de48.woff2",
+      "specialelite-7d93fdcde830.woff2"
+    ],
+    "sha256": {
+      "specialelite-98379468de48.woff2": "5ab1c7e4d8574a18090d98e945ebf7489d7120303eab111e0506470e1f82f2df",
+      "specialelite-7d93fdcde830.woff2": "770493d84cbb753cd0573d0f014550583138f40469d137e310d239593a1949d8"
+    }
+  },
+  {
+    "family": "Satisfy",
+    "label": "Satisfy",
+    "category": "handwriting",
+    "slug": "satisfy",
+    "css": "/fonts/satisfy.css",
+    "source": "https://fonts.googleapis.com/css2?family=Satisfy:wght@400&display=swap",
+    "license": "https://raw.githubusercontent.com/google/fonts/main/apache/satisfy/LICENSE.txt",
+    "files": [
+      "satisfy-cbd9dfe702c9.woff2"
+    ],
+    "sha256": {
+      "satisfy-cbd9dfe702c9.woff2": "efed75fb59ebfac3006c1a815cef791a300d1a4f7e75b0bf0654fa4f6884098e"
+    }
   }
 ]

@@ -134,6 +134,7 @@ export function resizeWidget(
   keepAspect: boolean,
   minSize = 24,
 ): Pick<Widget, "x" | "y" | "width" | "height"> {
+  if(start.type==='sticky_note')minSize=Math.min(minSize,.001);
   const c = widgetCenter(start);
   const local = worldToLocal(start, pointerWorld);
 
@@ -146,7 +147,9 @@ export function resizeWidget(
   if (sx !== 0) width = Math.max(minSize, sx > 0 ? local.x : start.width - local.x);
   if (sy !== 0) height = Math.max(minSize, sy > 0 ? local.y : start.height - local.y);
 
-  if (keepAspect && sx !== 0 && sy !== 0) {
+  if(start.type==='sticky_note'){
+    const side=sx===0?height:sy===0?width:Math.max(width,height);width=side;height=side;
+  }else if (keepAspect && sx !== 0 && sy !== 0) {
     const ratio = start.width / start.height;
     if (width / height > ratio) width = height * ratio;
     else height = width / ratio;

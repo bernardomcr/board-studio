@@ -9,7 +9,9 @@ import { SHAPE_OPTIONS, type ShapeWidget, type Style, type Widget, type TextWidg
 import { groupSelection, ungroupSelection, selectionRoots, captureSelection, duplicateSnapshot, frameSelection, itemLocked, memberSelection, arrangementRoots, arrangeSelection, type ArrangeMode } from './core/groups';
 import { shapeIconSvg } from './core/shapes';
 import { icon } from './icons';
-import { relativeBorderScale } from './core/style-scale';
+import { relativeBorderScale,scaledWidgetStyle } from './core/style-scale';
+import {checklistFromLines,tableWithGrid} from './core/structured-text';
+import {rememberAudioDefaults} from './audio-defaults';
 import {sizeRangeMaximum,multipliedSize,formatSize} from './size-controls';
 import {installFontPickers} from './font-picker';
 import {uiPalette,UI_COLORS} from './ui-palette';
@@ -91,9 +93,8 @@ export function installEditorUI(api: EditorUIApi) {
   const stickyColors=['#fff9b1','#f5d128','#ffd0aa','#f66060','#ffc7d9','#ef73a1','#a6ccf5','#a77bd4','#6be5d0','#4b83d1','#25b8a2','#93d275','#d5f692','#167d37','#f1f1f1','#1a1a1a'].map(color=>UI_COLORS.find(([value])=>value===color)!);
   function renderStickyPicker(){
     stickyPicker.classList.toggle('sticky-pad',stickyPad);
-    stickyPicker.innerHTML=stickyPad?`<header><button data-sticky-back title="Voltar às cores" aria-label="Voltar às cores">${icon('arrow-left',18)}</button><button data-sticky-close aria-label="Fechar notas adesivas">${icon('close',18)}</button></header><h2>Bloco de notas adesivas</h2><button class="sticky-pad-preview" data-sticky-use style="--sticky-paper:${stickyColor}" aria-label="Usar bloco de notas adesivas" title="Criar notas desta cor"></button>`:`<div class="sticky-colors" role="group" aria-label="Cores de notas adesivas">${stickyColors.map(([color,name])=>`<button type="button" data-sticky-color="${color}" aria-label="Nota adesiva: ${name.toLowerCase()}" title="${name}" aria-pressed="${color===stickyColor}" style="background:${color}"></button>`).join('')}</div><button class="sticky-pad-open" data-sticky-pad>${icon('duplicate',18)}Bloco</button>`;
-    const target=document.querySelector<HTMLElement>('[data-tool="sticky_note"]'),anchor=target?.getBoundingClientRect(),height=stickyPicker.offsetHeight;
-    stickyPicker.style.left=`${Math.min(innerWidth-stickyPicker.offsetWidth-12,Math.max(12,(anchor?.right??64)+10))}px`;stickyPicker.style.top=`${Math.max(68,Math.min(innerHeight-height-58,anchor?.top??120))}px`;
+    stickyPicker.innerHTML=stickyPad?`<header><button data-sticky-back title="Voltar às cores" aria-label="Voltar às cores">${icon('arrow-left',18)}</button><button data-sticky-close aria-label="Fechar notas adesivas">${icon('close',18)}</button></header><h2>Bloco de notas adesivas</h2><button class="sticky-pad-preview" data-sticky-use style="--sticky-paper:${stickyColor}" aria-label="Posicionar bloco de notas" title="Posicionar bloco de notas"></button>`:`<div class="sticky-colors" role="group" aria-label="Cores de notas adesivas">${stickyColors.map(([color,name])=>`<button type="button" data-sticky-color="${color}" aria-label="Nota adesiva: ${name.toLowerCase()}" title="${name}" aria-pressed="${color===stickyColor}" style="background:${color}"></button>`).join('')}</div><button class="sticky-pad-open" data-sticky-pad>${icon('duplicate',18)}Bloco</button>`;
+    positionToolPicker(stickyPicker);
   }
   const chooseSticky=(stack=false)=>{api.setStickyStackMode?.(stack);api.onStyleDefaults?.('sticky_note',{fillColor:stickyColor,fillOpacity:1});api.setTool('sticky_note');};
   stickyPicker.addEventListener('click',event=>{const button=(event.target as Element).closest<HTMLButtonElement>('button');if(!button)return;if(button.dataset.stickyColor){stickyColor=button.dataset.stickyColor;chooseSticky();stickyPicker.hidden=false;renderStickyPicker();}if(button.hasAttribute('data-sticky-pad')){stickyPad=true;renderStickyPicker();}if(button.hasAttribute('data-sticky-back')){stickyPad=false;renderStickyPicker();}if(button.hasAttribute('data-sticky-use')){chooseSticky(true);stickyPicker.hidden=true;}if(button.hasAttribute('data-sticky-close'))stickyPicker.hidden=true;});
@@ -149,7 +150,8 @@ export function installEditorUI(api: EditorUIApi) {
       const c=connectorChoices[Number(b.dataset.connectorChoice)]!;b.setAttribute('aria-pressed',String(c.shape===defaults.shape&&c.arrow===(defaults.style.endCap!=='none')));
     }
   }
-  function positionToolPicker(panel:HTMLElement){const edge=document.getElementById('toolbar')?.getBoundingClientRect().right??68;panel.style.left=`${edge+10}px`;panel.style.maxWidth=`${Math.max(180,innerWidth-edge-22)}px`;}
+  function positionToolPicker(panel:HTMLElement){const toolbar=document.getElementById('toolbar')?.getBoundingClientRect(),button=document.querySelector<HTMLElement>(`[data-tool="${panel===picker?'shape':panel===stickyPicker?'sticky_note':'connector'}"]`)?.getBoundingClientRect();Object.assign(panel.style,{top:`${(toolbar?.bottom??66)+10}px`,transform:'none',maxWidth:`${innerWidth-24}px`,maxHeight:`${Math.max(100,innerHeight-(toolbar?.bottom??66)-28)}px`});panel.style.left=`${Math.max(12,Math.min(innerWidth-panel.offsetWidth-12,button?.left??toolbar?.left??12))}px`;}
+  window.addEventListener('resize',()=>{for(const panel of [picker,connectorPicker,stickyPicker])if(!panel.hidden)positionToolPicker(panel);});
   function chooseConnector(index:number) {
     const choice=connectorChoices[index];if(!choice)return;
     const options={shape:choice.shape,arrow:choice.arrow};rememberConnectorDefaults({shape:choice.shape,style:{endCap:choice.arrow?'arrow':'none'}});api.setConnectorDefault?.(options);api.setTool('connector');closePanels();refresh();
@@ -160,8 +162,8 @@ export function installEditorUI(api: EditorUIApi) {
   picker.addEventListener('click',event=>{
     const b=(event.target as Element).closest<HTMLButtonElement>('button');if(!b)return;
     if(b.hasAttribute('data-close'))picker.hidden=true;
-    if(b.hasAttribute('data-more-shapes')){expandedShapes=true;renderShapes();picker.querySelector<HTMLInputElement>('input')?.focus();}
-    if(b.hasAttribute('data-shapes-back')){expandedShapes=false;renderShapes();}
+    if(b.hasAttribute('data-more-shapes')){expandedShapes=true;renderShapes();positionToolPicker(picker);picker.querySelector<HTMLInputElement>('input')?.focus({preventScroll:true});}
+    if(b.hasAttribute('data-shapes-back')){expandedShapes=false;renderShapes();positionToolPicker(picker);}
     if(b.dataset.pickerLine!==undefined)chooseConnector(Number(b.dataset.pickerLine));
     if(b.dataset.shape){
       const shape=b.dataset.shape as ShapeWidget['shape'];api.setShape(shape);
@@ -174,12 +176,14 @@ export function installEditorUI(api: EditorUIApi) {
   connectorPicker.addEventListener('click',event=>{const b=(event.target as Element).closest<HTMLButtonElement>('button');if(b?.hasAttribute('data-close'))connectorPicker.hidden=true;if(b?.dataset.connectorChoice!==undefined)chooseConnector(Number(b.dataset.connectorChoice));});
 
   function applyStyle(patch: Partial<Style>) {
-    const source=selected().find(w=>!w.locked);if(source)api.onStyleDefaults?.(source.type,patch);
+    const source=selected().find(w=>!w.locked);if(source&&!source.audio)api.onStyleDefaults?.(source.type,patch);
+    if(selected().some(w=>w.audio&&!w.locked))rememberAudioDefaults(patch);
     const commands:Command[]=selected().filter(w=>!w.locked).map(w=>({op:'WIDGET_UPDATE',payload:{id:w.id,patch:{style:{...w.style,...patch}}}}));
     if(commands.length)bus.exec({op:'BATCH',payload:{label:'Formatar seleção',commands}});
   }
   function convertSelectionType(type:'text'|'shape'|'sticky_note',shape:ShapeWidget['shape']='rectangle',stickyRatio=1){
-    const node=selected()[0];if(state.selection.size!==1||!node||node.locked||node.type==='frame'||node.type==='image'||node.audio||node.table||node.checklist)return;
+    stickyRatio=1;
+    const node=selected()[0];if(state.selection.size!==1||!node||node.locked||node.type==='frame'||node.type==='image'||node.type==='sticky_note'&&node.stickyPad||node.audio||node.table||node.checklist)return;
     if(type===node.type&&(type==='text'||type==='shape'&&node.type==='shape'&&node.shape===shape||type==='sticky_note'&&Math.abs(node.width/node.height-stickyRatio)<.000001))return;
     const center={x:node.x+node.width/2,y:node.y+node.height/2};let width=node.width,height=node.height;const style={...node.style};
     if(node.type==='text'&&type!=='text'){width+=20;height+=20;if(style.fillColor==='transparent'||style.fillOpacity===0){style.fillColor=type==='sticky_note'?'#fff9b1':'#ffffff';style.fillOpacity=1;}if(type==='shape'&&style.borderWidth===0){style.borderWidth=1;style.borderScale=1/Math.min(width,height);}}
@@ -194,7 +198,7 @@ export function installEditorUI(api: EditorUIApi) {
     const items=selected().filter(w=>!w.locked);
     if(live&&!borderGesture){finishThicknessGesture();bus.beginTransaction('Espessura da borda');borderGesture=true;}
     else if(!live)bus.beginTransaction('Espessura da borda');
-    const commands:Command[]=items.map(w=>{const patch={borderScale:ratio,borderWidth:ratio*Math.min(w.width,w.height)};api.onStyleDefaults?.(w.type,patch);return {op:'WIDGET_UPDATE',payload:{id:w.id,patch:{style:{...w.style,...patch}}}};});
+    const commands:Command[]=items.map(w=>{const patch={borderScale:ratio,borderWidth:ratio*Math.min(w.width,w.height)};if(w.audio)rememberAudioDefaults(patch);else api.onStyleDefaults?.(w.type,patch);return {op:'WIDGET_UPDATE',payload:{id:w.id,patch:{style:{...w.style,...patch}}}};});
     if(commands.length)bus.exec({op:'BATCH',payload:{label:'Espessura da borda',commands}});
     if(!live)bus.endTransaction();
     const output=properties.querySelector<HTMLOutputElement>('[data-border-output]');if(output)output.textContent=`${formatSize(ratio*100)}%`;
@@ -241,7 +245,7 @@ export function installEditorUI(api: EditorUIApi) {
     }
     if(live&&!opacityGesture){finishThicknessGesture();bus.beginTransaction('Opacidade');opacityGesture=true;}
     if(commands.length){if(!live)bus.beginTransaction('Opacidade');bus.exec({op:'BATCH',payload:{label:'Opacidade',commands}});if(!live)bus.endTransaction();}
-    if(domain==='field'){const w=selected().find(w=>!w.locked);if(w)api.onStyleDefaults?.(w.type,{[field]:value});}
+    if(domain==='field'){const w=selected().find(w=>!w.locked);if(w?.audio)rememberAudioDefaults({[field]:value});else if(w)api.onStyleDefaults?.(w.type,{[field]:value});}
     const output=input.closest('.opacity-control')?.querySelector('output');if(output)output.textContent=`${Math.round(value*100)}%`;
   }
   function canPasteStyle(){return !!copiedStyle&&[...state.selection].some(id=>!itemLocked(state,id)&&(copiedStyle!.kind==='widget'?state.widgets.has(id):copiedStyle!.kind==='connector'?state.connectors.has(id):state.strokes.has(id)));}
@@ -266,9 +270,10 @@ export function installEditorUI(api: EditorUIApi) {
       }
       if(commands.length)bus.exec({op:'BATCH',payload:{label:'Colar estilo',commands}});
       if(commands.length&&appearance.kind==='connector')rememberConnectorDefaults({style:appearance.style});
+      if(commands.length&&appearance.kind==='widget'&&selected().some(w=>w.audio&&!w.locked))rememberAudioDefaults(appearance.style);
     }
     if(name==='clear'){bus.beginTransaction('Limpar conteúdo');for(const w of selected().filter(w=>!w.locked&&w.type!=='image')){
-      const patch=w.type==='frame'?{title:''}:{content:'',...(w.checklist?{checklist:{items:w.checklist.items.map(item=>({...item,text:'',checked:false}))}}:{}),...(w.table?{table:{...w.table,title:'',cells:w.table.cells.map(row=>row.map(()=>''))}}:{})};
+      const patch=w.type==='frame'?{title:''}:{content:'',...(w.checklist?{checklist:{items:w.checklist.items.map(item=>({...item,text:'',checked:false}))}}:{}),...(w.table?{table:{...tableWithGrid(w.table,w.table.cells.length,w.table.cells[0]!.length,''),cells:w.table.cells.map(row=>row.map(()=>''))}}:{})};
       bus.exec({op:'WIDGET_UPDATE',payload:{id:w.id,patch}});
     }bus.endTransaction();}
     if(name==='frame')frameSelection(state,bus);if(name==='copy-image')api.onCopyImage?.();if(name==='exit-group')api.onExitGroup?.();
@@ -292,7 +297,7 @@ export function installEditorUI(api: EditorUIApi) {
       if(commands.length)bus.exec({op:'BATCH',payload:{label:'Adicionar rótulo',commands}});
     }
     if(name==='more-connector-shapes'){closeMenus();expandedShapes=true;shapeTargetSelection=false;connectorShapeTarget=true;renderShapes();picker.hidden=false;positionToolPicker(picker);picker.querySelector<HTMLInputElement>('input')?.focus();}
-    if(name==='more-shapes'){closeMenus();expandedShapes=true;shapeTargetSelection=true;connectorShapeTarget=false;renderShapes();picker.hidden=false;picker.querySelector<HTMLInputElement>('input')?.focus();}
+    if(name==='more-shapes'){closeMenus();expandedShapes=true;shapeTargetSelection=true;connectorShapeTarget=false;renderShapes();picker.hidden=false;positionToolPicker(picker);picker.querySelector<HTMLInputElement>('input')?.focus({preventScroll:true});}
     context.hidden=true;renderKey='';refresh();
   }
 
@@ -325,16 +330,17 @@ export function installEditorUI(api: EditorUIApi) {
     const compact=`<div class="compact-type-controls">${select('field','fontFamily','Família tipográfica',fontOptions,s.fontFamily)}${number('field','fontSize','Tamanho tipográfico',s.fontSize,1)}</div>`;
     const alignments=choice('field','textAlign','Alinhamento do texto',[['left','Esquerda'],['center','Centro'],['right','Direita']],s.textAlign,v=>icon(v==='left'?'align-left':v==='center'?'align-center':'align-right'))+(w.type==='text'?'':'<hr>'+choice('field','textAlignVertical','Alinhamento vertical do texto',[['top','Topo'],['middle','Meio'],['bottom','Base']],s.textAlignVertical,v=>icon(v==='top'?'align-top':v==='middle'?'align-center-y':'align-bottom')));
     const styles=`<div class="icon-choices type-style-choices">${toggle('fontWeight','bold','Negrito','bold')}${toggle('fontStyle','italic','Itálico','italic')}${toggle('textDecoration','underline','Sublinhado','underline')}${toggle('textDecoration','line-through','Riscado','strike')}</div>`;
-    const content=w.type==='frame'?w.title:w.content,listType=content.split('\n').every(line=>/^\s*•\s/.test(line))?'bullet':content.split('\n').every(line=>/^\s*\d+\.\s/.test(line))?'number':'';
-    const lists=`<div class="icon-choices"><button type="button" data-text-list="bullet" aria-label="Lista com marcadores" title="Lista com marcadores" aria-pressed="${listType==='bullet'}">${icon('list')}</button><button type="button" data-text-list="number" aria-label="Lista numerada" title="Lista numerada" aria-pressed="${listType==='number'}">${icon('list-ordered')}</button></div><hr><div class="icon-choices"><button type="button" data-text-list="outdent" aria-label="Diminuir recuo" title="Diminuir recuo">${icon('indent-decrease')}</button><button type="button" data-text-list="indent" aria-label="Aumentar recuo" title="Aumentar recuo">${icon('indent-increase')}</button></div>`;
-    const plain=selected().every(w=>!w.checklist&&!w.table&&!w.audio);
-    return `<select class="toolbar-font" aria-label="Fonte do texto" data-field="fontFamily">${options(fontOptions,s.fontFamily)}</select><input class="toolbar-fontsize" type="number" data-field="fontSize" aria-label="Texto" title="Tamanho do texto" min="1" value="${formatSize(s.fontSize)}">${separator}${menu('text-style','Estilo do texto',icon('bold'),styles)}${menu('text','Texto',icon(s.textAlign==='left'?'align-left':s.textAlign==='center'?'align-center':'align-right'),compact+alignments+(!isFreeText(w)&&plain?'<hr>'+lists:''))}${isFreeText(w)&&plain?menu('text-list','Listas e recuos',icon('list'),lists):''}${state.selection.size===1?button('add-link','Adicionar link','link'):''}${menu('text-color','Cor do texto',icon('text-color'),palette('field','color','Cor do texto',s.color))}${menu('text-highlight','Realce do texto',icon('highlighter'),palette('field','highlightColor','Realce do texto',s.highlightColor??'transparent'))}`;
+    const tasks=selected().every(w=>w.type==='text'||w.type==='shape');
+    const content=w.type==='frame'?w.title:w.content,listType=w.checklist?'check':content.split('\n').every(line=>/^\s*•\s/.test(line))?'bullet':content.split('\n').every(line=>/^\s*\d+\.\s/.test(line))?'number':'';
+    const lists=`<div class="icon-choices"><button type="button" data-text-list="bullet" aria-label="Lista com marcadores" title="Lista com marcadores" aria-pressed="${listType==='bullet'}">${icon('list')}</button><button type="button" data-text-list="number" aria-label="Lista numerada" title="Lista numerada" aria-pressed="${listType==='number'}">${icon('list-ordered')}</button>${tasks?`<button type="button" data-text-list="check" aria-label="Lista de tarefas" title="Lista de tarefas" aria-pressed="${listType==='check'}">${icon('checklist')}</button>`:''}</div><hr><div class="icon-choices"><button type="button" data-text-list="outdent" aria-label="Diminuir recuo" title="Diminuir recuo">${icon('indent-decrease')}</button><button type="button" data-text-list="indent" aria-label="Aumentar recuo" title="Aumentar recuo">${icon('indent-increase')}</button></div>`;
+    const plain=selected().every(w=>!w.table&&!w.audio),free=w.type==='text'&&!w.mind;
+    return `<select class="toolbar-font" aria-label="Fonte do texto" data-field="fontFamily">${options(fontOptions,s.fontFamily)}</select><input class="toolbar-fontsize" type="number" data-field="fontSize" aria-label="Texto" title="Tamanho do texto" min="1" value="${formatSize(s.fontSize)}">${separator}${menu('text-style','Estilo do texto',icon('bold'),styles)}${menu('text','Texto',icon(s.textAlign==='left'?'align-left':s.textAlign==='center'?'align-center':'align-right'),compact+alignments+(!free&&plain?'<hr>'+lists:''))}${free&&plain?menu('text-list','Listas e recuos',icon('list'),lists):''}${state.selection.size===1?button('add-link','Adicionar link','link'):''}${menu('text-color','Cor do texto',icon('text-color'),palette('field','color','Cor do texto',s.color))}${menu('text-highlight','Realce do texto',icon('highlighter'),palette('field','highlightColor','Realce do texto',s.highlightColor??'transparent'))}`;
   }
   function shapeMenu(w:Widget) {
     const shapes=[...MAIN_SHAPES,'speech_bubble','parallelogram','star'] as ShapeWidget['shape'][];
     const symbol=w.type==='shape'?shapeIconSvg(w.shape):icon(w.type==='text'?'text':'sticky');
     const sticky=(ratio:number)=>`<svg width="28" height="24" viewBox="0 0 32 28" aria-hidden="true"><rect x="${ratio===1?5:2}" y="4" width="${ratio===1?22:28}" height="20" fill="#fff5a0" stroke="currentColor" stroke-width="1.2"/><path d="M5 21h22" stroke="#d6b844"/></svg>`;
-    return menu('shape','Alterar tipo',symbol,`<div class="compact-types icon-choices"><button data-convert-type="text" title="Texto livre" aria-label="Converter em texto livre" aria-pressed="${w.type==='text'}">${icon('text')}</button><button data-convert-type="sticky_note" data-sticky-ratio="1" title="Nota adesiva quadrada" aria-label="Converter em nota adesiva quadrada" aria-pressed="${w.type==='sticky_note'&&Math.abs(w.width/w.height-1)<.01}">${sticky(1)}</button><button data-convert-type="sticky_note" data-sticky-ratio="1.6" title="Nota adesiva retangular" aria-label="Converter em nota adesiva retangular" aria-pressed="${w.type==='sticky_note'&&Math.abs(w.width/w.height-1.6)<.01}">${sticky(1.6)}</button>${shapes.map(id=>`<button data-convert-type="shape" data-convert-shape="${id}" aria-label="Converter em ${SHAPE_OPTIONS.find(s=>s.id===id)!.label.toLowerCase()}" title="${SHAPE_OPTIONS.find(s=>s.id===id)!.label}" aria-pressed="${w.type==='shape'&&w.shape===id}">${shapeIconSvg(id)}</button>`).join('')}</div>${menuAction('more-shapes','Mais formas','plus')}`);
+    return menu('shape','Alterar tipo',symbol,`<div class="compact-types icon-choices"><button data-convert-type="text" title="Texto livre" aria-label="Converter em texto livre" aria-pressed="${w.type==='text'}">${icon('text')}</button><button data-convert-type="sticky_note" data-sticky-ratio="1" title="Nota adesiva quadrada" aria-label="Converter em nota adesiva quadrada" aria-pressed="${w.type==='sticky_note'&&Math.abs(w.width/w.height-1)<.01}">${sticky(1)}</button>${shapes.map(id=>`<button data-convert-type="shape" data-convert-shape="${id}" aria-label="Converter em ${SHAPE_OPTIONS.find(s=>s.id===id)!.label.toLowerCase()}" title="${SHAPE_OPTIONS.find(s=>s.id===id)!.label}" aria-pressed="${w.type==='shape'&&w.shape===id}">${shapeIconSvg(id)}</button>`).join('')}</div>${menuAction('more-shapes','Mais formas','plus')}`);
   }
   function sizeMenu(w:Widget) {
     const aspect=isFreeText(w)?'':`<label class="aspect-control"><span>${icon(preserveAspect?'lock':'unlock',16)}Manter proporção</span><input type="checkbox" aria-label="Manter proporção" data-aspect-lock ${preserveAspect?'checked':''}></label>`;
@@ -347,10 +353,11 @@ export function installEditorUI(api: EditorUIApi) {
   }
   function commonMenus(widgets:Widget[]) {
     const ids=[...state.selection],locked=ids.some(id=>itemLocked(state,id)),allLocked=ids.every(id=>itemLocked(state,id)),w=widgets[0];
-    const link=w&&ids.length===1?`<hr><label>Link do objeto<input type="url" aria-label="Link do objeto" data-field="link" placeholder="https://" value="${escapeHtml(w.link)}"></label>`:'';
+    const pad=w?.type==='sticky_note'&&w.stickyPad;
+    const link=w&&ids.length===1&&!pad?`<hr><label>Link do objeto<input type="url" aria-label="Link do objeto" data-field="link" placeholder="https://" value="${escapeHtml(w.link)}"></label>`:'';
     const advanced=(widgets.length||ids.length>1?arrangeMenu(widgets,locked):'')+(w&&ids.length===1?sizeMenu(w):'');
-    const structured=w&&ids.length===1&&w.type!=='image'&&!w.audio?'<hr>'+(w.table?'':menuAction('create-checklist',w.checklist?'Editar lista de tarefas':'Converter em lista de tarefas','checklist','',locked))+(w.checklist?'':menuAction('create-table',w.table?'Editar tabela':'Converter em tabela','grid','',locked)):'';
-    return `${separator}${selectionRoots(state).length>=2?button('group','Agrupar','group',locked?'disabled':''):''}${groupIds().length?button('ungroup','Desagrupar','ungroup',locked?'disabled':''):''}${button('lock',allLocked?'Desbloquear':'Bloquear',allLocked?'unlock':'lock')}${menu('more','Mais',icon('more'),menuAction('duplicate','Duplicar','duplicate','Ctrl+D')+menuAction('copy-image','Copiar como imagem','image')+'<hr>'+advanced+'<hr>'+menuAction('copy-style','Copiar estilo','stroke','',ids.length!==1)+menuAction('paste-style','Colar estilo','fill','',!canPasteStyle()||locked)+structured+(widgets.some(w=>w.type!=='image')?menuAction('clear','Limpar conteúdo','eraser','',locked):'')+link+'<hr>'+menuAction('delete','Excluir','trash','Del',locked))}`;
+    const structured=w&&ids.length===1&&!pad&&(w.type==='text'||w.type==='shape')&&!w.mind&&!w.audio&&!w.checklist?'<hr>'+menuAction('create-table',w.table?'Editar tabela':'Converter em tabela','grid','',locked):'';
+    return `${separator}${selectionRoots(state).length>=2?button('group','Agrupar','group',locked?'disabled':''):''}${groupIds().length?button('ungroup','Desagrupar','ungroup',locked?'disabled':''):''}${button('lock',allLocked?'Desbloquear':'Bloquear',allLocked?'unlock':'lock')}${menu('more','Mais',icon('more'),menuAction('duplicate','Duplicar','duplicate','Ctrl+D')+menuAction('copy-image','Copiar como imagem','image')+'<hr>'+advanced+'<hr>'+menuAction('copy-style','Copiar estilo','stroke','',ids.length!==1)+menuAction('paste-style','Colar estilo','fill','',!canPasteStyle()||locked)+structured+(widgets.some(w=>w.type!=='image'&&!(w.type==='sticky_note'&&w.stickyPad))?menuAction('clear','Limpar conteúdo','eraser','',locked):'')+link+'<hr>'+menuAction('delete','Excluir','trash','Del',locked))}`;
   }
   function connectorToolbar(c:Connector) {
     const capIcon=(cap:string,start=false)=>{
@@ -366,7 +373,7 @@ export function installEditorUI(api: EditorUIApi) {
       const s=c.captionStyles?.[i]??{},side=s.side??'center';
       return `<div class="caption-item"><div class="caption-row"><input type="text" aria-label="Rótulo ${i+1}" data-caption-index="${i}" value="${escapeHtml(caption)}"><input type="number" aria-label="Posição do rótulo ${i+1}" title="Posição ao longo da linha (%)" data-caption-position="${i}" min="2" max="98" value="${Math.round((c.captionPositions?.[i]??(i+1)/(captions.length+1))*100)}"><button data-remove-caption="${i}" aria-label="Excluir rótulo ${i+1}">${icon('close',15)}</button></div><div class="caption-options"><button data-caption-follow="${i}" aria-pressed="${!!s.followPath}" title="Seguir a linha" aria-label="Rótulo ${i+1}: seguir a linha">${icon('connector',18)}</button>${(['above','center','below'] as const).map((sideValue,n)=>`<button data-caption-side="${i}" data-value="${sideValue}" aria-pressed="${side===sideValue}" aria-label="Rótulo ${i+1}: ${['acima da linha','no meio da linha','abaixo da linha'][n]}" title="${['Acima','No meio','Abaixo'][n]}">${icon(['align-top','align-center-y','align-bottom'][n]!,17)}</button>`).join('')}<input type="number" min="0.1" step="any" data-caption-font="${i}" aria-label="Tamanho do rótulo ${i+1}" title="Tamanho do texto" value="${formatSize(s.fontSize??14)}"><input type="color" data-caption-color="${i}" aria-label="Cor do rótulo ${i+1}" title="Cor do texto" value="${validColor(s.color??c.style.strokeColor)}"></div></div>`;
     }).join('')+'<hr>'+menuAction('add-caption','Adicionar rótulo','plus'):'<p class="empty-message">Adicione texto ao longo do conector.</p>'+menuAction('add-caption','Adicionar rótulo','plus'),true);
-    const insertChoices:Array<ConnectorObjectChoice&{label:string}>=[{type:'text',label:'Texto'},{type:'sticky_note',ratio:1,label:'Nota quadrada'},{type:'sticky_note',ratio:1.6,label:'Nota retangular'},...(['rectangle','round_rectangle','circle','triangle','rhombus','speech_bubble','parallelogram','star'] as const).map(shape=>({type:'shape' as const,shape,label:SHAPE_OPTIONS.find(s=>s.id===shape)?.label??shape}))];
+    const insertChoices:Array<ConnectorObjectChoice&{label:string}>=[{type:'text',label:'Texto'},{type:'sticky_note',ratio:1,label:'Nota quadrada'},...(['rectangle','round_rectangle','circle','triangle','rhombus','speech_bubble','parallelogram','star'] as const).map(shape=>({type:'shape' as const,shape,label:SHAPE_OPTIONS.find(s=>s.id===shape)?.label??shape}))];
     const insertion=menu('insert-object','Inserir objeto no conector',icon('shape'),`<div class="connector-insert-grid">${insertChoices.map(choice=>`<button data-connector-insert="${choice.type}" data-shape="${choice.shape??''}" data-ratio="${choice.ratio??1}" aria-label="Inserir ${choice.label.toLowerCase()} no conector" title="${api.canInsertConnectorObject?.(choice)===false?'Aumente o espaço entre os objetos':choice.label}" ${api.canInsertConnectorObject?.(choice)===false?'disabled':''}>${choice.type==='shape'?shapeIconSvg(choice.shape!):icon(choice.type==='text'?'text':'sticky')}</button>`).join('')}</div><hr>${menuAction('more-connector-shapes','Mais formas','plus','',api.canInsertConnectorObject?.()===false)}`);
     return menu('start-cap','Início da linha',capIcon(c.style.startCap??'none',true),choice('connector','startCap','Início da linha',CAP_OPTIONS,c.style.startCap??'none',v=>capIcon(v,true)))+button('reverse-connector','Inverter direção','swap')+menu('end-cap','Fim da linha',capIcon(c.style.endCap??'none'),choice('connector','endCap','Fim da linha',CAP_OPTIONS,c.style.endCap??'none',v=>capIcon(v)))+separator+stroke+menu('line-color','Cor do conector',colorSymbol(c.style.strokeColor),palette('connector','strokeColor','Cor do conector',c.style.strokeColor))+separator+insertion+(api.onNewConnectorCaption?button('add-caption','Adicionar texto ao conector','text'):captions.length?'':labels)+(captions.length?labels:'')+route;
   }
@@ -380,8 +387,15 @@ export function installEditorUI(api: EditorUIApi) {
     if(b.dataset.choice!==undefined){const select=b.closest('.icon-choices')?.querySelector<HTMLSelectElement>('select');if(select){select.value=b.dataset.choice;select.dispatchEvent(new Event('change',{bubbles:true}));}return;}
     if(b.dataset.textList){
       const kind=b.dataset.textList;bus.beginTransaction('Formatar lista');
-      for(const w of selected().filter(w=>!w.locked&&w.type!=='image'&&!w.checklist&&!w.table&&!w.audio)){
-        const content=w.type==='frame'?w.title:w.content,lines=content.split('\n'),active=kind==='bullet'?lines.every(line=>/^\s*•\s/.test(line)):kind==='number'?lines.every(line=>/^\s*\d+\.\s/.test(line)):false,counters=new Map<number,number>();
+      for(const w of selected().filter(w=>!w.locked&&w.type!=='image'&&!w.table&&!w.audio)){
+        const content=w.checklist?w.checklist.items.map(item=>item.text).join('\n'):w.type==='frame'?w.title:w.content,lines=content.split('\n'),active=kind==='bullet'?lines.every(line=>/^\s*•\s/.test(line)):kind==='number'?lines.every(line=>/^\s*\d+\.\s/.test(line)):false,counters=new Map<number,number>();
+        if(kind==='check'){
+          if(w.type!=='text'&&w.type!=='shape')continue;
+          if(w.checklist)bus.exec({op:'WIDGET_UPDATE',payload:{id:w.id,patch:{checklist:undefined,content,style:{...w.style}}}});
+          else{const checklist=checklistFromLines(content.replace(/^([ \t]*)(?:•\s+|\d+\.\s+)/gm,'$1')),plain=checklist.items.map(item=>item.text).join('\n'),natural=w.type==='text'&&!w.mind?naturalText({...w,content:plain}):null;
+            bus.exec({op:'WIDGET_UPDATE',payload:{id:w.id,patch:{checklist,content:plain,...(natural?{width:natural.width+w.style.fontSize*1.4,height:natural.height}:{}),style:{...w.style}}}});
+          }continue;
+        }
         const next=lines.map(line=>{
           if(kind==='indent')return `  ${line}`;if(kind==='outdent')return line.replace(/^(?: {1,2}|\t)/,'');
           const plain=line.replace(/^([ \t]*)(?:•\s+|\d+\.\s+)/,'$1');if(active)return plain;
@@ -389,7 +403,8 @@ export function installEditorUI(api: EditorUIApi) {
           if(kind==='bullet')return `${indent}• ${body}`;
           const level=indent.length,count=(counters.get(level)??0)+1;counters.set(level,count);for(const key of counters.keys())if(key>level)counters.delete(key);return `${indent}${count}. ${body}`;
         }).join('\n');
-        bus.exec({op:'WIDGET_UPDATE',payload:{id:w.id,patch:w.type==='frame'?{title:next}:{content:next}}});
+        const checklist=w.checklist&&(kind==='indent'||kind==='outdent')?{items:w.checklist.items.map((item,index)=>({...item,text:next.split('\n')[index]??''}))}:undefined;
+        bus.exec({op:'WIDGET_UPDATE',payload:{id:w.id,patch:w.type==='frame'?{title:next,checklist}:{content:next,checklist,style:{...w.style}}}});
       }
       bus.endTransaction();renderKey='';refresh();return;
     }
@@ -426,6 +441,8 @@ export function installEditorUI(api: EditorUIApi) {
         for(const w of selected().filter(w=>!w.locked)){
           const patch:Partial<Widget>={[field]:field==='rotation'?value*Math.PI/180:field==='width'||field==='height'?Math.max(1,value):value};
           if(preserveAspect&&(field==='width'||field==='height')){const ratio=w.width/w.height;if(field==='width')patch.height=Math.max(1,value)/ratio;else patch.width=Math.max(1,value)*ratio;}
+          if(w.type==='sticky_note'&&(field==='width'||field==='height'))patch.width=patch.height=Math.max(.000001,value);
+          if((w.table||w.checklist)&&(field==='width'||field==='height'))patch.style=scaledWidgetStyle(w,(patch.width??w.width)/w.width,(patch.height??w.height)/w.height);
           bus.exec({op:'WIDGET_UPDATE',payload:{id:w.id,patch}});
         }bus.endTransaction();
       }
@@ -484,14 +501,15 @@ export function installEditorUI(api: EditorUIApi) {
       const s=strokes[0],width=strokeWidth(s.points);
       html+=menu('stroke','Traço do pincel',icon('brush'),opacity('stroke','opacity','Opacidade do traço',(s.opacity??(s.tool==='highlighter'?.35:1))*100,100)+palette('stroke','color','Cor do traço',s.color)+number('stroke','width','Espessura do traço',width,.5,Infinity,.5));
     }else if(w){
-      if(single&&w.type!=='frame'&&w.type!=='image'&&!w.audio&&!w.table&&!w.checklist)html+=shapeMenu(w)+separator;
+      if(single&&w.type!=='frame'&&w.type!=='image'&&!(w.type==='sticky_note'&&w.stickyPad)&&!w.audio&&!w.table&&!w.checklist)html+=shapeMenu(w)+separator;
       if(allText){
-        html+=textMenus(w)+separator;
+        if(!widgets.every(w=>w.type==='sticky_note'&&w.stickyPad))html+=(widgets.every(w=>w.audio)?menu('audio-ink','Cor do player',icon('audio'),palette('field','color','Cor do player',w.style.color)):textMenus(w))+separator;
         if(widgets.every(w=>w.type==='shape'||w.type==='frame'))html+=borderMenu(w,widgets.every(w=>w.type==='shape'&&w.shape==='round_rectangle'));
         html+=fillMenu(w.style);
       }
       if(single&&w.type==='image'){
-        html+=button('download-image','Baixar original','download')+menu('image','Mascarar imagem',icon(w.maskShape==='ellipse'?'crop-circle':w.maskShape==='round_rectangle'?'corner-radius':'rectangle'),choice('image','maskShape','Máscara da imagem',[['rectangle','Retângulo'],['ellipse','Elipse / círculo'],['round_rectangle','Cantos arredondados']],w.maskShape??'rectangle',value=>icon(value==='ellipse'?'crop-circle':value==='round_rectangle'?'corner-radius':'rectangle')))+button('crop','Recortar','crop')+separator+menu('image-opacity','Opacidade da imagem',icon('opacity'),opacity('image','opacity','Opacidade da imagem',(w.opacity??1)*100,100))+borderMenu(w,w.maskShape==='round_rectangle');
+        const opacityIcon=icon('opacity');
+        html+=button('download-image','Baixar original','download')+button('crop','Recortar','crop')+separator+menu('image-opacity','Opacidade da imagem',opacityIcon,opacity('image','opacity','Opacidade da imagem',(w.opacity??1)*100,100))+borderMenu(w,true);
       }
     }
     html+=commonMenus(widgets);

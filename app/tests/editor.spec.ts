@@ -96,13 +96,13 @@ test('precision and common erasers preserve independent history on sparse geomet
 
 test('all font choices load real local faces and rich formatting round-trips',async({page})=>{
   await blank(page);const result=await page.evaluate(async()=>{const fonts=await import('/src/fonts.ts'),rich=await import('/src/core/richtext.ts');await Promise.all(fonts.FONT_OPTIONS.map(f=>fonts.loadBoardFont(f.family)));const parsed=rich.parseRich(rich.fromHtml('<strong><em><u>Ação</u></em></strong>'));return {count:fonts.FONT_OPTIONS.length,loaded:fonts.FONT_OPTIONS.every(f=>document.fonts.check('18px "'+f.family+'"')),run:parsed[0][0]};});
-  expect(result.count).toBe(25);expect(result.loaded).toBe(true);expect(result.run).toMatchObject({text:'Ação',bold:true,italic:true,underline:true});
+  expect(result.count).toBe(43);expect(result.loaded).toBe(true);expect(result.run).toMatchObject({text:'Ação',bold:true,italic:true,underline:true});
 });
 
 test('image originals, masks, legacy flips and crop survive reload and export',async({page})=>{
   await blank(page);const original=await importImage(page);
-  await page.getByRole('button',{name:'Recortar',exact:true}).click();await page.getByRole('button',{name:'4:3',exact:true}).click();await page.getByRole('button',{name:'Aplicar recorte',exact:true}).click();
-  await menu(page,'image');await page.getByRole('button',{name:'Máscara da imagem: elipse / círculo',exact:true}).click();await page.evaluate(()=>{const b=window.__board,id=[...b.state.selection][0];b.bus.exec({op:'WIDGET_UPDATE',payload:{id,patch:{flipX:true}}});});
+  await page.getByRole('button',{name:'Recortar',exact:true}).click();await page.getByRole('combobox',{name:'Formato do recorte',exact:true}).selectOption('landscape');await page.getByRole('button',{name:'Aplicar recorte',exact:true}).click();
+  await page.getByRole('button',{name:'Recortar',exact:true}).click();await page.getByRole('combobox',{name:'Formato do recorte',exact:true}).selectOption('circle');await page.keyboard.press('Enter');await page.evaluate(()=>{const b=window.__board,id=[...b.state.selection][0];b.bus.exec({op:'WIDGET_UPDATE',payload:{id,patch:{flipX:true}}});});
   await menu(page,'image-opacity');await number(page,'Opacidade da imagem','65');
   await page.evaluate(()=>window.__board.saveNow());await page.reload();await page.waitForFunction(()=>window.__board?.booted);
   const result=await page.evaluate(async()=>{const s=window.__board.state,w=[...s.widgets.values()].find(w=>w.type==='image'),{boardToSvg}=await import('/src/core/exportSvg.ts');return {w,svg:boardToSvg(s)};});
@@ -111,9 +111,9 @@ test('image originals, masks, legacy flips and crop survive reload and export',a
 
 test('circular image crop and custom borders use the actual menus, undo and SVG',async({page})=>{
   await blank(page);const original=await importImage(page,1600,900);
-  await page.getByRole('button',{name:'Recortar',exact:true}).click();await page.getByRole('dialog',{name:'Recortar imagem'}).getByRole('button',{name:'Círculo',exact:true}).click();
-  const crop=page.getByRole('dialog',{name:'Recortar imagem'});await expect(crop.getByRole('button',{name:'Círculo',exact:true})).toHaveAttribute('aria-pressed','true');await expect(crop.getByRole('button',{name:'4:3',exact:true})).toBeDisabled();
-  const region=crop.locator('[data-region]'),box=await region.boundingBox();expect(box.width).toBeCloseTo(box.height,1);
+  await page.getByRole('button',{name:'Recortar',exact:true}).click();const crop=page.getByRole('region',{name:'Recortar imagem no quadro',exact:true});await crop.getByRole('combobox',{name:'Formato do recorte',exact:true}).selectOption('circle');
+  await expect(crop.getByRole('combobox',{name:'Formato do recorte',exact:true})).toHaveValue('circle');await expect(page.getByRole('dialog',{name:'Recortar imagem',exact:true})).toHaveCount(0);
+  const region=crop.locator('[data-image-crop-frame]'),box=await region.boundingBox();expect(box.width).toBeCloseTo(box.height,1);
   await page.mouse.move(box.x+box.width/2,box.y+box.height/2);await page.mouse.down();await page.mouse.move(box.x+box.width/2+35,box.y+box.height/2,{steps:8});await page.mouse.up();
   const handle=await crop.locator('[data-crop-handle="se"]').boundingBox();await page.mouse.move(handle.x+5,handle.y+5);await page.mouse.down();await page.mouse.move(handle.x-35,handle.y-35,{steps:8});await page.mouse.up();
   const resized=await region.boundingBox();expect(resized.width).toBeCloseTo(resized.height,1);await page.screenshot({path:'../work/v5-ui-circle-crop.png'});
@@ -154,7 +154,7 @@ test('mixed groups expose applicable menus and support editing a member then ung
   await expect(toolbar.locator('details[data-menu="fill"],details[data-menu="text"],details[data-menu="border"],details[data-menu="image"]')).toHaveCount(0);await expect(toolbar.getByRole('button',{name:'Agrupar',exact:true})).toBeVisible();
   await toolbar.getByRole('button',{name:'Agrupar',exact:true}).click();expect(await page.evaluate(()=>window.__board.state.groups.size)).toBe(1);
   await page.mouse.dblclick(380,505);await expect(toolbar.getByRole('button',{name:'Sair do grupo',exact:true})).toBeVisible();
-  await page.mouse.click(800,500);await expect(toolbar.locator('details[data-menu="image"]')).toBeVisible();await expect(toolbar.locator('details[data-menu="text"],details[data-menu="fill"]')).toHaveCount(0);
+  await page.mouse.click(800,500);await expect(toolbar.getByRole('button',{name:'Recortar',exact:true})).toBeVisible();await expect(toolbar.locator('details[data-menu="image"],details[data-menu="text"],details[data-menu="fill"]')).toHaveCount(0);
   await toolbar.getByRole('button',{name:'Sair do grupo',exact:true}).click();await toolbar.getByRole('button',{name:'Desagrupar',exact:true}).click();expect(await page.evaluate(()=>window.__board.state.groups.size)).toBe(0);
   await page.keyboard.press('Control+z');expect(await page.evaluate(()=>window.__board.state.groups.size)).toBe(1);
 });

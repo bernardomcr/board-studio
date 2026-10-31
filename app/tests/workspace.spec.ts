@@ -16,7 +16,7 @@ async function source(page){await page.evaluate(async()=>{const b=window.__board
 test('selection toggles navigation without a separate hand button and returns to moving objects',async({page})=>{
   await blank(page);await source(page);
   const select=page.getByRole('button',{name:'Selecionar',exact:true});
-  await expect(page.getByRole('button',{name:'Início',exact:true})).toHaveCSS('background-color','rgb(255, 255, 255)');
+  const surface=await page.locator('#board-title').evaluate(el=>getComputedStyle(el).backgroundColor);await expect(page.getByRole('button',{name:'Início',exact:true})).toHaveCSS('background-color',surface);
   await expect(page.locator('[data-tool="hand"]')).toHaveCount(0);await expect(select).toHaveAttribute('aria-pressed','true');
   await select.click();await expect(select).toHaveAttribute('aria-pressed','false');await expect(page.locator('#app canvas')).toHaveCSS('cursor','grab');
   await expect(page.getByRole('toolbar',{name:'Propriedades da seleção'})).toBeHidden();

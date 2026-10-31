@@ -6,7 +6,7 @@
     <title>Board Studio</title>
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
     <style>
-      /* ---- design tokens extraídos do Miro (library-design-tokens) ---- */
+      /* Core layout tokens; the Studio identity and themes live in interface.css. */
       :root {
         --blue-500: #3859ff;
         --blue-450: #5b76fe;
@@ -72,7 +72,7 @@
       .chip button:disabled:hover { background: transparent; }
       #board-title { display:block;line-height:40px;max-width:min(360px,35vw);overflow:hidden;white-space:nowrap;text-overflow:ellipsis;user-select:text; }
 
-      /* ---------------- toolbar esquerda ---------------- */
+      /* ---------------- toolbar ---------------- */
       #toolbar {
         position: fixed; top: 50%; left: var(--sp-150); transform: translateY(-50%);
         display: flex; flex-direction: column; gap: 2px;

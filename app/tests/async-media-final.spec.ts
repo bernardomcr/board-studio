@@ -123,28 +123,28 @@ test('background import cannot replace another board background after a pending 
   await reopenOrigin(page);expect(await page.evaluate(()=>window.__board.state.background.image)).toBeUndefined();
 });
 
-test('crop apply cannot change an image locked while the crop dialog was open',async({page})=>{
+test('inline crop discards its draft when the image becomes locked',async({page})=>{
   await blank(page);const original=await imported(page);
   await page.getByRole('button',{name:'Recortar',exact:true}).click();
-  const crop=page.getByRole('dialog',{name:'Recortar imagem',exact:true});
-  await crop.getByRole('button',{name:'1:1',exact:true}).click();
+  const crop=page.getByRole('region',{name:'Recortar imagem no quadro',exact:true});
+  await crop.getByRole('combobox',{name:'Formato do recorte',exact:true}).selectOption('square');
   await page.evaluate(id=>window.__board.bus.exec({op:'WIDGET_UPDATE',payload:{id,patch:{locked:true}}}),original.id);
-  const before=await snapshot(page);await crop.getByRole('button',{name:'Aplicar recorte',exact:true}).click();
+  const before=await snapshot(page);
   await expect(crop).toHaveCount(0);expect(await snapshot(page)).toBe(before);
 });
 
-test('crop apply cannot change a same-ID image after real hash navigation to another board',async({page})=>{
+test('inline crop cannot change a same-ID image after real hash navigation to another board',async({page})=>{
   await blank(page);const original=await imported(page);await another(page);
   await page.evaluate(original=>window.__board.bus.exec({op:'WIDGET_CREATE',payload:original}),original);
   const destinationHash=new URL(page.url()).hash;await reopenOrigin(page);
   await page.evaluate(id=>window.__board.bus.exec({op:'SELECTION_SET',payload:[id]}),original.id);
   await page.getByRole('button',{name:'Recortar',exact:true}).click();
-  const crop=page.getByRole('dialog',{name:'Recortar imagem',exact:true});
-  await crop.getByRole('button',{name:'1:1',exact:true}).click();
-  // Use the production hashchange navigation, leaving the original modal alive.
+  const crop=page.getByRole('region',{name:'Recortar imagem no quadro',exact:true});
+  await crop.getByRole('combobox',{name:'Formato do recorte',exact:true}).selectOption('square');
+  // Real hashchange must cancel the original draft, even with a matching ID.
   await page.evaluate(hash=>location.hash=hash,destinationHash);
   await expect(page.getByRole('textbox',{name:'Nome do board',exact:true})).toHaveText('Destino');
-  const before=await snapshot(page);await crop.getByRole('button',{name:'Aplicar recorte',exact:true}).click();
+  const before=await snapshot(page);
   await expect(crop).toHaveCount(0);expect(await snapshot(page)).toBe(before);
 });
 

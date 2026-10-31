@@ -24,6 +24,7 @@ import {mindNodeHidden,mindConnectorHidden,mindTopicText} from './mindmap';
 import {audioCardSvg} from '../render/audio-paint';
 import {structuredSvgContent} from '../render/structured-text';
 import {measureTextRun,textFontScale,wrapRichLines,fitBoxText,isBoxText,isFreeText,trimTextLine} from './text-layout';
+import {stickyPadPaper} from './stickies';
 
 const escapeXml = (value: string): string =>
   value
@@ -92,8 +93,8 @@ function widgetSvg(w: Widget): string {
 
   if (w.type === "image") {
     const crop = w.crop ?? { x: 0, y: 0, width: 1, height: 1 };
-    const width = w.width / Math.max(.0001, crop.width);
-    const height = w.height / Math.max(.0001, crop.height);
+    const width = w.width / (crop.width>0?crop.width:1);
+    const height = w.height / (crop.height>0?crop.height:1);
     // Clip the photograph, then draw its independently styled outline above it.
     const clipId='image-mask-'+w.id.replace(/[^a-zA-Z0-9_-]/g,'');
     const radius=Math.max(0,Math.min(w.style.cornerRadius??Math.min(w.width,w.height)*.12,Math.min(w.width,w.height)/2));
@@ -113,7 +114,7 @@ function widgetSvg(w: Widget): string {
   }
 
   const body = backgroundSvg(w);
-  const text = structuredSvgContent(w)??textSvg(w);
+  const text = w.type==='sticky_note'&&w.stickyPad?'':structuredSvgContent(w)??textSvg(w);
   return `<g transform="${transform}">${body}${text}</g>`;
 }
 
@@ -135,7 +136,8 @@ function backgroundOuterSvg(w: Widget): string {
   if(w.type==='text'&&style.fillColor==='transparent'&&style.borderWidth<=0)return '';
 
   if (w.type === "sticky_note") {
-    return `<rect width="${round(w.width)}" height="${round(w.height)}" rx="2" fill="${fill}" fill-opacity="${style.fillOpacity}"/>`;
+    if(w.stickyPad){const paper=stickyPadPaper(w),step=w.height*.025,rect=(y:number)=>`<rect x="${round(paper.x)}" y="${round(y)}" width="${round(paper.width)}" height="${round(paper.height)}" fill="${fill}" fill-opacity="${style.fillOpacity}"/>`;return `<g data-sticky-pad="true">${[3,2,1].map(layer=>rect(step*layer)+`<rect x="${round(paper.x)}" y="${round(paper.height+step*(layer-1))}" width="${round(paper.width)}" height="${round(step)}" fill="#000" fill-opacity=".08"/>`).join('')}${rect(0)}<rect x="${round(w.width*.3)}" y="${round(w.height*.942)}" width="${round(w.width*.4)}" height="${round(w.height*.045)}" rx="${round(w.height*.02)}" fill="#000" fill-opacity=".18"/>${[0,1,2,3,4].map(dot=>`<circle cx="${round(w.width*(.4+dot*.05))}" cy="${round(w.height*.964)}" r="${round(w.width*.006)}" fill="#fff" fill-opacity=".65"/>`).join('')}</g>`;}
+    return `<rect width="${round(w.width)}" height="${round(w.height)}" rx="${round(Math.min(w.width,w.height)/80)}" fill="${fill}" fill-opacity="${style.fillOpacity}"/>`;
   }
 
   const originalShape = w.type === "shape" ? w.shape : "rectangle";

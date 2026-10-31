@@ -69,6 +69,8 @@ export interface BaseWidget {
 
 export interface StickyWidget extends BaseWidget {
   type: "sticky_note";
+  /** Physical stack: dragging its front paper dispenses an independent note. */
+  stickyPad?:boolean;
   content: string;
   shape: "square";
 }
@@ -281,11 +283,12 @@ export function createWidget(type: WidgetType, opts: CreateOpts): Widget {
   };
 
   if (type === "sticky_note") {
+    const side=opts.width??opts.height??160;
     return {
       ...base,
       type,
-      width: opts.width ?? 160,
-      height: opts.height ?? 160,
+      width: side,
+      height: side,
       content: opts.content ?? "",
       shape: "square",
       style: { ...STICKY_STYLE, fillColor: opts.fillColor ?? STICKY_STYLE.fillColor },

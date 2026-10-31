@@ -13,7 +13,7 @@ import {
   type Endpoint,
 } from "./connectors";
 import {inheritStrokeFittingCache,type Stroke} from "./strokes";
-import { DEFAULT_BACKGROUND, validateBoardBackground, type BoardBackground, type BackgroundPatch } from "./background";
+import { DEFAULT_BACKGROUND, validateBoardBackground, copyBoardBackground, type BoardBackground, type BackgroundPatch } from "./background";
 import { isFreeText,naturalText } from './text-layout';
 import { relativeBorderScale } from './style-scale';
 import { mindLayoutCommands, mindSubtree } from './mindmap';
@@ -72,6 +72,7 @@ export interface ExecutedCommand {
  * last complete redo. Creates, selections and additive moves are barriers. */
 function mergeAbsoluteUpdates(before:Command,after:Command):Command|null {
   if(before.op!==after.op)return null;
+  if(after.op==='BACKGROUND_UPDATE')return {op:'BACKGROUND_UPDATE',payload:{...(before.payload as BackgroundPatch),...(after.payload as BackgroundPatch)}};
   if(after.op==='BATCH'){
     const a=before.payload as {label?:string;commands:Command[]},b=after.payload as {label?:string;commands:Command[]};
     if(a.commands.length!==b.commands.length||!b.commands.length)return null;
@@ -173,10 +174,15 @@ export class CommandBus {
 
     switch (command.op) {
       case "BACKGROUND_UPDATE": {
-        const before = s.background ? structuredClone(s.background) : undefined;
-        const after = validateBoardBackground({ ...(s.background ?? DEFAULT_BACKGROUND), ...(command.payload as BackgroundPatch) });
+        const before = s.background ? copyBoardBackground(s.background) : undefined;
+        const base=s.background??DEFAULT_BACKGROUND,patch=command.payload as BackgroundPatch;
+        // A color/grid gesture keeps the already validated picture. Rechecking
+        // its entire embedded source for every slider sample is unnecessary.
+        const sameImage=patch?.image===undefined;
+        const after = validateBoardBackground({ ...base, ...patch,...(sameImage?{image:undefined}:{}) });
         if (!after) return null;
-        return { command, label: "Alterar fundo", redo: () => { s.background = structuredClone(after); }, undo: () => { if (before) s.background = structuredClone(before); else delete s.background; } };
+        if(sameImage&&base.image)after.image={...base.image};
+        return { command, label: "Alterar fundo", redo: () => { s.background = copyBoardBackground(after); }, undo: () => { if (before) s.background = copyBoardBackground(before); else delete s.background; } };
       }
       case "BATCH": {
         const { label } = command.payload as { label?: string; commands: Command[] };

@@ -61,14 +61,18 @@ test('inserted free text resolves its natural size before collision checks at ev
  for(const item of cases){expect(item.screenFont).toBeCloseTo(24,7);expect(item.sourceFont).toBe(1e50);expect(item.weight).toBe('bold');expect(item.screenWidth).toBeLessThanOrEqual(100);expect(item.screenHeight).toBeLessThanOrEqual(80);expect(item.overlaps).toBe(false);}
 });
 
+test('legacy rectangular note insertion choices resolve the same square geometry that the factory publishes',async({page})=>{
+ await blank(page);const result=await page.evaluate(async()=>{const b=window.__board,{connectorInsertion}=await import('/src/core/connector-insert.ts');b.bus.exec({op:'CONNECTOR_CREATE',payload:{id:'square-line',type:'connector',shape:'straight',start:{kind:'point',x:-500,y:0},end:{kind:'point',x:500,y:0},style:{strokeColor:'#222222',strokeWidth:2,startCap:'none',endCap:'none'},z:0}});const insertion=connectorInsertion(b.state,b.state.connectors.get('square-line'),{type:'sticky_note',ratio:1.6},1);if(!insertion)throw Error('Note must fit in empty span');b.bus.exec({op:'BATCH',payload:{commands:insertion.commands}});const w=b.state.widgets.get(insertion.widgetId);return {square:w.width===w.height,center:{x:w.x+w.width/2,y:w.y+w.height/2},connectors:b.state.connectors.size};});expect(result).toEqual({square:true,center:{x:0,y:0},connectors:2});
+});
+
 test('connector menu inserts an editable note and More shapes can insert a nonprimary shape',async({page})=>{
  await blank(page);
  await page.evaluate(()=>{const b=window.__board;b.bus.exec({op:'CONNECTOR_CREATE',payload:{id:'menu-line',type:'connector',shape:'straight',start:{kind:'point',x:250,y:320},end:{kind:'point',x:1000,y:320},style:{strokeColor:'#167654',strokeWidth:3,startCap:'none',endCap:'none'},z:0}});b.bus.exec({op:'SELECTION_SET',payload:['menu-line']});});
  await page.getByRole('button',{name:'Inserir objeto no conector',exact:true}).click();
- await page.getByRole('button',{name:'Inserir nota retangular no conector',exact:true}).click();
+ await page.getByRole('button',{name:'Inserir nota quadrada no conector',exact:true}).click();
  await expect(page.locator('#inline-editor')).toBeVisible();await page.locator('#inline-editor').fill('Etapa intermediária');await page.locator('#inline-editor').press('Control+Enter');
  const note=await page.evaluate(()=>{const b=window.__board,w=[...b.state.widgets.values()][0];return {type:w.type,ratio:w.width/w.height,content:w.content,selection:[...b.state.selection],lines:b.state.connectors.size,id:w.id};});
- expect(note.type).toBe('sticky_note');expect(note.ratio).toBeCloseTo(1.6);expect(note.content).toContain('Etapa intermediária');expect(note.lines).toBe(2);expect(note.selection).toEqual([note.id]);
+ expect(note.type).toBe('sticky_note');expect(note.ratio).toBeCloseTo(1);expect(note.content).toContain('Etapa intermediária');expect(note.lines).toBe(2);expect(note.selection).toEqual([note.id]);
  await page.keyboard.press('Control+z');await page.keyboard.press('Control+z');
  await expect.poll(()=>page.evaluate(()=>window.__board.state.widgets.size)).toBe(0);
  await page.getByRole('button',{name:'Inserir objeto no conector',exact:true}).click();await page.locator('details[data-menu="insert-object"]').getByRole('button',{name:'Mais formas',exact:true}).click();

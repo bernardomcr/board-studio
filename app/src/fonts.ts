@@ -4,9 +4,9 @@ import type {Connector} from './core/connectors';
 
 export const fontFamilyName=(family:string):string=>family.split(',')[0]!.trim().replace(/^['"]|['"]$/g,'');
 /** Every entity that owns text participates in loading and portable exports. */
-export function boardFontFamilies(widgets:Iterable<Pick<Widget,'style'>>,connectors?:Iterable<Pick<Connector,'captions'|'captionStyles'>>):string[]{
+export function boardFontFamilies(widgets:Iterable<Pick<Widget,'style'|'audio'>>,connectors?:Iterable<Pick<Connector,'captions'|'captionStyles'>>):string[]{
  const families=new Set<string>();
- for(const widget of widgets)families.add(widget.style.fontFamily);
+ for(const widget of widgets){families.add(widget.style.fontFamily);if(widget.audio)families.add('Inter');}
  for(const connector of connectors??[])for(let i=0;i<(connector.captions?.length??0);i++)families.add(connector.captionStyles?.[i]?.fontFamily??'Arial, sans-serif');
  return [...families];
 }
@@ -162,6 +162,114 @@ export const FONT_OPTIONS:readonly BoardFont[]=[
     "label": "Fredoka One",
     "category": "display",
     "slug": "fredokaone"
+  },
+  {
+    "family": "Bungee",
+    "label": "Bungee",
+    "category": "display",
+    "slug": "bungee"
+  },
+  {
+    "family": "Bungee Shade",
+    "label": "Bungee Shade",
+    "category": "display",
+    "slug": "bungeeshade"
+  },
+  {
+    "family": "Monoton",
+    "label": "Monoton",
+    "category": "display",
+    "slug": "monoton"
+  },
+  {
+    "family": "Righteous",
+    "label": "Righteous",
+    "category": "display",
+    "slug": "righteous"
+  },
+  {
+    "family": "Black Ops One",
+    "label": "Black Ops One",
+    "category": "display",
+    "slug": "blackopsone"
+  },
+  {
+    "family": "Cinzel Decorative",
+    "label": "Cinzel Decorative",
+    "category": "display",
+    "slug": "cinzeldecorative"
+  },
+  {
+    "family": "Rubik Glitch",
+    "label": "Rubik Glitch",
+    "category": "display",
+    "slug": "rubikglitch"
+  },
+  {
+    "family": "Rubik Doodle Shadow",
+    "label": "Rubik Doodle Shadow",
+    "category": "display",
+    "slug": "rubikdoodleshadow"
+  },
+  {
+    "family": "Rubik Scribble",
+    "label": "Rubik Scribble",
+    "category": "display",
+    "slug": "rubikscribble"
+  },
+  {
+    "family": "Creepster",
+    "label": "Creepster",
+    "category": "display",
+    "slug": "creepster"
+  },
+  {
+    "family": "Press Start 2P",
+    "label": "Press Start 2P",
+    "category": "display",
+    "slug": "pressstart2p"
+  },
+  {
+    "family": "Fredericka the Great",
+    "label": "Fredericka the Great",
+    "category": "display",
+    "slug": "frederickathegreat"
+  },
+  {
+    "family": "Pacifico",
+    "label": "Pacifico",
+    "category": "handwriting",
+    "slug": "pacifico"
+  },
+  {
+    "family": "Lobster",
+    "label": "Lobster",
+    "category": "handwriting",
+    "slug": "lobster"
+  },
+  {
+    "family": "Dancing Script",
+    "label": "Dancing Script",
+    "category": "handwriting",
+    "slug": "dancingscript"
+  },
+  {
+    "family": "Amatic SC",
+    "label": "Amatic SC",
+    "category": "handwriting",
+    "slug": "amaticsc"
+  },
+  {
+    "family": "Special Elite",
+    "label": "Special Elite",
+    "category": "display",
+    "slug": "specialelite"
+  },
+  {
+    "family": "Satisfy",
+    "label": "Satisfy",
+    "category": "handwriting",
+    "slug": "satisfy"
   }
 ];
 export const UI_FONT='Noto Sans';

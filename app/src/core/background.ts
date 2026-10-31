@@ -13,6 +13,8 @@ export interface BoardBackground {
   grid: boolean;
   /** Omitted retains the original dotted grid. grid=false hides every pattern. */
   gridStyle?:'dots'|'lines'|'crosses';
+  /** Visual intensity only; it never changes alignment or object coordinates. */
+  gridOpacity?:number;
   image?: BackgroundImage;
 }
 
@@ -22,11 +24,18 @@ export interface BackgroundPatch {
   grid?: boolean;
   /** null restores the legacy dotted default without adding a stored property. */
   gridStyle?:'dots'|'lines'|'crosses'|null;
+  gridOpacity?:number;
   image?: BackgroundImage | null;
 }
 
 export const DEFAULT_BACKGROUND: Readonly<BoardBackground> = Object.freeze({ color: '#fbfaf7', grid: true });
 export const BACKGROUND_MAX_BYTES = 25 * 1024 * 1024;
+
+/** Scenery contains primitives and one flat image descriptor. Copy its mutable
+ * records while sharing the immutable source string across history frames. */
+export function copyBoardBackground(background:BoardBackground):BoardBackground{
+  return {...background,...(background.image?{image:{...background.image}}:{})};
+}
 
 /** Accept only bounded local raster data; SVG and network URLs are never scenery. */
 export function validateBoardBackground(value: unknown): BoardBackground | null {
@@ -34,6 +43,7 @@ export function validateBoardBackground(value: unknown): BoardBackground | null 
   const background = value as Record<string, unknown>;
   if (typeof background.color !== 'string' || !/^#[0-9a-f]{6}$/i.test(background.color) || typeof background.grid !== 'boolean') return null;
   const result: BoardBackground = { color: background.color.toLowerCase(), grid: background.grid };
+  if(background.gridOpacity!==undefined){if(typeof background.gridOpacity!=='number'||!Number.isFinite(background.gridOpacity)||background.gridOpacity<0||background.gridOpacity>1)return null;result.gridOpacity=background.gridOpacity;}
   if(background.gridStyle!==undefined&&background.gridStyle!==null){if(!['dots','lines','crosses'].includes(background.gridStyle as string))return null;result.gridStyle=background.gridStyle as BoardBackground['gridStyle'];}
   if (background.image === undefined || background.image === null) return result;
   if (typeof background.image !== 'object' || Array.isArray(background.image)) return null;

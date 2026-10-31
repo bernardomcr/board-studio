@@ -15,7 +15,8 @@ export function creationWidgetAt(widget:Widget,start:Vec,current:Vec,zoom:number
   const base=widget.type==='text'?naturalText(widget):widget;
   if(base.type==='text')return {...base,x:start.x,y:start.y};
   if(Math.hypot(current.x-start.x,current.y-start.y)*zoom<=5)return {...base,x:start.x-base.width/2,y:start.y-base.height/2};
-  const next={...base,x:Math.min(start.x,current.x),y:Math.min(start.y,current.y),width:Math.max(12,Math.abs(current.x-start.x)),height:Math.max(12,Math.abs(current.y-start.y))};
+  const square=base.type==='sticky_note',side=Math.max(.001,Math.max(Math.abs(current.x-start.x),Math.abs(current.y-start.y)));
+  const next={...base,x:square?(current.x<start.x?start.x-side:start.x):Math.min(start.x,current.x),y:square?(current.y<start.y?start.y-side:start.y):Math.min(start.y,current.y),width:square?side:Math.max(12,Math.abs(current.x-start.x)),height:square?side:Math.max(12,Math.abs(current.y-start.y))};
   return next;
 }
 
@@ -39,11 +40,11 @@ export function installCreationPreview(api:CreationPreviewOptions){
   }
   function clear(){layer.visible=false;current=undefined;}
   function refresh(){
-    if(!isCreationTool(api.getTool())||api.temporaryHand()||document.body.classList.contains('home-visible')){clear();return;}
-    if(api.getGesture().kind==='create'&&current)show(current);else clear();
+    if(!isCreationTool(api.getTool())&&api.getGesture().kind!=='sticky-pull'||api.temporaryHand()||document.body.classList.contains('home-visible')){clear();return;}
+    if(['create','sticky-pull'].includes(api.getGesture().kind)&&current)show(current);else clear();
   }
-  function move(){if(api.getGesture().kind!=='create')refresh();}
-  function leave(){if(api.getGesture().kind!=='create')clear();}
+  function move(){if(!['create','sticky-pull'].includes(api.getGesture().kind))refresh();}
+  function leave(){if(!['create','sticky-pull'].includes(api.getGesture().kind))clear();}
   const keyboard=()=>queueMicrotask(refresh);
   api.canvas.addEventListener('pointermove',move);api.canvas.addEventListener('pointerenter',move);api.canvas.addEventListener('pointerleave',leave);
   // A creation preview exists only while the pointer gesture is in progress.

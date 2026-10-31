@@ -76,14 +76,14 @@ export function validateBoardFile(value: unknown): BoardFile {
         borderOpacity:style.borderOpacity===undefined?undefined:number(style.borderOpacity,0,1),cornerRadius:style.cornerRadius===undefined?undefined:number(style.cornerRadius,0),
         borderScale:style.borderScale===undefined?undefined:number(style.borderScale,0),borderWidth: number(style.borderWidth, 0), borderStyle: one(style.borderStyle, ["normal", "dotted", "dashed"] as const),
         fontWeight:style.fontWeight===undefined?undefined:one(style.fontWeight,["normal","bold"] as const),fontStyle:style.fontStyle===undefined?undefined:one(style.fontStyle,["normal","italic"] as const),textDecoration:style.textDecoration===undefined?undefined:one(style.textDecoration,["none","underline","line-through"] as const),highlightColor:style.highlightColor===undefined?undefined:color(style.highlightColor),
-        color: color(style.color), fontFamily: str(style.fontFamily, 256), fontSize: number(style.fontSize, .1),
+        color: color(style.color), fontFamily: str(style.fontFamily, 256), fontSize: number(style.fontSize, Number.MIN_VALUE),
         textAlign: one(style.textAlign, ["left", "center", "right"] as const), textAlignVertical: one(style.textAlignVertical, ["top", "middle", "bottom"] as const),
       },
     };
     if (type === "frame") return { ...base, type, title: str(w.title) };
     const content = str(w.content);
     if (type === "shape") return { ...base, type, content, shape: one(w.shape, SHAPE_OPTIONS.map(option => option.id)) };
-    if (type === "sticky_note") return { ...base, type, content, shape: one(w.shape, ["square"] as const) };
+    if (type === "sticky_note") return { ...base, type, content, shape: one(w.shape, ["square"] as const),...(w.stickyPad===undefined?{}:{stickyPad:!!w.stickyPad}) };
     if (type === "text") return { ...base, type, content,...(w.textSizing==='natural'?{textSizing:'natural' as const}:{}) };
     const src = str(w.src, 50000000);
     if (!/^data:image\/(png|jpeg|webp|gif|avif|bmp);base64,[A-Za-z0-9+/=\s]+$/.test(src)) fail("A imagem deve estar incorporada no arquivo.");
@@ -145,9 +145,9 @@ export function validateBoardFile(value: unknown): BoardFile {
     camera: { x: number(camera.x), y: number(camera.y), scale: number(camera.scale, MIN_SCALE, MAX_SCALE) } };
 }
 
-export function installProjectFiles(api: { state: BoardState; bus: CommandBus; camera: Camera; sync(): void;getBoardKey?():string|null }) {
+export function installProjectFiles(api: { state: BoardState; bus: CommandBus; camera: Camera; sync(): void;getBoardKey?():string|null;beforeOperation?():void }) {
   const { state, bus, camera } = api;
-  const container = document.createElement("div"); container.className = "chip";
+  const container = document.createElement("div"); container.className = "chip";container.id='project-file-controls';
   const status = document.createElement("span"); status.setAttribute("role", "status"); status.style.cssText = "font-size:12px;color:#73726c;max-width:200px";
   const saveButton = document.createElement("button"), openButton = document.createElement("button");
   saveButton.textContent = "Salvar arquivo"; openButton.textContent = "Abrir arquivo";
@@ -157,6 +157,7 @@ export function installProjectFiles(api: { state: BoardState; bus: CommandBus; c
   container.append(saveButton, openButton, status); document.getElementById("topbar")?.append(container);
   const input = document.createElement("input"); input.type = "file"; input.accept = ".board.json,.json,application/json"; input.hidden = true; document.body.append(input);
   saveButton.onclick = () => {
+    api.beforeOperation?.();
     const data: BoardFile = { format: "local-board", version: 1,layerOrderVersion:1, title: document.getElementById("board-title")?.textContent ?? "Board",
       background:state.background??{...DEFAULT_BACKGROUND},userFonts:snapshotUserFonts(boardFontFamilies(state.widgets.values(),state.connectors.values())),
       widgets: [...state.widgets.values()], order: [...state.order], connectors: [...state.connectors.values()], connectorOrder: [...state.connectorOrder],
@@ -166,7 +167,7 @@ export function installProjectFiles(api: { state: BoardState; bus: CommandBus; c
     setTimeout(() => URL.revokeObjectURL(url), 1000); status.textContent = "Arquivo gerado";
   };
   let destinationKey:string|null|undefined;
-  openButton.onclick = () => {destinationKey=api.getBoardKey?.();input.click();};
+  openButton.onclick = () => {api.beforeOperation?.();destinationKey=api.getBoardKey?.();input.click();};
   input.onchange = async () => {
     const file = input.files?.[0],boardKey=destinationKey; input.value = ""; if (!file) return;
     try {
@@ -177,6 +178,7 @@ export function installProjectFiles(api: { state: BoardState; bus: CommandBus; c
       await Promise.all(boardFontFamilies(data.widgets,data.connectors).map(loadBoardFont));
       if(api.getBoardKey&&boardKey!==api.getBoardKey()){status.textContent='O board mudou. Abra o arquivo novamente no destino desejado.';return;}
       // Nothing changes until every field and reference has passed validation.
+      api.beforeOperation?.();
       const widgetById = new Map(data.widgets.map(w => [w.id, w]));
       const connectorById = new Map(data.connectors.map(c => [c.id, c]));
       const strokeById = new Map(data.strokes.map(s => [s.id, s]));

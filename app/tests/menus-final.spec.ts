@@ -107,16 +107,15 @@ test('all-shapes search and results remain reachable in a small viewport at two 
   await picker.getByRole('textbox',{name:'Buscar formas',exact:true}).fill('Losango');await picker.getByRole('button',{name:'Losango',exact:true}).click();await expect(picker).toBeHidden();
 });
 
-test('an image crop modal owns keyboard focus and blocks the global object-link shortcut',async({page})=>{
+test('inline image crop blocks object shortcuts and cancels when keyboard focus leaves',async({page})=>{
   await blank(page);await page.evaluate(async()=>{
     const b=window.__board,{createWidget}=await import('/src/core/model.ts'),canvas=document.createElement('canvas');canvas.width=240;canvas.height=120;canvas.getContext('2d').fillRect(0,0,240,120);
     b.bus.exec({op:'WIDGET_CREATE',payload:{...createWidget('shape',{x:-120,y:-60,width:240,height:120}),id:'image',type:'image',src:canvas.toDataURL(),naturalWidth:240,naturalHeight:120,content:''}});
     b.bus.exec({op:'SELECTION_SET',payload:['image']});
   });
-  await page.getByRole('button',{name:'Recortar',exact:true}).click();const crop=page.getByRole('dialog',{name:'Recortar imagem',exact:true});await expect(crop).toBeVisible();
+  await page.getByRole('button',{name:'Recortar',exact:true}).click();const crop=page.getByRole('region',{name:'Recortar imagem no quadro',exact:true});await expect(crop).toBeVisible();
   await page.keyboard.press('Control+k');await expect(page.locator('#link-dialog')).not.toHaveAttribute('open','');
-  await crop.getByRole('button',{name:'Aplicar recorte',exact:true}).focus();await page.keyboard.press('Tab');expect(await crop.evaluate(el=>el.contains(document.activeElement))).toBe(true);
-  await page.keyboard.press('Escape');await expect(crop).toHaveCount(0);
+  await crop.getByRole('button',{name:'Aplicar recorte',exact:true}).focus();await page.keyboard.press('Tab');await expect(crop).toHaveCount(0);expect(await page.evaluate(()=>window.__board.state.widgets.get('image').crop)).toBeUndefined();
 });
 
 test('keyboard reorder and group shortcuts preserve the locks enforced by their menus',async({page})=>{

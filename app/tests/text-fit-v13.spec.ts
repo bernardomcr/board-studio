@@ -10,7 +10,7 @@ function fits(r){expect(r.runs.length).toBeGreaterThan(0);for(const n of r.runs)
 for(const type of ['shape','sticky_note'])test(`${type} shrinks overflowing text, remembers the preferred font and grows back when the fixed box is enlarged`,async({page})=>{
  await blank(page);await box(page,type);const small=await inspect(page);fits(small);expect(small.w.style.fontSize).toBe(64);expect(small.fit.font).toBeLessThan(20);expect(small.fit.font).toBeGreaterThan(1);
  await page.evaluate(()=>{const b=window.__board;b.bus.exec({op:'WIDGET_UPDATE',payload:{id:'fit-box',patch:{width:2000,height:2000}}});});const large=await inspect(page);fits(large);expect(large.w.style.fontSize).toBe(64);expect(large.fit.font).toBe(64);
- await page.keyboard.press('Escape');await page.keyboard.press('Control+z');const undone=await inspect(page);fits(undone);expect(undone.w.width).toBe(220);expect(undone.w.height).toBe(180);expect(undone.fit.font).toBe(small.fit.font);await page.keyboard.press('Control+Shift+z');expect((await inspect(page)).fit.font).toBe(64);
+ await page.keyboard.press('Escape');await page.keyboard.press('Control+z');const undone=await inspect(page);fits(undone);expect(undone.w.width).toBe(220);expect(undone.w.height).toBe(type==='sticky_note'?220:180);expect(undone.fit.font).toBe(small.fit.font);await page.keyboard.press('Control+Shift+z');expect((await inspect(page)).fit.font).toBe(64);
  await page.evaluate(()=>window.__board.saveNow());await page.reload();await page.waitForFunction(()=>window.__board?.booted);const restored=await inspect(page);fits(restored);expect(restored.w.style.fontSize).toBe(64);expect(restored.fit.font).toBe(64);expect(restored.w).toMatchObject({width:2000,height:2000});
 });
 

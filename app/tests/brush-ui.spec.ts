@@ -42,8 +42,10 @@ test('brush precision and Alt-left size/opacity gestures use the visible tip and
 
 test('a long real brush gesture has identical opacity at crossings and frozen-preview chunk joins before and after release',async({page})=>{
   await blank(page);await brush(page);
-  await page.mouse.move(800,500);await page.mouse.down();
-  for(let i=1;i<=420;i++){const t=i/420*Math.PI*2;await page.mouse.move(800+200*Math.sin(t),500+140*Math.sin(2*t));}
+  // The tool options now open under the top strip. Begin the native stroke in
+  // the free canvas area; it still crosses itself and every preview chunk.
+  await page.mouse.move(600,700);await page.mouse.down();
+  for(let i=1;i<=420;i++){const t=i/420*Math.PI*2;await page.mouse.move(600+200*Math.sin(t),700+140*Math.sin(2*t));}
   await settled(page);
   const live=await page.evaluate(async()=>{
     const b=window.__board,g=b.gesture(),layer=b.app.stage.children.find(n=>n.label==='brush-preview');
@@ -51,7 +53,7 @@ test('a long real brush gesture has identical opacity at crossings and frozen-pr
     const points=[g.points[0],g.points[128],g.points[256],g.points[384]],samples=points.map(p=>b.camera.worldToScreen(p));
     const canvas=b.app.renderer.extract.canvas({target:layer,frame:new b.app.screen.constructor(0,0,1600,1000),resolution:1}),ctx=canvas.getContext('2d');
     const alpha=p=>ctx.getImageData(Math.round(p.x),Math.round(p.y),1,1).data[3];
-    return {chunks:layer.children.length,expectedChunks:1+Math.max(0,Math.floor((g.points.length-1-PRECISION_LOOKAHEAD)/128)),count:g.points.length,samples,alphas:samples.map(alpha),holes:[alpha({x:650,y:500}),alpha({x:950,y:500})]};
+    return {chunks:layer.children.length,expectedChunks:1+Math.max(0,Math.floor((g.points.length-1-PRECISION_LOOKAHEAD)/128)),count:g.points.length,samples,alphas:samples.map(alpha),holes:[alpha({x:450,y:700}),alpha({x:750,y:700})]};
   });
   expect(live.count).toBeGreaterThan(400);expect(live.chunks).toBe(live.expectedChunks);expect(live.chunks).toBeGreaterThan(1);expect(live.holes).toEqual([0,0]);
   for(const alpha of live.alphas){expect(alpha).toBeGreaterThanOrEqual(100);expect(alpha).toBeLessThanOrEqual(104);}
@@ -60,7 +62,7 @@ test('a long real brush gesture has identical opacity at crossings and frozen-pr
     const b=window.__board,s=[...b.state.strokes.values()][0],node=b.app.stage.children[1].children[3].children.find(n=>n.label===s.id),bounds=node.getLocalBounds();
     const canvas=b.app.renderer.extract.canvas({target:node,frame:new b.app.screen.constructor(bounds.minX,bounds.minY,bounds.width,bounds.height),resolution:1}),ctx=canvas.getContext('2d');
     const alpha=p=>{const w=b.camera.screenToWorld(p);return ctx.getImageData(Math.round(w.x-bounds.minX),Math.round(w.y-bounds.minY),1,1).data[3];};
-    return {tool:s.tool,opacity:s.opacity,precision:s.precision,alphas:samples.map(alpha),holes:[alpha({x:650,y:500}),alpha({x:950,y:500})],previewEmpty:b.app.stage.children.find(n=>n.label==='brush-preview').children.every(n=>!n.context?.instructions?.length)};
+    return {tool:s.tool,opacity:s.opacity,precision:s.precision,alphas:samples.map(alpha),holes:[alpha({x:450,y:700}),alpha({x:750,y:700})],previewEmpty:b.app.stage.children.find(n=>n.label==='brush-preview').children.every(n=>!n.context?.instructions?.length)};
   },live.samples);
   expect(final).toMatchObject({tool:'brush',opacity:.4,precision:true,holes:[0,0],previewEmpty:true});
   for(let i=0;i<final.alphas.length;i++)expect(Math.abs(final.alphas[i]-live.alphas[i])).toBeLessThanOrEqual(2);

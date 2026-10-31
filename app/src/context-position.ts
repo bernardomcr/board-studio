@@ -14,8 +14,8 @@ export function positionContextPanel(panel:HTMLElement,state:BoardState,camera:C
   const left=Math.max(limits.left,Math.min(limits.right-width,(a.x+b.x-width)/2));
   // Leave the rotation handle and connection dots outside the toolbar hit area.
   const handles=[...state.selection].some(id=>state.widgets.has(id))||state.selection.size>1;
-  let top=a.y-height-(handles?60:20);if(top<68)top=b.y+(handles?36:20);
-  top=Math.max(68,Math.min(innerHeight-height-54,top));
+  let top=a.y-height-(handles?60:20);if(top<limits.top)top=b.y+(handles?36:20);
+  top=Math.max(limits.top,Math.min(innerHeight-height-54,top));
   panel.style.left=`${left}px`;panel.style.top=`${top}px`;panel.style.transform='none';
   panel.dataset.below=String(top>b.y);
   for(const menu of panel.querySelectorAll<HTMLDetailsElement>('details[open]'))positionPopover(menu);
@@ -24,8 +24,11 @@ export function positionContextPanel(panel:HTMLElement,state:BoardState,camera:C
 function workspaceLimits(){
   const layers=document.getElementById('layers-panel');
   const layerLeft=layers&&!layers.hidden&&document.body.classList.contains('layers-open')?layers.getBoundingClientRect().left-12:innerWidth-12;
-  const left=innerWidth>600?(innerHeight<=460?98:78):12;
-  return {left,right:Math.max(left+220,layerLeft)};
+  const tools=document.getElementById('toolbar'),rect=tools?.getBoundingClientRect();
+  const horizontal=!!rect&&rect.width>rect.height;
+  const left=horizontal?12:innerWidth>600?(innerHeight<=460?98:78):12;
+  const top=horizontal?Math.max(68,rect!.bottom+10):68;
+  return {left,right:Math.max(left+220,layerLeft),top};
 }
 
 function positionPopover(menu:HTMLDetailsElement){
@@ -39,14 +42,14 @@ function positionPopover(menu:HTMLDetailsElement){
     const parent=parentMenu.querySelector<HTMLElement>(':scope > .property-popover')?.getBoundingClientRect();
     const left=parent&&parent.right+width+8<=limits.right?parent.right+8:parent?parent.left-width-8:anchor.left;
     body.style.left=`${Math.max(limits.left,Math.min(limits.right-width,left))}px`;
-    body.style.top=`${Math.max(68,Math.min(innerHeight-height-12,anchor.top))}px`;return;
+    body.style.top=`${Math.max(limits.top,Math.min(innerHeight-height-12,anchor.top))}px`;return;
   }
   const left=Math.max(limits.left,Math.min(limits.right-width,anchor.left));
-  const below=innerHeight-anchor.bottom-24,above=anchor.top-80;
+  const below=innerHeight-anchor.bottom-24,above=anchor.top-limits.top-12;
   let top=anchor.bottom+10;
   if(height>below&&above>below){body.style.maxHeight=`${Math.max(120,above)}px`;top=anchor.top-Math.min(height,above)-10;}
   else body.style.maxHeight=`${Math.max(120,below)}px`;
-  body.style.left=`${left}px`;body.style.top=`${Math.max(68,Math.min(innerHeight-body.offsetHeight-12,top))}px`;
+  body.style.left=`${left}px`;body.style.top=`${Math.max(limits.top,Math.min(innerHeight-body.offsetHeight-12,top))}px`;
 }
 
 /** Attach behaviour to menus that are authored in their final DOM structure. */

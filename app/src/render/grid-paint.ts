@@ -11,7 +11,7 @@ export function boardGridPattern(background?:BoardBackground):GridPattern{return
 export function paintBoardGrid(g:Graphics,camera:Camera,background?:BoardBackground):void{
  const pattern=boardGridPattern(background);g.clear();g.label='board-grid';if(pattern==='none')return;
  const cell=gridStateAt(camera.scale).visualCell,step=cell*camera.scale;if(step<6)return;
- const alpha=Math.min(1,Math.max(.18,step/24)),rect=camera.visibleWorldRect(),startX=Math.floor(rect.minX/cell)*cell,startY=Math.floor(rect.minY/cell)*cell;
+ const alpha=Math.min(1,Math.max(.18,step/24))*(background?.gridOpacity??1),rect=camera.visibleWorldRect(),startX=Math.floor(rect.minX/cell)*cell,startY=Math.floor(rect.minY/cell)*cell;
  const columns=Math.min(2000,Math.ceil(camera.width/step)+2),rows=Math.min(2000,Math.ceil(camera.height/step)+2);
  const rgb=Number.parseInt((background?.color??DEFAULT_BACKGROUND.color).slice(1),16),dark=((rgb>>16)*.2126+((rgb>>8)&255)*.7152+(rgb&255)*.0722)<110,color=dark?0x767b88:0xc9c8c3;
  if(pattern==='lines'){

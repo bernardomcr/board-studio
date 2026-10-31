@@ -19,7 +19,7 @@ function insertionLayout(state:BoardState,line:Connector,choice:ConnectorObjectC
   let width=length/3,height=length/3;
   for(const w of ends)if(w.type!=='text'){width=Math.min(width,w.width);height=Math.min(height,w.height);}
   if(choice.type==='sticky_note'){
-    const ratio=choice.ratio===1.6?1.6:1,unit=Math.min(width/ratio,height);width=unit*ratio;height=unit;
+    const unit=Math.min(width,height);width=unit;height=unit;
   }
   const center=connectorPointAt(geometry,.5),source=line.start.kind==='anchor'?state.widgets.get(line.start.widgetId):undefined;
   let text:TextWidget|undefined;

@@ -6,6 +6,7 @@ import {widgetAABB,widgetCorners,worldToLocal,type Vec} from './core/geometry';
 import {visibleFrames,frameForWidget} from './core/frame-visibility';
 import {MAX_AUDIO_BYTES,createAudioWidget,audioWaveform,formatAudioTime,type AudioMetadata} from './core/audio';
 import {audioCardLayout} from './render/audio-paint';
+import {audioDefaults} from './audio-defaults';
 import {icon} from './icons';
 
 interface AudioAPI{
@@ -78,7 +79,7 @@ export function installAudio(api:AudioAPI){
   const picker=document.createElement('input');picker.type='file';picker.accept='audio/*,.mp3,.wav,.ogg,.opus,.webm,.m4a,.aac,.flac';picker.multiple=true;picker.hidden=true;document.body.append(picker);
   function notice(text:string){const toast=document.createElement('div');toast.setAttribute('role','status');toast.textContent=text;toast.style.cssText='position:fixed;bottom:64px;left:50%;transform:translateX(-50%);max-width:min(600px,90vw);padding:12px 16px;background:#303746;color:#fff;border-radius:8px;z-index:110;font:13px Inter,Segoe UI,sans-serif';document.body.append(toast);setTimeout(()=>toast.remove(),6500);}
   function closeMenu(){popup?.remove();popup=null;}
-  function insert(metadata:AudioMetadata,point:Vec){const node=createAudioWidget(metadata,point);bus.exec({op:'BATCH',payload:{label:'Inserir áudio',commands:[{op:'WIDGET_CREATE',payload:node},{op:'SELECTION_SET',payload:[node.id]}]}});api.setTool?.('select');refresh();api.onChange?.();return node.id;}
+  function insert(metadata:AudioMetadata,point:Vec){const node=createAudioWidget(metadata,point);node.style={...node.style,...audioDefaults()};bus.exec({op:'BATCH',payload:{label:'Inserir áudio',commands:[{op:'WIDGET_CREATE',payload:node},{op:'SELECTION_SET',payload:[node.id]}]}});api.setTool?.('select');refresh();api.onChange?.();return node.id;}
   async function importFiles(files:FileList|File[]){
     closeMenu();const boardKey=api.getBoardKey?.(),point={x:camera.x,y:camera.y};let index=0;
     for(const file of Array.from(files))try{
@@ -92,9 +93,11 @@ export function installAudio(api:AudioAPI){
   function openMenu(){
     if(popup){closeMenu();return;}const menu=document.createElement('div');popup=menu;menu.id='audio-create-menu';menu.setAttribute('role','menu');menu.setAttribute('aria-label','Adicionar áudio');
     menu.innerHTML=`<button type="button" role="menuitem" data-record>${icon('mic',18)}Gravar áudio</button><button type="button" role="menuitem" data-import>${icon('upload',18)}Importar áudio</button>`;
-    document.body.append(menu);const rect=toolbarButton.getBoundingClientRect();menu.style.left=`${Math.min(innerWidth-226,rect.right+10)}px`;menu.style.top=`${Math.max(70,Math.min(innerHeight-menu.offsetHeight-16,rect.top))}px`;
+    document.body.append(menu);positionMenu();
     menu.querySelector<HTMLButtonElement>('[data-record]')!.onclick=()=>openRecorder();menu.querySelector<HTMLButtonElement>('[data-import]')!.onclick=()=>{closeMenu();picker.click();};
   }
+  function positionMenu(){if(!popup)return;const rect=toolbarButton.getBoundingClientRect();popup.style.left=`${Math.max(12,Math.min(innerWidth-226,rect.left))}px`;popup.style.top=`${Math.max(12,Math.min(innerHeight-popup.offsetHeight-16,rect.bottom+10))}px`;}
+  window.addEventListener('resize',positionMenu);
   toolbarButton.addEventListener('click',event=>{event.stopPropagation();openMenu();});
   document.addEventListener('pointerdown',event=>{if(popup&&!popup.contains(event.target as Node)&&!toolbarButton.contains(event.target as Node))closeMenu();});
   window.addEventListener('keydown',event=>{if(event.key==='Escape')closeMenu();});
@@ -142,6 +145,7 @@ export function installAudio(api:AudioAPI){
       Object.assign(player.download.style,{left:'94%',top:'18%',width:`${Math.max(18,16*layout.unit*scale)}px`,height:`${Math.max(18,16*layout.unit*scale)}px`});
       Object.assign(player.seek.style,{left:`${layout.waveX/node.width*100}%`,top:`${(layout.waveY-layout.waveHeight)/node.height*100}%`,width:`${layout.waveWidth/node.width*100}%`,height:`${layout.waveHeight*2*scale}px`});
       Object.assign(player.line.style,{top:`${(layout.waveY-layout.waveHeight)/node.height*100}%`,height:`${layout.waveHeight*2*scale}px`});
+      Object.assign(player.time.style,{fontFamily:'Inter, sans-serif',fontSize:`${10*layout.unit*scale}px`,padding:`0 ${3*layout.unit*scale}px`});
       // Controls follow frame clipping just like the card's canvas content.
       const frame=frameForWidget(node,frames);
       player.element.style.clipPath=frame?`polygon(${widgetCorners(frame).map(point=>{const local=worldToLocal(node,point);return `${local.x*scale}px ${local.y*scale}px`;}).join(',')})`:'';

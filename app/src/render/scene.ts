@@ -27,6 +27,7 @@ import {renderStructuredText} from './structured-text';
 import {textFontScale,wrapRichLines,fitBoxText,isBoxText,isFreeText,trimTextLine,TEXT_DESIGN_SIZE,type BoxTextFit} from '../core/text-layout';
 import {LargeTextRaster,needsLargeTextRaster} from './large-text';
 import {screenStroke,screenDot,screenStrokeKey} from './screen-coverage';
+import {stickyPadPaper} from '../core/stickies';
 
 interface Node {
   container: Container;
@@ -50,6 +51,16 @@ interface Node {
 }
 interface ConnectorLabelNode {container:Container;textLayer:Container;text:Text;caption?:CaptionLayout;largeText?:LargeTextRaster}
 function destroyConnectorLabel(node:ConnectorLabelNode):void{node.largeText?.destroy();destroyDisplayTree(node.container);}
+const TRANSFORM_FIELDS=new Set(['x','y','rotation','z','name','hidden','locked']);
+/** Commands replace widget records while moving. Its local paint does not
+ * change when only the transform/metadata changed; preserve text measurements,
+ * structured cells and display lists instead of visiting them for each frame. */
+function sameLocalPaint(a:Widget,b:Widget):boolean{
+  const before=a as unknown as Record<string,unknown>,after=b as unknown as Record<string,unknown>;
+  for(const key in before)if(!TRANSFORM_FIELDS.has(key)&&before[key]!==after[key])return false;
+  for(const key in after)if(!TRANSFORM_FIELDS.has(key)&&before[key]!==after[key])return false;
+  return true;
+}
 
 export class BoardScene {
   /** quadros ficam abaixo de traços/conectores/objetos */
@@ -294,6 +305,12 @@ export class BoardScene {
     // Oversized text is the exception: its viewport tiles follow the camera.
     const dpr=globalThis.devicePixelRatio||1;
     if(node.paintedWidget===w&&node.paintedZoom===this.zoom&&node.paintedDpr===dpr&&!node.largeText)return;
+    const previous=node.paintedWidget;
+    if(previous&&node.paintedZoom===this.zoom&&node.paintedDpr===dpr&&!node.largeText&&sameLocalPaint(previous,w)){
+      node.paintedWidget=w;if(node.layoutWidget===previous)node.layoutWidget=w;
+      node.container.position.set(w.x+w.width/2,w.y+w.height/2);node.container.rotation=w.rotation;
+      return;
+    }
     node.paintedWidget=w;node.paintedZoom=this.zoom;node.paintedDpr=dpr;
     if(node.type!==w.type){
       node.largeText?.destroy();node.largeText=undefined;node.boxFit=undefined;
@@ -307,7 +324,7 @@ export class BoardScene {
     container.rotation = w.rotation;
 
     const style=w.style;
-    const backgroundSig=[w.type,w.width,w.height,w.type==='shape'?w.shape:'',style.fillColor,style.fillOpacity,style.borderColor,style.borderWidth,style.borderScale,style.borderStyle,style.borderOpacity,style.cornerRadius,audioSignature(w),Math.round(Math.log2(Math.max(.02,this.zoom))*2),screenStrokeKey(borderWidthFor(w),this.zoom,dpr),w.audio?this.zoom*dpr:0].join('|');
+    const backgroundSig=[w.type,w.width,w.height,w.type==='shape'?w.shape:'',w.type==='sticky_note'&&!!w.stickyPad,style.fillColor,style.fillOpacity,style.borderColor,style.borderWidth,style.borderScale,style.borderStyle,style.borderOpacity,style.cornerRadius,audioSignature(w),Math.round(Math.log2(Math.max(.02,this.zoom))*2),screenStrokeKey(borderWidthFor(w),this.zoom,dpr),w.audio?this.zoom*dpr:0].join('|');
     if(node.backgroundSig!==backgroundSig){node.backgroundSig=backgroundSig;graphics.clear();drawBackground(graphics,w,this.zoom);}
 
     this.layoutText(node, w);
@@ -326,8 +343,9 @@ export class BoardScene {
     const coverage=w.checklist||w.table||node.decorations?this.zoom*(globalThis.devicePixelRatio||1):0;
     if(node.layoutWidget===w&&node.layoutDensity===this.textResolution&&node.layoutCoverage===coverage)return;
     node.layoutWidget=w;node.layoutDensity=this.textResolution;node.layoutCoverage=coverage;
-    if(w.audio){node.sig='';paintAudioLabels(node.text,w,this.textResolution);return;}
-    if(renderStructuredText(node.text,w,this.textResolution,this.zoom)){node.sig='';return;}
+    if(w.type==='sticky_note'&&w.stickyPad){this.links.delete(w.id);for(const child of node.text.removeChildren())destroyDisplayTree(child);node.sig='sticky-pad';return;}
+    if(w.audio){this.links.delete(w.id);node.sig='';paintAudioLabels(node.text,w,this.textResolution);return;}
+    if(renderStructuredText(node.text,w,this.textResolution,this.zoom)){this.links.delete(w.id);node.sig='';return;}
     for (const child of node.text.children) if (child instanceof Text){const resolution=fitTextResolution(child,this.textResolution*Math.abs(child.scale.x));if(child.resolution!==resolution)child.resolution=resolution;}
     const content = w.type === "frame" ? w.title : mindTopicText(w);
     node.decorations=!!w.style.textDecoration&&w.style.textDecoration!=='none'||content.includes('__')||content.includes('~~');
@@ -527,8 +545,17 @@ function drawBackground(g: Graphics, w: Widget, zoom: number): void {
   }
 
   if (w.type === "sticky_note") {
-    g.roundRect(1, 2, w.width, w.height, 2).fill({ color: 0x000000, alpha: 0.08 });
-    g.roundRect(0, 0, w.width, w.height, 2).fill({ color: style.fillColor, alpha: style.fillOpacity });
+    if(w.stickyPad){
+      const paper=stickyPadPaper(w),step=w.height*.025;
+      for(let layer=3;layer>=1;layer--){g.rect(paper.x,paper.y+step*layer,paper.width,paper.height).fill({color:style.fillColor,alpha:style.fillOpacity});g.rect(paper.x,paper.y+paper.height+step*(layer-1),paper.width,step).fill({color:0x000000,alpha:.08});}
+      g.rect(paper.x,paper.y,paper.width,paper.height).fill({color:style.fillColor,alpha:style.fillOpacity});
+      g.roundRect(w.width*.3,w.height*.942,w.width*.4,w.height*.045,w.height*.02).fill({color:0x000000,alpha:.18});
+      for(let dot=0;dot<5;dot++)g.circle(w.width*(.4+dot*.05),w.height*.964,w.width*.006).fill({color:0xffffff,alpha:.65});
+      return;
+    }
+    const radius=Math.min(w.width,w.height)/80;
+    g.roundRect(w.width/160,w.height/80,w.width,w.height,radius).fill({ color: 0x000000, alpha: 0.08 });
+    g.roundRect(0,0,w.width,w.height,radius).fill({ color: style.fillColor, alpha: style.fillOpacity });
     return;
   }
 

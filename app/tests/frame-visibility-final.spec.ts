@@ -61,14 +61,16 @@ for(const scale of [.02,1,20])test(`smallest-frame ownership updates when a nest
 
 async function partialFixture(page,kind){
  return page.evaluate(async kind=>{
-  const b=window.__board,{createWidget}=await import('/src/core/model.ts');
-  // The rotated left edge crosses x+y=-138. The checkbox center (-143,0)
-  // is clipped, but its lower-right corner remains visibly inside the frame.
-  const center={x:-138+Math.SQRT1_2*500,y:Math.SQRT1_2*500};
+  const b=window.__board,{createWidget}=await import('/src/core/model.ts'),{checklistLayout}=await import('/src/core/structured-text.ts');
+  const widget={...createWidget('shape',{x:-170,y:-50,width:340,height:100}),id:kind,...(kind==='checklist'?{checklist:{items:[{id:'partial-task',text:'Partial task',checked:false}]}}:{table:{title:'',headerColor:'#4262ff',cells:[['Editable']]}})};
+  // Cut the actual marker diagonally, independently of the marker's styling.
+  const box=kind==='checklist'?checklistLayout(widget)[0].box:null;
+  const edge=box?widget.x+box.x+box.width/2+widget.y+box.y+box.height/2+2:-138;
+  const center={x:edge+Math.SQRT1_2*500,y:Math.SQRT1_2*500};
   b.bus.exec({op:'WIDGET_CREATE',payload:{...createWidget('shape',{x:-800,y:-300,width:1000,height:600}),id:'behind'}});
   b.bus.exec({op:'WIDGET_CREATE',payload:{...createWidget('frame',{x:center.x-500,y:center.y-500,width:1000,height:1000}),id:'frame',rotation:Math.PI/4}});
-  b.bus.exec({op:'WIDGET_CREATE',payload:{...createWidget('shape',{x:-170,y:-50,width:340,height:100}),id:kind,...(kind==='checklist'?{checklist:{items:[{id:'partial-task',text:'Partial task',checked:false}]}}:{table:{title:'',headerColor:'#4262ff',cells:[['Editable']]}})}});
-  return {hidden:b.camera.worldToScreen({x:-152,y:-9}),visible:b.camera.worldToScreen({x:-134,y:9}),cell:b.camera.worldToScreen({x:0,y:0})};
+  b.bus.exec({op:'WIDGET_CREATE',payload:widget});
+  return {hidden:b.camera.worldToScreen(box?{x:widget.x+box.x+1,y:widget.y+box.y+1}:{x:-152,y:-9}),visible:b.camera.worldToScreen(box?{x:widget.x+box.x+box.width-1,y:widget.y+box.y+box.height-1}:{x:-134,y:9}),cell:b.camera.worldToScreen({x:0,y:0})};
  },kind);
 }
 
