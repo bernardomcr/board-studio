@@ -1,8 +1,7 @@
 /**
  * Export SVG: serializa o MODELO (não o canvas), então o resultado é vetorial e editável.
  *
- * Texto é aproximado: quebra por largura estimada (0,55 × fontSize por caractere),
- * com runs aplicados via <tspan>.
+ * Texto usa métricas da fonte em escala de desenho estável, com runs via <tspan>.
  */
 
 import { connectorSvgContent } from "../render/connector-paint";
@@ -14,7 +13,7 @@ import {
 } from "./connectors";
 import { unionRect, widgetAABB, pointInWidget, widgetCorners, type Rect } from "./geometry";
 import type { Style, Widget } from "./model";
-import { parseRich } from "./richtext";
+import type { Run } from "./richtext";
 import { strokeBounds, type Stroke } from "./strokes";
 import {strokeSvgContent} from '../render/stroke-paint';
 import { borderPattern, canonicalShape, shapeDetails, shapePolygon } from "./shapes";
@@ -23,6 +22,7 @@ import {resolvedWidgetStyle} from './style-scale';
 import {mindNodeHidden,mindConnectorHidden,mindTopicText} from './mindmap';
 import {audioCardSvg} from '../render/audio-paint';
 import {structuredSvgContent} from '../render/structured-text';
+import {measureTextRun,textFontScale,wrapRichLines} from './text-layout';
 
 const escapeXml = (value: string): string =>
   value
@@ -131,7 +131,7 @@ function backgroundOuterSvg(w: Widget): string {
   const cx = w.width / 2;
   const cy = w.height / 2;
 
-  if (w.type === "text") return "";
+  if(w.type==='text'&&style.fillColor==='transparent'&&style.borderWidth<=0)return '';
 
   if (w.type === "sticky_note") {
     return `<rect width="${round(w.width)}" height="${round(w.height)}" rx="2" fill="${fill}" fill-opacity="${style.fillOpacity}"/>`;
@@ -171,17 +171,19 @@ function borderSvg(style: Style): string {
 
 function textSvg(w: Widget): string {
   const content=w.type==='frame'?'':mindTopicText(w);if(!content.trim())return '';
-  const pad=w.type==='text'?0:10,maxWidth=w.type==='text'?Infinity:Math.max(10,w.width-pad*2),lineHeight=w.style.fontSize*1.35;
+  const {fontSize,scale}=textFontScale(w.style.fontSize),style={...w.style,fontSize},width=w.width/scale,height=w.height/scale;
+  const pad=(w.type==='text'?0:10)/scale,maxWidth=w.type==='text'?Infinity:Math.max(10/scale,width-pad*2),lineHeight=fontSize*1.35;
   const anchor=w.style.textAlign==='center'?'middle':w.style.textAlign==='right'?'end':'start';
-  const x=w.style.textAlign==='center'?w.width/2:w.style.textAlign==='right'?w.width-pad:pad;
-  const lines=wrapRich(content,maxWidth,w.style),blockHeight=lines.length*lineHeight;
-  let firstY=pad+w.style.fontSize;if(w.style.textAlignVertical==='middle')firstY=Math.max(pad,(w.height-blockHeight)/2)+w.style.fontSize;else if(w.style.textAlignVertical==='bottom')firstY=Math.max(pad,w.height-blockHeight-pad)+w.style.fontSize;
+  const x=w.style.textAlign==='center'?width/2:w.style.textAlign==='right'?width-pad:pad;
+  const lines=wrapRichLines(content,maxWidth,style),blockHeight=lines.length*lineHeight;
+  let firstY=pad+fontSize;if(w.style.textAlignVertical==='middle')firstY=Math.max(pad,(height-blockHeight)/2)+fontSize;else if(w.style.textAlignVertical==='bottom')firstY=Math.max(pad,height-blockHeight-pad)+fontSize;
+  const n=(value:number)=>String(Number(value.toPrecision(14)));
   const highlights:string[]=[],tspans:string[]=[];
   lines.forEach((line,index)=>{
-    const y=firstY+index*lineHeight,width=line.reduce((sum,run)=>sum+measureRichToken(run.text,run,w.style),0);
+    const y=firstY+index*lineHeight,width=line.reduce((sum,run)=>sum+measureRichToken(run.text,run,style),0);
     if(w.style.highlightColor&&w.style.highlightColor!=='transparent'){
       const left=anchor==='middle'?x-width/2:anchor==='end'?x-width:x;
-      highlights.push('<rect x="'+round(left)+'" y="'+round(y-w.style.fontSize)+'" width="'+round(width)+'" height="'+round(lineHeight)+'" fill="'+escapeXml(w.style.highlightColor)+'"/>');
+      highlights.push('<rect x="'+n(left)+'" y="'+n(y-fontSize)+'" width="'+n(width)+'" height="'+n(lineHeight)+'" fill="'+escapeXml(w.style.highlightColor)+'"/>');
     }
     const inner=line.map(run=>{
       const decorations=[run.underline||w.style.textDecoration==='underline'?'underline':'',run.strike||w.style.textDecoration==='line-through'?'line-through':''].filter(Boolean).join(' ');
@@ -189,27 +191,14 @@ function textSvg(w: Widget): string {
       const span='<tspan'+(attrs?' '+attrs:'')+'>'+escapeXml(run.text)+'</tspan>';
       return run.link?'<a href="'+escapeXml(run.link)+'">'+span+'</a>':span;
     }).join('');
-    tspans.push('<tspan x="'+round(x)+'" y="'+round(y)+'">'+inner+'</tspan>');
+    tspans.push('<tspan x="'+n(x)+'" y="'+n(y)+'">'+inner+'</tspan>');
   });
-  return highlights.join('')+'<text font-family="'+escapeXml(w.style.fontFamily)+'" font-size="'+w.style.fontSize+'" font-weight="'+(w.style.fontWeight==='bold'?'700':'400')+'" font-style="'+(w.style.fontStyle??'normal')+'" fill="'+escapeXml(w.style.color)+'" text-anchor="'+anchor+'">'+tspans.join('')+'</text>';
+  const body=highlights.join('')+'<text xml:space="preserve" font-family="'+escapeXml(w.style.fontFamily)+'" font-size="'+fontSize+'" font-weight="'+(w.style.fontWeight==='bold'?'700':'400')+'" font-style="'+(w.style.fontStyle??'normal')+'" fill="'+escapeXml(w.style.color)+'" text-anchor="'+anchor+'">'+tspans.join('')+'</text>';
+  return scale===1?body:'<g transform="scale('+n(scale)+')" data-text-font-size="'+n(w.style.fontSize)+'">'+body+'</g>';
 }
 
-let measurementContext:CanvasRenderingContext2D|null|undefined;
-function measureRichToken(token:string,run:ReturnType<typeof parseRich>[number][number],style:Style):number {
-  if(measurementContext===undefined)measurementContext=typeof document!=='undefined'?document.createElement('canvas').getContext('2d'):null;
-  if(!measurementContext)return Array.from(token).length*style.fontSize*.55;
-  measurementContext.font=(run.italic||style.fontStyle==='italic'?'italic ':'')+(run.bold||style.fontWeight==='bold'?'700 ':'400 ')+style.fontSize+'px '+style.fontFamily;
-  return measurementContext.measureText(token).width;
-}
-function wrapRich(content:string,maxWidth:number,style:Style){
-  return parseRich(content).flatMap(runs=>{
-    const lines:Array<typeof runs>=[];let current:typeof runs=[],width=0;
-    for(const run of runs)for(const token of run.text.split(/(\s+)/).filter(Boolean)){
-      const tokenWidth=measureRichToken(token,run,style);if(width+tokenWidth>maxWidth&&width>0&&token.trim()!==''){lines.push(current);current=[];width=0;}
-      current.push({...run,text:token});width+=tokenWidth;
-    }
-    lines.push(current);return lines;
-  });
+function measureRichToken(token:string,run:Run,style:Style):number {
+  return measureTextRun(token,style,run);
 }
 
 function connectorSvg(connector: Connector, state: BoardState): string {

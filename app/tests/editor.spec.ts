@@ -21,7 +21,7 @@ async function menu(page:Page,id:string){
   await expect(details).toBeVisible();if(!await details.evaluate(el=>el.open))await details.locator('summary').click();
   await expect(details).toHaveAttribute('open','');return details;
 }
-async function number(page:Page,label:string,value:string){const input=page.getByRole('spinbutton',{name:label,exact:true});await input.fill(value);await input.press('Tab');}
+async function number(page:Page,label:string,value:string){const input=page.getByRole('spinbutton',{name:label,exact:true});if(await input.count()){await input.fill(value);await input.press('Tab');return;}const slider=page.getByRole('slider',{name:label,exact:true});await slider.focus();await slider.evaluate((element,value)=>{element.value=value;element.dispatchEvent(new Event('input',{bubbles:true}));element.dispatchEvent(new Event('change',{bubbles:true}));},value);await slider.press('Tab');}
 async function importImage(page:Page,width=3200,height=1600){
   const image=await page.evaluate(({width,height})=>{const c=document.createElement('canvas');c.width=width;c.height=height;const ctx=c.getContext('2d');ctx.fillStyle='#a6c8ff';ctx.fillRect(0,0,width,height);ctx.fillStyle='#3859ff';ctx.fillRect(0,0,width/2,height);ctx.fillStyle='#ffdd66';ctx.beginPath();ctx.arc(width*.53,height*.48,height*.3,0,Math.PI*2);ctx.fill();return c.toDataURL().split(',')[1];},{width,height});
   const chooser=page.waitForEvent('filechooser');await page.locator('[data-tool="image"]').click();await(await chooser).setFiles({name:'original.png',mimeType:'image/png',buffer:Buffer.from(image,'base64')});
@@ -34,6 +34,7 @@ test('dashboard creates, renames, saves and reopens an independent board',async(
   await page.getByRole('textbox',{name:'Nome do board',exact:true}).fill('Projeto salvo');await page.getByRole('textbox',{name:'Nome do board',exact:true}).press('Enter');
   await page.getByRole('button',{name:'Início',exact:true}).click();await expect(page.locator('#board-home')).toBeVisible();
   await page.getByRole('button',{name:'Abrir Projeto salvo',exact:true}).click();
+  await expect(page.locator('#board-home')).toBeHidden();await expect(page.locator('#board-transition')).toBeHidden();await expect(page).toHaveURL(/#board\//);
   await expect.poll(()=>page.evaluate(()=>window.__board.state.widgets.size)).toBe(3);
   await page.reload();await page.waitForFunction(()=>window.__board?.booted);expect(await page.evaluate(()=>window.__board.state.widgets.size)).toBe(3);expect(errors).toEqual([]);
 });
@@ -63,8 +64,8 @@ test('nested groups retain mixed entities, anchors, undo and duplication',async(
 
 test('connector paths, patterns, terminations and positioned labels persist',async({page})=>{
   await blank(page);await fixture(page);await page.evaluate(()=>window.__board.bus.exec({op:'SELECTION_SET',payload:['link']}));
-  await menu(page,'end-cap');await page.getByRole('combobox',{name:'Fim da linha',exact:true}).selectOption('diamond');
-  await menu(page,'stroke');await page.getByRole('combobox',{name:'Estilo da linha',exact:true}).selectOption('dotted');
+  await menu(page,'end-cap');await page.getByRole('button',{name:'Fim da linha: losango',exact:true}).click();
+  await menu(page,'stroke');await page.getByRole('button',{name:'Estilo da linha: pontilhada',exact:true}).click();
   await menu(page,'route');await page.getByRole('button',{name:'Adicionar ponto',exact:true}).click();
   await menu(page,'captions');await page.getByRole('button',{name:'Adicionar rótulo',exact:true}).click();
   await page.getByRole('textbox',{name:'Rótulo 1',exact:true}).fill('Uma ligação');await page.getByRole('textbox',{name:'Rótulo 1',exact:true}).press('Tab');
@@ -101,7 +102,7 @@ test('all font choices load real local faces and rich formatting round-trips',as
 test('image originals, masks, flips, crop and replacement survive reload and export',async({page})=>{
   await blank(page);const original=await importImage(page);
   await page.getByRole('button',{name:'Recortar',exact:true}).click();await page.getByRole('button',{name:'4:3',exact:true}).click();await page.getByRole('button',{name:'Aplicar recorte',exact:true}).click();
-  await menu(page,'image');await page.getByRole('combobox',{name:'Máscara da imagem'}).selectOption('ellipse');await page.getByRole('button',{name:'Espelhar ↔',exact:true}).click();
+  await menu(page,'image');await page.getByRole('button',{name:'Máscara da imagem: elipse / círculo',exact:true}).click();await page.getByRole('button',{name:'Espelhar ↔',exact:true}).click();
   await menu(page,'image');await number(page,'Opacidade da imagem','65');
   await page.evaluate(()=>window.__board.saveNow());await page.reload();await page.waitForFunction(()=>window.__board?.booted);
   const result=await page.evaluate(async()=>{const s=window.__board.state,w=[...s.widgets.values()].find(w=>w.type==='image'),{boardToSvg}=await import('/src/core/exportSvg.ts');return {w,svg:boardToSvg(s)};});
@@ -124,12 +125,12 @@ test('circular image crop and custom borders use the actual menus, undo and SVG'
   await page.keyboard.press('Control+z');expect(await page.evaluate(id=>window.__board.state.widgets.get(id),original.id)).toMatchObject({width:original.width,height:original.height});expect(await page.evaluate(id=>window.__board.state.widgets.get(id).maskShape,original.id)).toBeUndefined();await page.keyboard.press('Control+Shift+z');
   await menu(page,'border');await page.getByRole('button',{name:'Cor da borda: rosa',exact:true}).click();
   await page.locator('input[type="color"][aria-label="Cor da borda"]').evaluate(input=>{input.value='#d0296b';input.dispatchEvent(new Event('change',{bubbles:true}));});
-  await page.getByRole('button',{name:'Borda média',exact:true}).click();await page.getByRole('combobox',{name:'Estilo da borda',exact:true}).selectOption('dashed');await number(page,'Opacidade da borda','0.8');
+  await page.getByRole('button',{name:'Borda média',exact:true}).click();await page.getByRole('button',{name:'Estilo da borda: tracejada',exact:true}).click();await number(page,'Opacidade da borda','0.8');
   await menu(page,'image');await number(page,'Opacidade da imagem','45');await page.getByRole('button',{name:'Espelhar ↔',exact:true}).click();
   await menu(page,'border');await page.screenshot({path:'../work/v5-ui-image-border.png'});
   const result=await page.evaluate(async()=>({w:[...window.__board.state.widgets.values()].find(w=>w.type==='image'),svg:(await import('/src/core/exportSvg.ts')).boardToSvg(window.__board.state)}));
   expect(result.w.style).toMatchObject({borderScale:.02,borderColor:'#d0296b',borderStyle:'dashed',borderOpacity:.8});expect(result.w.style.borderWidth).toBeCloseTo(Math.min(result.w.width,result.w.height)*.02,6);expect(result.w.opacity).toBe(.45);expect(result.svg).toContain('stroke-dasharray=');expect(result.svg).toContain('stroke-opacity="0.8"');expect(result.svg).toContain('opacity="0.45"');
-  await page.getByRole('combobox',{name:'Estilo da borda',exact:true}).selectOption('dotted');await page.getByRole('combobox',{name:'Estilo da borda',exact:true}).press('Tab');
+  await page.getByRole('button',{name:'Estilo da borda: pontilhada',exact:true}).click();await page.getByRole('button',{name:'Estilo da borda: pontilhada',exact:true}).press('Tab');
   expect(await page.evaluate(async()=>(await import('/src/core/exportSvg.ts')).boardToSvg(window.__board.state))).toMatch(/stroke-dasharray="0 [\d.]+"/);
   await page.evaluate(()=>window.__board.saveNow());await page.reload();await page.waitForFunction(()=>window.__board?.booted);expect(await page.evaluate(id=>window.__board.state.widgets.get(id).style,original.id)).toMatchObject({borderScale:.02,borderColor:'#d0296b',borderStyle:'dotted',borderOpacity:.8});
 });

@@ -31,6 +31,7 @@ test('selection toggles navigation without a separate hand button and returns to
 test('formatting after typing a size applies the first click and retains both edits',async({page})=>{
   await blank(page);await source(page);
   await page.getByRole('spinbutton',{name:'Texto',exact:true}).fill('24');
+  await page.getByRole('button',{name:'Estilo do texto',exact:true}).click();
   await page.getByRole('button',{name:'Negrito',exact:true}).click();
   expect(await page.evaluate(()=>{const s=window.__board.state.widgets.get('source').style;return {size:s.fontSize,weight:s.fontWeight};})).toEqual({size:24,weight:'bold'});
 });

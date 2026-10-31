@@ -6,12 +6,14 @@ import type { Connector, Endpoint } from "./core/connectors";
 import type { Stroke } from "./core/strokes";
 import { DEFAULT_BACKGROUND, validateBoardBackground, type BoardBackground } from "./core/background";
 import {loadBoardFont} from './fonts';
+import {validateUserFonts,snapshotUserFonts,restoreUserFonts,type UserFont} from './user-fonts';
 import {migrateFrameSnapshots} from './core/layer-migration';
 import {validateMindMetadata,validateMindMapGraph} from './core/mindmap';
 import {validateAudioMetadata} from './core/audio';
 import {validateStructuredMetadataFields} from './core/structured-text';
 
 interface BoardFile {
+  userFonts?:UserFont[];
   layerOrderVersion?:1;
   format: "local-board"; version: 1; title: string;
   widgets: Widget[]; order: string[]; connectors: Connector[]; connectorOrder: string[];
@@ -58,6 +60,7 @@ function order(value: unknown, items: { id: string }[]): string[] {
 export function validateBoardFile(value: unknown): BoardFile {
   const data = record(value);
   if (data.format !== "local-board" || data.version !== 1) fail("Este arquivo não é um projeto Board compatível.");
+  const userFonts=data.userFonts===undefined?undefined:validateUserFonts(data.userFonts);
   const widgets = list(data.widgets).map(raw => {
     const w = record(raw), style = record(w.style);
     const type = one(w.type, ["shape", "sticky_note", "text", "frame", "image"] as const);
@@ -91,6 +94,8 @@ export function validateBoardFile(value: unknown): BoardFile {
     }
     return { ...base, type, content, src, crop, maskShape:w.maskShape===undefined?undefined:one(w.maskShape,["rectangle","ellipse","round_rectangle"] as const),flipX:!!w.flipX,flipY:!!w.flipY,opacity:w.opacity===undefined?undefined:number(w.opacity,0,1),naturalWidth: number(w.naturalWidth, 1), naturalHeight: number(w.naturalHeight, 1) };
   }) as Widget[];
+  const embeddedFamilies=new Set(userFonts?.map(font=>font.family));
+  for(const widget of widgets)if(widget.style.fontFamily.startsWith('BoardCustom-')&&!embeddedFamilies.has(widget.style.fontFamily))fail('O arquivo não inclui os dados de uma fonte personalizada usada no board.');
   const widgetIds = new Set(widgets.map(widget => widget.id));
   const endpoint = (value: unknown): Endpoint => {
     const ep = record(value), kind = one(ep.kind, ["point", "anchor"] as const);
@@ -133,7 +138,7 @@ export function validateBoardFile(value: unknown): BoardFile {
   const background=data.background===undefined?{...DEFAULT_BACKGROUND}:validateBoardBackground(data.background);
   if(!background)fail("Fundo do board inválido.");
   return { format: "local-board", version: 1,layerOrderVersion:1, title: str(data.title, 1000), widgets:data.layerOrderVersion===1?widgets:migrateFrameSnapshots(widgets), connectors, strokes, groups,
-    background: background!,
+    background: background!,userFonts,
     order: order(data.order, widgets), connectorOrder: order(data.connectorOrder, connectors), strokeOrder: order(data.strokeOrder, strokes),
     camera: { x: number(camera.x), y: number(camera.y), scale: number(camera.scale, MIN_SCALE, MAX_SCALE) } };
 }
@@ -151,7 +156,7 @@ export function installProjectFiles(api: { state: BoardState; bus: CommandBus; c
   const input = document.createElement("input"); input.type = "file"; input.accept = ".board.json,.json,application/json"; input.hidden = true; document.body.append(input);
   saveButton.onclick = () => {
     const data: BoardFile = { format: "local-board", version: 1,layerOrderVersion:1, title: document.getElementById("board-title")?.textContent ?? "Board",
-      background:state.background??{...DEFAULT_BACKGROUND},
+      background:state.background??{...DEFAULT_BACKGROUND},userFonts:snapshotUserFonts([...state.widgets.values()].map(w=>w.style.fontFamily)),
       widgets: [...state.widgets.values()], order: [...state.order], connectors: [...state.connectors.values()], connectorOrder: [...state.connectorOrder],
       strokes: [...state.strokes.values()], strokeOrder: [...state.strokeOrder], groups: [...state.groups.entries()], camera: { x: camera.x, y: camera.y, scale: camera.scale } };
     const url = URL.createObjectURL(new Blob([JSON.stringify(data)], { type: "application/json" }));
@@ -165,6 +170,8 @@ export function installProjectFiles(api: { state: BoardState; bus: CommandBus; c
     try {
       if (file.size > 100 * 1024 * 1024) fail("Escolha um projeto de até 100 MB.");
       const data = validateBoardFile(JSON.parse(await file.text()));
+      if(api.getBoardKey&&boardKey!==api.getBoardKey()){status.textContent='O board mudou. Abra o arquivo novamente no destino desejado.';return;}
+      await restoreUserFonts(data.userFonts);
       await Promise.all([...new Set(data.widgets.map(w=>w.style.fontFamily))].map(loadBoardFont));
       if(api.getBoardKey&&boardKey!==api.getBoardKey()){status.textContent='O board mudou. Abra o arquivo novamente no destino desejado.';return;}
       // Nothing changes until every field and reference has passed validation.

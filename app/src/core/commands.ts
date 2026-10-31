@@ -6,7 +6,7 @@
  * Cada comando devolve o seu inverso, e o undo é só executar inversos.
  */
 
-import type { Widget } from "./model";
+import type { TextWidget,Widget } from "./model";
 import {
   resolveEndpoint,
   type Connector,
@@ -14,7 +14,7 @@ import {
 } from "./connectors";
 import type { Stroke } from "./strokes";
 import { DEFAULT_BACKGROUND, validateBoardBackground, type BoardBackground, type BackgroundPatch } from "./background";
-import { naturalText } from './text-layout';
+import { isFreeText,naturalText } from './text-layout';
 import { relativeBorderScale } from './style-scale';
 import { mindLayoutCommands, mindSubtree } from './mindmap';
 
@@ -80,6 +80,7 @@ export class CommandBus {
     private readonly state: BoardState,
     private readonly onChange: () => void,
     private readonly limit = 500,
+    private readonly canMutate = () => true,
   ) {}
 
   private topZ(): number {
@@ -93,6 +94,7 @@ export class CommandBus {
   }
 
   exec(command: Command): void {
+    if(!this.canMutate())return;
     command=structuredClone(command);
     const executed = this.execute(command);
     if (!executed) return;
@@ -161,7 +163,7 @@ export class CommandBus {
       }
       case "WIDGET_CREATE": {
         let widget = command.payload as Widget;
-        if(widget.type==='text'&&widget.textSizing!=='natural')widget=naturalText(widget);
+        if(isFreeText(widget))widget=naturalText(widget);
         command.payload=widget;
         const bottom=Math.min(0,...[...s.widgets.values(),...s.connectors.values(),...s.strokes.values()].map(item=>item.z));
         const placed: Widget = { ...widget, z: widget.type==='frame'?bottom-1:this.topZ() + 1 };
@@ -383,10 +385,10 @@ export class CommandBus {
           if(style.borderScale!==undefined)style.borderWidth=style.borderScale*Math.min(patch.width??widget.width,patch.height??widget.height);
           patch.style=style;
         }
-        if(widget.type==='text'&&!(incoming.textSizing==='natural'&&incoming.width!==undefined&&incoming.height!==undefined)){
+        if(isFreeText({...widget,...patch} as Widget)){
           const style={...(patch.style??widget.style)};
           if(sized&&incoming.style?.fontSize===undefined){const ratio=incoming.width!==undefined?incoming.width/widget.width:(incoming.height??widget.height)/widget.height;const fontSize=widget.style.fontSize*ratio;if(Number.isFinite(fontSize))style.fontSize=Math.max(.1,fontSize);}
-          const text=naturalText({...widget,...patch,style} as typeof widget);
+          const text=naturalText({...widget,...patch,style} as TextWidget);
           patch={...patch,style,width:text.width,height:text.height,textSizing:'natural'};
         }
         command.payload={id,patch};
@@ -556,6 +558,7 @@ export class CommandBus {
   }
 
   undo(): void {
+    if(!this.canMutate())return;
     this.endTransaction();
     const cmd = this.undoStack.pop();
     if (!cmd) return;
@@ -565,6 +568,7 @@ export class CommandBus {
   }
 
   redo(): void {
+    if(!this.canMutate())return;
     this.endTransaction();
     const cmd = this.redoStack.pop();
     if (!cmd) return;

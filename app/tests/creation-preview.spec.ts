@@ -23,15 +23,18 @@ async function preview(page){return page.evaluate(()=>{
   return {x,y,width,height,corner:alpha(5,5),center:alpha(width/2,height/2),hasText:node.children[1].children.some(n=>typeof n.text==='string'&&n.text.length>0),backgroundCommands:node.children[0].context.instructions.length,count:b.state.widgets.size};
 });}
 
-test('circle, triangle and star preview their real silhouette before placement without creating board content',async({page})=>{
+test('circle, triangle and star preview their real silhouette only after pointer down without creating board content',async({page})=>{
   await blank(page);
   for(const id of ['circle','triangle','star']){
     await shape(page,id);await page.mouse.move(950,550);await settle(page);
+    expect(await preview(page)).toBeNull();await page.mouse.down();await settle(page);
     const ghost=await preview(page);expect(ghost).not.toBeNull();expect(ghost.count).toBe(0);expect(ghost.corner).toBe(0);expect(ghost.center).toBeGreaterThan(100);
+    await page.keyboard.press('Escape');await page.mouse.up();
     await page.mouse.move(20,30);await settle(page);expect(await preview(page)).toBeNull();
   }
-  await shape(page,'circle');await page.mouse.move(950,550);await settle(page);await page.screenshot({path:'../work/v10-shape-preview.png'});
+  await shape(page,'circle');await page.mouse.move(950,550);await page.mouse.down();await settle(page);await page.screenshot({path:'../work/v12-shape-preview.png'});
   await page.keyboard.press('Escape');expect(await preview(page)).toBeNull();
+  await page.mouse.up();
 });
 
 test('drag preview and committed geometry agree with Shift, reverse drag, pan and zoom',async({page})=>{
@@ -44,12 +47,12 @@ test('drag preview and committed geometry agree with Shift, reverse drag, pan an
   expect(await preview(page)).toBeNull();
 });
 
-test('notes, frames and text use their actual renderer and click placement matches the ghost',async({page})=>{
+test('notes, frames and text show their actual renderer during the press and placement matches that preview',async({page})=>{
   await blank(page);
   for(const [key,type]of [['s','sticky_note'],['f','frame'],['t','text']]){
-    await page.keyboard.press(key);await page.mouse.move(1000,600);await settle(page);const ghost=await preview(page);
+    await page.keyboard.press(key);await page.mouse.move(1000,600);await settle(page);expect(await preview(page)).toBeNull();await page.mouse.down();await settle(page);const ghost=await preview(page);
     expect(ghost).not.toBeNull();if(type==='text'){expect(ghost.hasText).toBe(true);expect(ghost.backgroundCommands).toBe(0);}if(type==='frame')expect(ghost.hasText).toBe(true);if(type==='sticky_note')expect(ghost.center).toBeGreaterThan(100);
-    await page.mouse.click(1000,600);await settle(page);
+    await page.mouse.up();await settle(page);
     const actual=await page.evaluate(()=>{const w=window.__board.state.widgets.get([...window.__board.state.selection][0]);return {type:w.type,x:w.x,y:w.y,width:w.width,height:w.height};});
     expect(actual.type).toBe(type);for(const property of ['x','y','width','height'])expect(actual[property]).toBeCloseTo(ghost[property],7);
     expect(await preview(page)).toBeNull();await page.keyboard.press('Escape');

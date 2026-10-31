@@ -22,6 +22,10 @@ No Windows, `../TESTAR.cmd` compila e abre `http://localhost:4173`. Os boards fi
 | Suavizar pincel | Marcar Precisão no painel |
 | Laço | L |
 | Forma / texto / nota / quadro | R / T / S / F |
+| Repetir uma forma | Desenhar mantém a mesma ferramenta; V volta à seleção |
+| Escrever dentro de uma forma | Duplo clique; o texto quebra dentro da área da forma |
+| Texto novo | Canto superior esquerdo no centro da tela; tamanho inicial adaptado ao zoom |
+| Fontes próprias | Abrir o seletor de fonte e escolher Adicionar fontes |
 | Conector | C ou puxar uma porta de um objeto |
 | Mapa mental selecionado | Tab adiciona filho; Enter adiciona irmão; Shift+Enter adiciona irmão acima |
 | Editar tópico | Enter confirma; Shift+Enter quebra linha; Escape cancela |

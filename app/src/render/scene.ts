@@ -13,7 +13,7 @@ import {visibleFrames,frameForWidget} from '../core/frame-visibility';
 import { connectorGeometry, connectorBounds, connectorCaptionPoints,type ConnectorGeometry } from "../core/connectors";
 import { strokeBounds, type StrokePoint } from "../core/strokes";
 import {paintStroke,strokeRenderKey} from './stroke-paint';
-import { parseRich, type Run } from "../core/richtext";
+import type { Run } from "../core/richtext";
 import { paintConnector } from "./connector-paint";
 import type { Widget } from "../core/model";
 import { borderPattern, canonicalShape, patternedContour, shapeContours, shapePolygon, shapeDetails } from "../core/shapes";
@@ -22,6 +22,8 @@ import {fitTextResolution,textRasterDensity,TEXT_SAMPLING,sharedTextStyle} from 
 import {mindNodeHidden,mindConnectorHidden,mindTopicText} from '../core/mindmap';
 import {audioSignature,paintAudioCard,paintAudioLabels} from './audio-paint';
 import {renderStructuredText} from './structured-text';
+import {textFontScale,wrapRichLines} from '../core/text-layout';
+import {LargeTextRaster,needsLargeTextRaster} from './large-text';
 
 interface Node {
   container: Container;
@@ -32,6 +34,7 @@ interface Node {
   /** assinatura do último layout, evita reconstruir a cada frame */
   sig: string;
   backgroundSig: string;
+  largeText?:LargeTextRaster;
 }
 
 export class BoardScene {
@@ -51,6 +54,7 @@ export class BoardScene {
   private links = new Map<string, Array<{ x: number; y: number; w: number; h: number; url: string }>>();
   private textResolution = 2;
   private zoom = 1;
+  private visible?:Rect;
 
   constructor(stage: Container) {
     this.frameLayer.sortableChildren = true;
@@ -168,7 +172,7 @@ export class BoardScene {
   /** Usado pelo editor inline. */
   setTextVisible(id: string, visible: boolean): void {
     const node = this.nodes.get(id);
-    if (node) node.text.visible = visible;
+    if(node){node.text.visible=visible;if(node.largeText)node.largeText.container.visible=visible;}
   }
 
   // -------------------------------------------------------------- clip
@@ -196,6 +200,7 @@ export class BoardScene {
 
   sync(state: BoardState, visible?: Rect, zoom = 1): void {
     this.zoom = zoom;
+    this.visible=visible;
     this.textResolution = textRasterDensity(zoom);
     this.syncStrokes(state, visible);
     this.syncConnectors(state, visible);
@@ -216,8 +221,10 @@ export class BoardScene {
 
     for (const [id, node] of this.nodes) {
       if (!state.widgets.has(id)) {
+        node.largeText?.destroy();
         node.container.destroy({ children: true });
         this.nodes.delete(id);
+        this.links.delete(id);
       }
     }
 
@@ -231,7 +238,8 @@ export class BoardScene {
         this.nodes.set(id, node);
         this.layer.addChild(node.container);
       }
-      this.paint(node, widget);
+      const shown=!widget.hidden&&!mindNodeHidden(state,widget.id)&&(!visible||rectsIntersect(visible,widgetAABB(widget)));
+      this.paint(node, widget,shown);
 
       node.container.zIndex = widget.z;
 
@@ -240,7 +248,7 @@ export class BoardScene {
       if (node.container.parent !== target) target.addChild(node.container);
       node.container.mask=frame?this.clipFor(frame).mask:null;
 
-      node.container.visible = !widget.hidden&&!mindNodeHidden(state,widget.id)&&(!visible||rectsIntersect(visible,widgetAABB(widget)));
+      node.container.visible=shown;
     }
   }
 
@@ -258,7 +266,12 @@ export class BoardScene {
     return { container, graphics, text, type: widget.type, sig: "", backgroundSig:'' };
   }
 
-  private paint(node: Node, w: Widget): void {
+  private paint(node: Node, w: Widget,rasterVisible=true): void {
+    if(node.type!==w.type){
+      node.largeText?.destroy();node.largeText=undefined;
+      for(const child of node.text.removeChildren())child.destroy({children:true});
+      node.text.visible=true;node.type=w.type;node.sig='';node.backgroundSig='';this.links.delete(w.id);
+    }
     const { container, graphics, text } = node;
 
     container.pivot.set(w.width / 2, w.height / 2);
@@ -270,6 +283,9 @@ export class BoardScene {
     if(node.backgroundSig!==backgroundSig){node.backgroundSig=backgroundSig;graphics.clear();drawBackground(graphics,w,this.zoom);}
 
     this.layoutText(node, w);
+    if(w.type!=='image'&&!w.audio&&!w.table&&!w.checklist&&(node.largeText||node.text.children.some(child=>child instanceof Text&&needsLargeTextRaster(child,this.zoom)))){
+      node.largeText??=new LargeTextRaster(node.container);node.largeText.update(w,node.text,rasterVisible&&node.text.visible?this.visible:undefined,this.zoom);
+    }else if(node.largeText){node.largeText.destroy();node.largeText=undefined;}
     void text;
   }
 
@@ -279,7 +295,7 @@ export class BoardScene {
     if (w.type === "image") return;
     if(w.audio){node.sig='';paintAudioLabels(node.text,w,this.textResolution);return;}
     if(renderStructuredText(node.text,w,this.textResolution)){node.sig='';return;}
-    for (const child of node.text.children) if (child instanceof Text){const resolution=fitTextResolution(child,this.textResolution);if(child.resolution!==resolution)child.resolution=resolution;}
+    for (const child of node.text.children) if (child instanceof Text){const resolution=fitTextResolution(child,this.textResolution*Math.abs(child.scale.x));if(child.resolution!==resolution)child.resolution=resolution;}
     const pad = w.type==='text'?0:10;
     const maxWidth = Math.max(1, w.width - pad * 2);
     const content = w.type === "frame" ? w.title : mindTopicText(w);
@@ -349,7 +365,7 @@ export class BoardScene {
     maxWidth: number,
     collected: Array<{ x: number; y: number; w: number; h: number; url: string }>,
   ): void {
-    const lines = parseRich(content);
+    const lines = wrapRichLines(content,w.type==='text'?Infinity:maxWidth,w.style);
     const lineHeight = w.style.fontSize * 1.35;
     const align = w.style.textAlign;
 
@@ -374,8 +390,6 @@ export class BoardScene {
           const node = makeRunText(token, run, w, this.textResolution);
           const width = node.width;
 
-          if (w.type!=='text' && lineWidth > 0 && lineWidth + width > maxWidth && token.trim() !== "") flush();
-
           items.push({ node, width, strike: Boolean(run.strike)||w.style.textDecoration==='line-through',underline:Boolean(run.underline)||w.style.textDecoration==='underline',highlight:w.style.highlightColor, link: run.link });
           lineWidth += width;
         }
@@ -392,20 +406,21 @@ function splitWords(run: Run): string[] {
 
 function makeRunText(token: string, run: Run, w: Widget, resolution: number): Text {
   const isLink = Boolean(run.link);
+  const {fontSize,scale}=textFontScale(w.style.fontSize);
   const node=new Text({
     ...TEXT_SAMPLING,
     text: token,
     resolution,
     style: sharedTextStyle({
       fontFamily: w.style.fontFamily,
-      fontSize: w.style.fontSize,
+      fontSize,
       fill: isLink ? "#3859ff" : w.style.color,
       fontWeight: run.bold || w.style.fontWeight==='bold' ? "700" : "400",
       fontStyle: run.italic || w.style.fontStyle==='italic' ? "italic" : "normal",
-      lineHeight: w.style.fontSize * 1.35,
+      lineHeight: fontSize * 1.35,
     }),
   });
-  node.resolution=fitTextResolution(node,resolution);
+  node.scale.set(scale);node.resolution=fitTextResolution(node,resolution*scale);
   return node;
 }
 
@@ -438,10 +453,10 @@ function placeLine(
       strike
         .moveTo(x, y + item.node.height * 0.55)
         .lineTo(x + item.width, y + item.node.height * 0.55)
-        .stroke({ width: Math.max(.8,item.node.style.fontSize/18), color: item.node.style.fill as string, alpha: 0.9 });
+        .stroke({ width: Math.max(.8,item.node.style.fontSize*Math.abs(item.node.scale.x)/18), color: item.node.style.fill as string, alpha: 0.9 });
       target.addChild(strike);
     }
-    if(item.underline){const underline=new Graphics();underline.moveTo(x,y+item.node.height*.91).lineTo(x+item.width,y+item.node.height*.91).stroke({width:Math.max(.8,item.node.style.fontSize/18),color:item.node.style.fill as string});target.addChild(underline);}
+    if(item.underline){const underline=new Graphics();underline.moveTo(x,y+item.node.height*.91).lineTo(x+item.width,y+item.node.height*.91).stroke({width:Math.max(.8,item.node.style.fontSize*Math.abs(item.node.scale.x)/18),color:item.node.style.fill as string});target.addChild(underline);}
 
     placed.push({ x, y, w: item.width, h: item.node.height, link: item.link });
     x += item.width;
@@ -472,7 +487,7 @@ function drawBackground(g: Graphics, w: Widget, zoom: number): void {
     return;
   }
 
-  if (w.type === "text") return;
+  if(w.type==='text'&&style.fillColor==='transparent'&&style.borderWidth<=0)return;
 
   const originalShape = w.type === "shape" ? w.shape : "rectangle";
   const shape = canonicalShape(originalShape);

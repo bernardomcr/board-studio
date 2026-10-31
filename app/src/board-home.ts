@@ -3,6 +3,8 @@ import type { Widget } from "./core/model";
 import type { Connector } from "./core/connectors";
 
 interface HomeAPI {
+  beforeTransition?():void;
+  afterTransition?():void;
   capture(): unknown;
   open(data: unknown, id: string): Promise<void> | void;
   thumbnail(): Promise<string>;
@@ -49,7 +51,21 @@ export function installBoardHome(api: HomeAPI) {
         boards: raw.boards.filter((b: unknown) => b && typeof b === "object" && typeof (b as BoardMeta).id === "string").map((b: BoardMeta) => ({ id: b.id, title: titleOf(b.title), createdAt: timestamp(b.createdAt), editedAt: timestamp(b.editedAt), starred: b.starred === true, project: typeof b.project === "string" ? b.project : null, trashedAt: typeof b.trashedAt === "number" ? b.trashedAt : null, thumbnail: typeof b.thumbnail === "string" && /^data:image\/(jpeg|png|webp);base64,/.test(b.thumbnail) ? b.thumbnail : "" })) };
     }
   } catch { /* The board bodies remain in IndexedDB even if an index is unavailable. */ }
-  let activeId: string | null = null, section = "home", search = "", modal: HTMLElement | null = null, busy = false;
+  let activeId: string | null = null, section = "home", search = "", modal: HTMLElement | null = null, busy = false, transitioning=false;
+  const inertBefore=new Map<HTMLElement,boolean>();let transitionFocus:HTMLElement|null=null;
+  const loading=document.createElement('div');loading.id='board-transition';loading.hidden=true;loading.tabIndex=-1;loading.setAttribute('role','status');loading.setAttribute('aria-live','polite');loading.textContent='Carregando board…';loading.style.cssText='position:fixed;inset:0;z-index:2000;background:#f8f9fb99;align-items:center;justify-content:center;cursor:progress;color:#5b6372;font:14px Inter,Segoe UI,sans-serif';document.body.append(loading);
+  const loadingStyle=document.createElement('style');loadingStyle.textContent='#board-transition{display:flex}#board-transition[hidden]{display:none!important}';document.head.append(loadingStyle);
+  function beginTransition(){
+    // Reentry is blocked by busy, but the old board is still writable while its
+    // last queued gesture/editor value is committed by this hook.
+    api.beforeTransition?.();transitioning=true;transitionFocus=document.activeElement instanceof HTMLElement?document.activeElement:null;
+    document.body.classList.add('board-transitioning');for(const child of document.body.children)if(child instanceof HTMLElement&&child!==loading){inertBefore.set(child,child.inert);child.inert=true;}
+    loading.hidden=false;loading.focus({preventScroll:true});
+  }
+  function endTransition(){
+    for(const [element,inert]of inertBefore)if(element.isConnected)element.inert=inert;inertBefore.clear();loading.hidden=true;document.body.classList.remove('board-transitioning');transitioning=false;api.afterTransition?.();
+    if(transitionFocus?.isConnected&&transitionFocus.getClientRects().length&&!transitionFocus.closest('[inert]'))transitionFocus.focus({preventScroll:true});transitionFocus=null;
+  }
   let modalReturnFocus:HTMLElement|null=null,menuReturnFocus:HTMLElement|null=null;
   const style = document.createElement("style");
   style.textContent = `
@@ -127,6 +143,7 @@ export function installBoardHome(api: HomeAPI) {
     if (busy) return; const board = meta(id); if (!board || board.trashedAt !== null) return;
     busy = true;
     try {
+      beginTransition();
       if(activeId && activeId !== id) await saveActive();
       const value = await readStoredBoard(boardKey(id)); if (!value) throw new Error("O conteúdo deste board não foi encontrado neste navegador.");
       const previous = activeId; activeId = id;
@@ -134,14 +151,15 @@ export function installBoardHome(api: HomeAPI) {
       root.hidden = true; document.body.classList.remove("home-visible"); closeMenu();
       if (changeHash) history.pushState(null, "", `${location.pathname}${location.search}#board/${encodeURIComponent(id)}`);
       board.editedAt = Date.now(); saveIndex();
-    } finally { busy = false; }
+    } finally { try{endTransition();}finally{busy = false;} }
   }
   async function show() {
     if (busy) return; busy = true;
-    try { await saveActive(); activeId = null; root.hidden = false; document.body.classList.add("home-visible"); history.replaceState(null, "", location.pathname + location.search); render(); }
-    finally { busy = false; }
+    try { beginTransition();await saveActive(); activeId = null; root.hidden = false; document.body.classList.add("home-visible"); history.replaceState(null, "", location.pathname + location.search); render(); }
+    finally { try{endTransition();}finally{busy = false;} }
   }
   function updateCurrent(change: { title?: string } = {}) {
+    if(transitioning)return;
     const board = meta(); if (!board) return;
     const captured = api.capture() as { title?: unknown };
     board.title = titleOf(change.title ?? captured?.title, board.title); board.editedAt = Date.now();
@@ -289,5 +307,5 @@ export function installBoardHome(api: HomeAPI) {
     }
     render();
   }
-  return { start, show, adoptCurrent, currentKey: () => activeId ? boardKey(activeId) : "board-app:v1", currentId: () => activeId, updateCurrent };
+  return { start, show, adoptCurrent, transitioning:()=>transitioning,currentKey: () => activeId ? boardKey(activeId) : "board-app:v1", currentId: () => activeId, updateCurrent };
 }

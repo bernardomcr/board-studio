@@ -58,7 +58,9 @@ import {creationWidgetAt,installCreationPreview} from './render/creation-preview
 import {installZoomUI} from './zoom-ui';
 import { installBackground } from "./background";
 import { DEFAULT_BACKGROUND, validateBoardBackground, type BoardBackground } from "./core/background";
-import {naturalText,resizeFreeText} from './core/text-layout';
+import {naturalText,resizeFreeText,textFontScale,isFreeText} from './core/text-layout';
+import {snapshotUserFonts,restoreUserFonts,type UserFont} from './user-fonts';
+import {boundedSvgBitmap} from './render/svg-bitmap';
 import {installLayers} from './layers';
 import {migrateFrameCommands,migrateFrameSnapshots} from './core/layer-migration';
 import {installMindmapUI} from './mindmap-ui';
@@ -93,10 +95,11 @@ const brushPreview=installBrushPreview(app.stage,camera);
 const STORAGE_KEY = "board-app:v1";
 let home:ReturnType<typeof installBoardHome>|undefined;
 let boardEpoch=0;
-const mediaBoardKey=()=>{const id=home?.currentId();return id?`${id}:${boardEpoch}`:null;};
+const mediaBoardKey=()=>{if(home?.transitioning())return null;const id=home?.currentId();return id?`${id}:${boardEpoch}`:null;};
 const storageKey=()=>home?.currentKey()??STORAGE_KEY;
 
 interface SavedBoard {
+  userFonts?:UserFont[];
   layerOrderVersion?:1;
   background?: BoardBackground;
   savedAt?:number;
@@ -135,7 +138,7 @@ function loadBoard(stored?:SavedBoard): boolean {
       return true;
     }
 
-    for (const w of data.layerOrderVersion===1?data.widgets as Widget[]:migrateFrameSnapshots(data.widgets as Widget[]))state.widgets.set(w.id,w.type==='text'&&w.textSizing!=='natural'?naturalText(w):w);
+    for (const w of data.layerOrderVersion===1?data.widgets as Widget[]:migrateFrameSnapshots(data.widgets as Widget[]))state.widgets.set(w.id,isFreeText(w)?naturalText(w):w);
     state.order = data.order ?? [];
     for (const c of data.connectors) state.connectors.set((c as Connector).id, c as Connector);
     state.connectorOrder = data.connectorOrder ?? [];
@@ -155,9 +158,9 @@ function loadBoard(stored?:SavedBoard): boolean {
 }
 
 let saveTimer:ReturnType<typeof setTimeout>|null=null;
-function savedBoard():SavedBoard{return structuredClone({layerOrderVersion:1 as const,savedAt:Date.now(),title:document.getElementById("board-title")!.textContent??"Board",background:state.background??{...DEFAULT_BACKGROUND},widgets:[...state.widgets.values()],order:state.order,connectors:[...state.connectors.values()],connectorOrder:state.connectorOrder,strokes:[...state.strokes.values()],strokeOrder:state.strokeOrder,groups:[...state.groups.entries()],journal:bus.snapshot(),camera:{x:camera.x,y:camera.y,scale:camera.scale}});}
-async function persistBoard(){if(home&&!home.currentId())return;try{await writeStoredBoard(storageKey(),savedBoard());document.getElementById("save-warning")?.remove();}catch{let notice=document.getElementById("save-warning");if(!notice){notice=document.createElement("div");notice.id="save-warning";notice.style.cssText="position:fixed;bottom:60px;left:50%;transform:translateX(-50%);z-index:80;background:#fff9b1;padding:12px 18px;border-radius:8px;font:13px Segoe UI";document.body.append(notice);}notice.textContent="Não foi possível salvar automaticamente. Use Salvar arquivo para guardar seu trabalho.";}}
-function scheduleSave(){if(home&&!home.currentId())return;if(saveTimer)clearTimeout(saveTimer);saveTimer=setTimeout(()=>{saveTimer=null;if(gesture.kind!=='none'){scheduleSave();return;}void persistBoard();},400);}
+function savedBoard():SavedBoard{return structuredClone({layerOrderVersion:1 as const,userFonts:snapshotUserFonts([...state.widgets.values()].map(w=>w.style.fontFamily)),savedAt:Date.now(),title:document.getElementById("board-title")!.textContent??"Board",background:state.background??{...DEFAULT_BACKGROUND},widgets:[...state.widgets.values()],order:state.order,connectors:[...state.connectors.values()],connectorOrder:state.connectorOrder,strokes:[...state.strokes.values()],strokeOrder:state.strokeOrder,groups:[...state.groups.entries()],journal:bus.snapshot(),camera:{x:camera.x,y:camera.y,scale:camera.scale}});}
+async function persistBoard(){if(home&&(!home.currentId()||home.transitioning()))return;try{await writeStoredBoard(storageKey(),savedBoard());document.getElementById("save-warning")?.remove();}catch{let notice=document.getElementById("save-warning");if(!notice){notice=document.createElement("div");notice.id="save-warning";notice.style.cssText="position:fixed;bottom:60px;left:50%;transform:translateX(-50%);z-index:80;background:#fff9b1;padding:12px 18px;border-radius:8px;font:13px Segoe UI";document.body.append(notice);}notice.textContent="Não foi possível salvar automaticamente. Use Salvar arquivo para guardar seu trabalho.";}}
+function scheduleSave(){if(home&&(!home.currentId()||home.transitioning()))return;if(saveTimer)clearTimeout(saveTimer);saveTimer=setTimeout(()=>{saveTimer=null;if(gesture.kind!=='none'){scheduleSave();return;}void persistBoard();},400);}
 window.addEventListener("pagehide",()=>{void persistBoard();});
 
 const state: BoardState = {
@@ -177,7 +180,7 @@ const bus = new CommandBus(state, () => {
   drawSelection();
   refreshChrome();
   scheduleSave();
-});
+},500,()=>!home?.transitioning());
 
 let images: ReturnType<typeof installImages> | undefined;
 let editorUI: ReturnType<typeof installEditorUI> | undefined;
@@ -373,13 +376,16 @@ function positionEditor(w: Widget): void {
   const center = camera.worldToScreen({ x: w.x + w.width / 2, y: w.y + w.height / 2 });
   const width = Math.max(w.type==='text'?8:40, w.width * camera.scale);
   const height = Math.max(w.type==='text'?8:24, w.height * camera.scale);
-  editor.style.left = center.x - width / 2 + "px";
-  editor.style.top = center.y - height / 2 + "px";
-  editor.style.width = width + "px";
-  editor.style.height = height + "px";
-  editor.style.transform = "rotate(" + w.rotation + "rad)";
-  editor.style.transformOrigin = "center center";
-  editor.style.fontSize = Math.max(.1, w.style.fontSize * camera.scale) + "px";
+  const font=textFontScale(Math.max(.1,w.style.fontSize*camera.scale));
+  const topLeft=w.rotation===0&&width===w.width*camera.scale&&height===w.height*camera.scale?camera.worldToScreen({x:w.x,y:w.y}):(()=>{const offset=rotate({x:-width/2,y:-height/2},w.rotation);return {x:center.x+offset.x,y:center.y+offset.y};})();
+  editor.style.left = topLeft.x + "px";
+  editor.style.top = topLeft.y + "px";
+  editor.style.width = width/font.scale + "px";
+  editor.style.height = height/font.scale + "px";
+  editor.style.transform = `rotate(${w.rotation}rad) scale(${font.scale})`;
+  editor.style.transformOrigin = '0 0';
+  editor.style.fontSize = font.fontSize + "px";
+  editor.style.padding=w.type==='text'?'0':`${10*camera.scale/font.scale}px`;
 }
 
 /** Editor WYSIWYG: mostra o texto formatado, não a marcação. */
@@ -570,6 +576,7 @@ type Tool = "lasso" | "select" | "hand" | "connector" | "brush" | "highlighter" 
 let pendingConnection: Extract<Gesture,{kind:"connect"}> | null = null;
 let connectorDefault: {shape:ConnectorShape; arrow:boolean} = {shape:"curved",arrow:true};
 let tool: Tool = "select";
+let stickyStackMode=false;
 const creationStyles:Partial<Record<WidgetType,Partial<Style>>>={};
 let selectedShape: ShapeWidget["shape"] = "rectangle";
 const creationPreview=installCreationPreview({parent:world,camera,canvas:app.canvas,getTool:()=>tool,getGesture:()=>gesture,temporaryHand:()=>spaceDown,getTemplate:()=>{
@@ -579,6 +586,7 @@ const creationPreview=installCreationPreview({parent:world,camera,canvas:app.can
 }});
 
 function setTool(next: Tool): void {
+  if(next!=='sticky_note')stickyStackMode=false;
   creationPreview.clear();
   connectorCompletion?.close();
   tool = next;
@@ -685,6 +693,7 @@ helpPanel.addEventListener("click", (event) => {
   if (event.target === helpPanel||(event.target as Element).closest('[data-help-close]')) toggleHelp(false);
 });
 window.addEventListener('keydown',event=>{
+  if(home?.transitioning()){event.preventDefault();event.stopImmediatePropagation();return;}
   if(helpPanel.hidden)return;
   if(event.key==='Escape'){event.preventDefault();toggleHelp(false);}
   else if(event.key==='Tab'){
@@ -777,7 +786,7 @@ let cursorWorld: Vec = { x: 0, y: 0 };
 let clipboard: EntitySnapshot = {widgets:[],connectors:[],strokes:[],groups:[]};
 let clipboardToken='';
 const BOARD_CLIPBOARD_TYPE='application/x-board-studio';
-const canvasClipboardBlocked=()=>document.body.classList.contains('home-visible')||[...document.querySelectorAll<HTMLElement>('dialog[open],[role="dialog"][aria-modal="true"]')].some(dialog=>!dialog.hidden&&dialog.getClientRects().length>0);
+const canvasClipboardBlocked=()=>!!home?.transitioning()||document.body.classList.contains('home-visible')||[...document.querySelectorAll<HTMLElement>('dialog[open],[role="dialog"][aria-modal="true"]')].some(dialog=>!dialog.hidden&&dialog.getClientRects().length>0);
 document.addEventListener('copy',event=>{
   if(event.defaultPrevented||isClipboardEditor(event.target)||canvasClipboardBlocked()||!event.clipboardData)return;
   const snapshot=captureSelection(state);if(!snapshot.widgets.length&&!snapshot.connectors.length&&!snapshot.strokes.length)return;
@@ -1066,12 +1075,17 @@ app.canvas.addEventListener("pointerdown", (e) => {
     drawSelection();return;
   }
 
-  if (tool !== "select" && tool !== "image") {
-    const widget = createWidget(tool, { x: p.x, y: p.y, shape: selectedShape,
+  const existingCreationTarget=tool==='shape'&&(
+    (state.selection.size>0&&(handleAtScreen(screen)!==null||rotateHandleAtScreen(screen)))||
+    (()=>{const item=frontmostEntityAt(p),widget=item?state.widgets.get(item.id):undefined;return !!widget&&widget.type!=='frame';})());
+  if (tool !== "select" && tool !== "image"&&!existingCreationTarget) {
+    const start=tool==='text'?{x:camera.x,y:camera.y}:p;
+    const widget = createWidget(tool, { x: start.x, y: start.y, shape: selectedShape,
       content: tool === "text" ? "Texto" : tool === "frame" ? "Quadro" : "" });
     widget.style={...widget.style,...creationStyles[widget.type]};
-    gesture = { kind: "create", start: p, current: p, widget };
-    creationPreview.show(creationWidgetAt(widget,p,p,camera.scale));
+    if(widget.type==='text')widget.style.fontSize=24/camera.scale;
+    gesture = { kind: "create", start, current: p, widget };
+    creationPreview.show(creationWidgetAt(widget,start,p,camera.scale));
     return;
   }
 
@@ -1324,7 +1338,7 @@ app.canvas.addEventListener("pointermove", (e) => {
     }
     case "resize": {
       const start = gesture.startWidget;
-      const next = start.type==='text'?resizeFreeText(start,gesture.handle,p):resizeWidget(start, gesture.handle, p, e.shiftKey);
+      const next = isFreeText(start)?resizeFreeText(start,gesture.handle,p):resizeWidget(start, gesture.handle, p, e.shiftKey);
       gesture.moved = true;
       const resizingId=gesture.id;queueGestureUpdate(()=>bus.exec({ op: "WIDGET_UPDATE", payload: { id: resizingId, patch: next } }));
 
@@ -1389,9 +1403,8 @@ function endGesture(e: PointerEvent): void {
       if (e.type === "pointercancel") break;
       const {widget,start,current} = gesture;
       const next=creationWidgetAt(widget,start,current,camera.scale);creationPreview.clear();
-      bus.exec({op:"WIDGET_CREATE",payload:next});
-      bus.exec({op:"SELECTION_SET",payload:[next.id]});
-      setTool("select");
+      bus.exec({op:'BATCH',payload:{label:'Criar objeto',commands:[{op:'WIDGET_CREATE',payload:next},{op:'SELECTION_SET',payload:[next.id]}]}});
+      setTool(next.type==='shape'?'shape':next.type==='sticky_note'&&stickyStackMode?'sticky_note':'select');
       if (next.type === "text") beginEdit(state.widgets.get(next.id)!);
       break;
     }
@@ -1506,12 +1519,18 @@ app.canvas.addEventListener(
 // ------------------------------------------------------------- keyboard
 
 window.addEventListener("keydown", (e) => {
-  if(document.body.classList.contains("home-visible"))return;
+  if(document.body.classList.contains("home-visible")||home?.transitioning())return;
   if(e.key==="Escape"&&document.querySelector('#selection-properties details[open],#shape-picker:not([hidden]),#connector-picker:not([hidden]),#editor-context:not([hidden])')){
     e.preventDefault();editorUI?.closePanels();return;
   }
   // enquanto o usuário digita (editor inline, prompt, input), atalhos globais não valem
   const target = e.target as HTMLElement | null;
+  const rangeHistory = target instanceof HTMLInputElement && target.type === 'range' && (e.ctrlKey || e.metaKey) && ['z','y'].includes(e.key.toLowerCase());
+  if(rangeHistory){
+    e.preventDefault();editorUI?.finalizePropertyGestures();connectorCompletion?.close();
+    if(e.key.toLowerCase()==='y'||e.shiftKey)bus.redo();else bus.undo();
+    editorUI?.refreshAfterHistory();mindmapUI?.refreshAfterHistory();return;
+  }
   if (
     target &&
     (target.tagName === "SELECT" ||
@@ -1586,6 +1605,7 @@ window.addEventListener("keydown", (e) => {
       break;
     case "s":
     case "S":
+      stickyStackMode=false;
       setTool("sticky_note");
       break;
     case "r":
@@ -1700,7 +1720,7 @@ async function copySelectionImage(){
     return [id,{...c,start:endpoint(c.start),end:endpoint(c.end)}] as const;
   });
   const subset={...state,widgets:new Map([...state.widgets].filter(([id])=>state.selection.has(id))),order:state.order.filter(id=>state.selection.has(id)),connectors:new Map(selectedConnectors),connectorOrder:state.connectorOrder.filter(id=>state.selection.has(id)),strokes:new Map([...state.strokes].filter(([id])=>state.selection.has(id))),strokeOrder:state.strokeOrder.filter(id=>state.selection.has(id))};
-  const svg=await embedSvgFonts(boardToSvg(subset,{background:"none"}),[...subset.widgets.values()].map(w=>w.style.fontFamily)),url=URL.createObjectURL(new Blob([svg],{type:"image/svg+xml"}));
+  const svg=boundedSvgBitmap(await embedSvgFonts(boardToSvg(subset,{background:"none"}),[...subset.widgets.values()].map(w=>w.style.fontFamily))),url=URL.createObjectURL(new Blob([svg],{type:"image/svg+xml"}));
   try{const img=new Image();img.src=url;await img.decode();const canvas=document.createElement("canvas"),scale=Math.min(2,4096/Math.max(img.width,img.height));canvas.width=Math.max(1,Math.ceil(img.width*scale));canvas.height=Math.max(1,Math.ceil(img.height*scale));canvas.getContext("2d")!.drawImage(img,0,0,canvas.width,canvas.height);const blob=await new Promise<Blob|null>(resolve=>canvas.toBlob(resolve));if(blob){try{await navigator.clipboard.write([new ClipboardItem({"image/png":blob})]);}catch{downloadBlob(blob,"selecao.png");}}}finally{URL.revokeObjectURL(url);}
 }
 const lassoButton=document.createElement("button");lassoButton.dataset.tool="lasso";lassoButton.dataset.label="Selecionar com laço (L)";lassoButton.setAttribute("aria-label","Laço");lassoButton.title="Laço (L)";lassoButton.innerHTML='<svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M8 17c-9-1-7-13 4-13 11 0 13 11 3 13-6 2-11 0-8-3 3-2 7 3 3 7"/></svg>';toolbar.querySelector('[data-tool="eraser"]')?.after(lassoButton);
@@ -1712,7 +1732,7 @@ const mindImagePicker=document.createElement('input');mindImagePicker.type='file
 let mindImageTarget:{parentId:string;boardKey:string|null}|null=null;
 mindImagePicker.addEventListener('change',()=>{const files=Array.from(mindImagePicker.files??[]),target=mindImageTarget;mindImagePicker.value='';mindImageTarget=null;if(!target||!files.length)return;void images?.importFiles(files,{label:'Imagem no mapa mental',canInsert:()=>target.boardKey===mediaBoardKey()&&!!state.widgets.get(target.parentId)?.mind&&!state.widgets.get(target.parentId)?.locked,afterCreate:ids=>{for(const id of ids)attachMindWidget(state,bus,target.parentId,id);}});});
 mindmapUI=installMindmapUI({state,bus,camera,setTool:t=>setTool(t),getTool:()=>tool,onEdit:id=>{const w=state.widgets.get(id);if(w&&!w.locked)beginEdit(w);},onLink:()=>linkUI?.open(),onImage:parentId=>{mindImageTarget={parentId,boardKey:mediaBoardKey()};mindImagePicker.click();},onChange:()=>{syncScene();drawSelection();refreshChrome();}});
-linkUI=installLinkUI({state,bus,getEditor:()=>editor,commitEditor:()=>endEdit(true),onChange:()=>{syncScene();drawSelection();refreshChrome();}});
+linkUI=installLinkUI({state,bus,camera,getBoardKey:mediaBoardKey,getEditor:()=>editor,commitEditor:()=>endEdit(true),onChange:()=>{syncScene();drawSelection();refreshChrome();}});
 audioUI=installAudio({state,bus,camera,getTool:()=>tool,setTool:t=>setTool(t),getBoardKey:mediaBoardKey,onChange:()=>{syncScene();drawSelection();refreshChrome();}});
 structuredUI=installStructuredTextUI({state,bus,camera,getTool:()=>tool,setTool:t=>setTool(t as Tool),onChange:()=>{syncScene();drawSelection();refreshChrome();}});
 connectorCompletion=installConnectorCompletion({state,bus,camera});
@@ -1726,6 +1746,7 @@ editorUI = installEditorUI({state,bus,camera,setTool:t=>setTool(t as Tool),getTo
   onLink:()=>linkUI?.open(),
   setConnectorDefault:options=>{connectorDefault=options;},
   onStyleDefaults:(type,patch)=>{creationStyles[type]={...creationStyles[type],...patch};},
+  setStickyStackMode:enabled=>{stickyStackMode=enabled;},
   setShape:s=>{selectedShape=s;},getShape:()=>selectedShape,onImage:()=>{imagePickerBoardKey=mediaBoardKey();imagePicker.click();},
   onCrop:()=>images?.cropSelected(),onResetCrop:()=>images?.resetCrop(),
   onCircleCrop:()=>images?.circleCropSelected(),onEditText:()=>{const w=state.widgets.get([...state.selection][0]!);if(w&&!w.locked&&w.type!=="image")beginEdit(w);},
@@ -1771,7 +1792,6 @@ app.ticker.add(() => {
       const w = state.widgets.get(editingId);
       if (w) {
         positionEditor(w);
-        if(w) editor.style.fontSize = `${Math.max(.1,w.style.fontSize * camera.scale)}px`;
       }
     }
     syncScene();
@@ -1804,12 +1824,13 @@ app.ticker.add(() => {
   ].join("\n");}
 });
 
-home=installBoardHome({capture:savedBoard,open:async data=>{
+home=installBoardHome({capture:savedBoard,afterTransition:()=>refreshChrome(),beforeTransition:()=>{audioUI?.pauseAll();flushGestureUpdate();endEdit(true);editorUI?.finalizePropertyGestures();bus.endTransaction();gesture={kind:'none'};pointers.clear();brushPreview.clear();creationPreview.clear();connectorCompletion?.close();},open:async data=>{
   if(saveTimer){clearTimeout(saveTimer);saveTimer=null;}endEdit(true);bus.endTransaction();gesture={kind:"none"};isolatedGroup=null;
+  await restoreUserFonts((data as SavedBoard).userFonts);
   await Promise.all([...new Set((data as SavedBoard).widgets.map(w=>(w as Widget).style.fontFamily))].map(loadBoardFont));
   if(!loadBoard(data as SavedBoard))throw new Error("Não foi possível abrir este board.");
   setTool("select");gridDirty=true;syncScene();drawGrid();drawSelection();refreshChrome();
-},thumbnail:async()=>{const svg=await embedSvgFonts(boardToSvg(state,{padding:30}),[...state.widgets.values()].map(w=>w.style.fontFamily));return 'data:image/svg+xml;base64,'+btoa(unescape(encodeURIComponent(svg)));},importFile:()=>projectFiles.open(),exportCurrent:()=>projectFiles.save()});
+},thumbnail:async()=>{const svg=boundedSvgBitmap(await embedSvgFonts(boardToSvg(state,{padding:30}),[...state.widgets.values()].map(w=>w.style.fontFamily)),1024,1024*1024);return 'data:image/svg+xml;base64,'+btoa(unescape(encodeURIComponent(svg)));},importFile:()=>projectFiles.open(),exportCurrent:()=>projectFiles.save()});
 const bootPromise=home.start();
 
 (window as unknown as { __board: unknown }).__board = {

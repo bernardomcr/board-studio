@@ -8,12 +8,12 @@ async function blank(page){
 }
 async function settle(page){await page.evaluate(()=>new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve))));}
 async function inspect(page){return page.evaluate(()=>{
- const b=window.__board,node=b.app.stage.children[1].children[3].children.find(n=>n.label==='quality').children[1],text=node.children.find(n=>n.style);
+ const b=window.__board,widget=b.app.stage.children[1].children[3].children.find(n=>n.label==='quality'),node=widget.children[1],text=node.children.find(n=>n.style),viewportRaster=!text.renderable,raster=widget.children.find(n=>n.label==='large-text-raster')?.children[0];
  b.app.renderer.render({container:b.app.stage});
- const source=b.app.renderer.canvasText._activeTextures[text.styleKey].texture.source;
+ const source=viewportRaster?raster.texture.source:b.app.renderer.canvasText._activeTextures[text.styleKey].texture.source;
  const Rectangle=b.app.screen.constructor,pixels=b.app.renderer.extract.pixels({target:b.app.stage,frame:new Rectangle(600,420,600,200),resolution:1}).pixels;
  let hash=2166136261,ink=0,antialiased=0;for(let i=0;i<pixels.length;i++){hash=Math.imul(hash^pixels[i],16777619);if(i%4===3&&pixels[i]>0){ink++;if(pixels[i]<255)antialiased++;}}
- return {hash:hash>>>0,ink,antialiased,font:text.style.fontSize,resolution:text.resolution,mipmaps:source.autoGenerateMipmaps,mipLevels:source.mipLevelCount,width:source.pixelWidth,height:source.pixelHeight,linear:source.style.scaleMode};
+ return {hash:hash>>>0,ink,antialiased,font:text.style.fontSize,resolution:text.resolution,mipmaps:source.autoGenerateMipmaps,mipLevels:source.mipLevelCount,width:source.pixelWidth,height:source.pixelHeight,linear:source.style.scaleMode,viewportRaster};
  });}
 
 test('font textures use filtered mip levels and repaint identically after size and zoom cycles',async({page})=>{
@@ -28,7 +28,7 @@ test('font textures use filtered mip levels and repaint identically after size a
 
 test('large glyphs receive a bounded texture and unchanged shape geometry survives pan and selection',async({page})=>{
  await blank(page);await page.evaluate(async()=>{const b=window.__board,w=b.state.widgets.get('quality'),{createWidget}=await import('/src/core/model.ts');b.bus.exec({op:'WIDGET_UPDATE',payload:{id:w.id,patch:{content:'Performance',style:{...w.style,fontSize:1600}}}});b.bus.exec({op:'WIDGET_CREATE',payload:{...createWidget('shape',{x:-100,y:-80,width:200,height:160,content:''}),id:'cached-shape'}});b.camera.scale=8;});await settle(page);
- const large=await inspect(page);expect(large.width).toBeLessThanOrEqual(4096);expect(large.height).toBeLessThanOrEqual(4096);expect(large.width*large.height).toBeLessThanOrEqual(4*1024*1024);expect(large.mipmaps).toBe(true);
+ const large=await inspect(page);expect(large.width).toBeLessThanOrEqual(4096);expect(large.height).toBeLessThanOrEqual(4096);expect(large.width*large.height).toBeLessThanOrEqual(4*1024*1024);expect(large.viewportRaster).toBe(true);expect(large.linear).toBe('linear');
  const cached=await page.evaluate(async()=>{const b=window.__board,node=b.app.stage.children[1].children[3].children.find(n=>n.label==='cached-shape'),first=node.children[0].context.instructions[0];b.camera.x=15;b.bus.exec({op:'SELECTION_SET',payload:['cached-shape']});await new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve)));return first===node.children[0].context.instructions[0];});
  expect(cached).toBe(true);
 });

@@ -70,7 +70,7 @@ test('deleting a mind-map branch through Layers removes its subtree and one undo
 });
 
 test('Space activates a focused formatting button without starting canvas navigation',async({page})=>{
-  await blank(page);await shape(page);const bold=page.getByRole('button',{name:'Negrito',exact:true});await bold.focus();await bold.press('Space');
+  await blank(page);await shape(page);await page.getByRole('button',{name:'Estilo do texto',exact:true}).click();const bold=page.getByRole('button',{name:'Negrito',exact:true});await bold.focus();await bold.press('Space');
   expect(await page.evaluate(()=>window.__board.state.widgets.get('visible').style.fontWeight)).toBe('bold');
   await expect(bold).toHaveAttribute('aria-pressed','true');
 });
