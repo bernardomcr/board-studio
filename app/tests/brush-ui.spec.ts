@@ -10,7 +10,7 @@ async function blank(page){
 }
 async function brush(page,size=40,opacity=40){
   await page.locator('[data-tool="brush"]').click();
-  await page.getByRole('button',{name:`Tamanho: ${size}`,exact:true}).click();
+  await page.getByRole('slider',{name:'Tamanho do pincel',exact:true}).evaluate((el,value)=>{el.value=String(value);el.dispatchEvent(new Event('input',{bubbles:true}));el.dispatchEvent(new Event('change',{bubbles:true}));},size);
   const range=page.getByRole('slider',{name:'Opacidade do pincel',exact:true});
   await range.press('Home');for(let value=0;value<opacity;value+=10)await range.press('PageUp');
   await expect(range).toHaveValue(String(opacity));

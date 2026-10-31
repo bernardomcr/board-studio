@@ -47,12 +47,14 @@ function changedMind(state:BoardState,id:string,patch:Partial<MindMetadata>):Com
   const w=state.widgets.get(id);if(!w?.mind)return;const mind={...w.mind,...patch};state.widgets.set(id,{...w,mind});return {op:'WIDGET_UPDATE',payload:{id,patch:{mind}}};
 }
 function run(bus:CommandBus,label:string,commands:Command[]):boolean{if(!commands.length)return false;bus.exec({op:'BATCH',payload:{label,commands}});return true;}
-function dimensions(widget:Widget){
-  if(widget.type==='image')return {width:widget.width,height:widget.height};
+function dimensions(widget:Widget,initial=false){
+  // Existing topic boxes are user geometry. Reflow positions the tree without
+  // silently expanding a box as its content or preferred font changes.
+  if(!initial||widget.type==='image')return {width:widget.width,height:widget.height};
   const content=mindTopicText(widget);
   const size=naturalTextSize({...widget,type:'text',content} as Parameters<typeof naturalTextSize>[0]);
   const root=widget.mind?.parentId===null;
-  return {width:Math.max(root?168:92,size.width+32),height:Math.max(root?64:44,size.height+18)};
+  return {width:Math.max(root?168:92,size.width+32),height:Math.max(root?64:44,size.height+20)};
 }
 function childIndex(state:BoardState):Map<string,Widget[]>{
   const index=new Map<string,Widget[]>();
@@ -126,7 +128,7 @@ export const normalizeMindMap=layoutMindMap;
 function topic(content:string,mind:MindMetadata,point:Vec):ShapeWidget{
   const root=mind.parentId===null,color=mind.color??MIND_COLORS[0],widget=createWidget('shape',{x:point.x,y:point.y,shape:'round_rectangle',content}) as ShapeWidget;
   widget.mind=mind;widget.style={...widget.style,fontFamily:'Inter',fontSize:root?26:20,fontWeight:root?'bold':'normal',textAlign:'center',textAlignVertical:'middle',fillColor:'#ffffff',fillOpacity:1,borderColor:color,borderWidth:root?2:1.5,borderScale:(root?2:1.5)/(root?64:44),cornerRadius:root?16:11};
-  const size=dimensions(widget);return {...widget,...size,x:point.x-size.width/2,y:point.y-size.height/2};
+  const size=dimensions(widget,true);return {...widget,...size,x:point.x-size.width/2,y:point.y-size.height/2};
 }
 export function createMindMap(state:BoardState,bus:CommandBus,point:Vec,content='Ideia central'):string{
   const id=nextId('mind'),node=topic(content,{rootId:id,parentId:null,side:'right',order:0,layout:'balanced',color:MIND_COLORS[0]},point);node.id=id;

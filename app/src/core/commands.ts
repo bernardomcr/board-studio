@@ -99,9 +99,12 @@ export class CommandBus {
     const executed = this.execute(command);
     if (!executed) return;
     executed.redo();
+    // Choosing an object must neither consume Undo nor discard content Redo.
+    // Selection inside a content BATCH is still restored with that operation.
+    if(command.op==='SELECTION_SET'&&!this.transaction){this.onChange();return;}
     if (this.transaction) this.transaction.entries.push({ ...executed, command });
     else this.pushUndo({ ...executed, command });
-    this.redoStack.length = 0;
+    if(command.op!=='SELECTION_SET')this.redoStack.length = 0;
     this.onChange();
   }
 
@@ -119,7 +122,7 @@ export class CommandBus {
   endTransaction(): void {
     const pending = this.transaction;
     this.transaction = null;
-    if (!pending?.entries.length) return;
+    if (!pending?.entries.length||pending.entries.every(entry=>entry.command.op==='SELECTION_SET')) return;
     const entries = pending.entries;
     this.pushUndo({
       label: pending.label,

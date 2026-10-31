@@ -4,6 +4,7 @@ import { widgetAABB, unionRect, rotate, type Vec } from './geometry';
 import { connectorBounds, connectorGeometry, resolveEndpoint, type Connector } from './connectors';
 import { strokeBounds, type Stroke } from './strokes';
 import {scaledWidgetStyle} from './style-scale';
+import {isFreeText,isBoxText} from './text-layout';
 import {mindSubtree,mindNodeHidden,mindConnectorHidden} from './mindmap';
 
 export function groupLeaves(s:BoardState,id:string,seen=new Set<string>()):string[] {
@@ -46,9 +47,9 @@ export function captureSelection(s:BoardState,ids=[...s.selection],includeIntern
 export function transformSnapshot(s:BoardState,snapshot:EntitySnapshot,dx:number,dy:number,sx=1,sy=1,origin:Vec={x:0,y:0},angle=0):Command[] {
   const point=(p:Vec)=>{const v=rotate({x:(p.x-origin.x)*sx,y:(p.y-origin.y)*sy},angle);return {x:origin.x+v.x+dx,y:origin.y+v.y+dy};};
   const cmds:Command[]=[];
-  for(const w of snapshot.widgets){if(w.locked)continue;const c=point({x:w.x+w.width/2,y:w.y+w.height/2}),uniform=Math.sqrt(Math.abs(sx*sy)),width=w.width*(w.type==='text'?uniform:sx),height=w.height*(w.type==='text'?uniform:sy);cmds.push({op:'WIDGET_UPDATE',payload:{id:w.id,patch:{x:c.x-width/2,y:c.y-height/2,width,height,rotation:w.rotation+angle,style:scaledWidgetStyle(w,sx,sy),...(w.type==='text'?{textSizing:'natural'}:{})}}});}
+  for(const w of snapshot.widgets){if(w.locked)continue;const c=point({x:w.x+w.width/2,y:w.y+w.height/2}),uniform=Math.sqrt(Math.abs(sx*sy)),width=w.width*(isFreeText(w)?uniform:sx),height=w.height*(isFreeText(w)?uniform:sy);cmds.push({op:'WIDGET_UPDATE',payload:{id:w.id,patch:{x:c.x-width/2,y:c.y-height/2,width,height,rotation:w.rotation+angle,style:{...scaledWidgetStyle(w,sx,sy),...(isBoxText(w)?{fontSize:w.style.fontSize}:{})},...(isFreeText(w)?{textSizing:'natural'}:{})}}});}
   for(const c of snapshot.connectors){if(c.locked)continue;const endpoint=(e:Connector['start'])=>e.kind==='anchor'?e:{...e,...point(e)};cmds.push({op:'CONNECTOR_UPDATE',payload:{id:c.id,patch:{start:endpoint(c.start),end:endpoint(c.end),controlPoint:c.controlPoint?point(c.controlPoint):null,waypoints:c.waypoints?.map(point)??null}}});}
-  for(const st of snapshot.strokes){if(st.locked)continue;cmds.push({op:'STROKE_UPDATE',payload:{id:st.id,patch:{points:st.points.map(p=>({...point(p),r:p.r*Math.sqrt(Math.abs(sx*sy))}))}}});}
+  for(const st of snapshot.strokes){if(st.locked)continue;const scale=Math.sqrt(Math.abs(sx*sy));cmds.push({op:'STROKE_UPDATE',payload:{id:st.id,patch:{points:st.points.map(p=>({...point(p),r:p.r*scale})),...(st.precisionSmoothing===undefined?{}:{precisionSmoothing:st.precisionSmoothing*scale}),...(st.erasures?{erasures:st.erasures.map(e=>({radius:e.radius*scale,points:e.points.map(point)}))}:{})}}});}
   return cmds;
 }
 
@@ -127,7 +128,7 @@ export function duplicateSnapshot(s:BoardState,bus:CommandBus,snapshot:EntitySna
   const ids:string[]=[],commands:Command[]=[];
   for(const w of snapshot.widgets){const id=map.get(w.id)!;commands.push({op:'WIDGET_CREATE',payload:{...w,id,mind:copiedMind(w),x:w.x+dx,y:w.y+dy,locked:false}});ids.push(id);}
   for(const c of copiedConnectors){commands.push({op:'CONNECTOR_CREATE',payload:c});ids.push(c.id);}
-  for(const st of snapshot.strokes){const id=map.get(st.id)!;commands.push({op:'STROKE_CREATE',payload:{...st,id,locked:false,points:st.points.map(p=>({...p,...point(p)}))}});ids.push(id);}
+  for(const st of snapshot.strokes){const id=map.get(st.id)!;commands.push({op:'STROKE_CREATE',payload:{...st,id,locked:false,points:st.points.map(p=>({...p,...point(p)})),...(st.erasures?{erasures:st.erasures.map(e=>({...e,points:e.points.map(point)}))}:{})}});ids.push(id);}
   for(const [id,members] of snapshot.groups)commands.push({op:'GROUP_CREATE',payload:{id:map.get(id)!,items:members.map(m=>map.get(m)).filter(Boolean)}});
   commands.push({op:'SELECTION_SET',payload:ids});
   bus.exec({op:'BATCH',payload:{label:'Duplicar seleção',commands}});

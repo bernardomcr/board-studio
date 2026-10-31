@@ -15,6 +15,9 @@ export interface StrokePoint {
 
 export type StrokeTool = "brush" | "pen" | "highlighter" | "eraser";
 
+/** Swept circular eraser paths subtract coverage without changing brush samples. */
+export interface StrokeErasure {points:Vec[];radius:number}
+
 export interface Stroke {
   name?: string;
   hidden?: boolean;
@@ -29,6 +32,7 @@ export interface Stroke {
   precision?: boolean;
   /** World-space precision window, captured from the drawing zoom. */
   precisionSmoothing?:number;
+  erasures?:StrokeErasure[];
   points: StrokePoint[];
   z: number;
 }
@@ -42,28 +46,29 @@ export const strokeOpacity=(stroke:Stroke):number=>Math.max(0,Math.min(1,stroke.
 const safePoint=(point:StrokePoint):StrokePoint=>({x:point.x,y:point.y,r:Math.max(.01,point.r)});
 
 /** Local smoothing never changes the finished interior when more input arrives. */
-function precisionPoint(points:StrokePoint[],index:number,smoothing:number,at:(i:number)=>StrokePoint):StrokePoint{
+function precisionPoint(points:StrokePoint[],index:number,smoothing:number,at:(i:number)=>StrokePoint,segmentLength:(i:number)=>number):StrokePoint{
   const point=at(index);
   if(points.length<3||index===0||index===points.length-1||smoothing<=0)return point;
   // Integrate over arc length rather than sample count. Fast/coalesced input and
   // dense slow input therefore receive the same visible smoothing window.
-  const sigma=smoothing*.5,window=smoothing*1.5,variance=2*sigma*sigma;
-  let sumX=0,sumY=0,total=0,left=0,right=0;
+  const requested=smoothing*1.5,reach=(direction:number)=>{let travel=0;for(let step=1;step<=PRECISION_LOOKAHEAD-2;step++){const next=index+step*direction;if(next<0||next>=points.length)break;travel+=segmentLength(Math.min(next,next-direction));if(travel>=requested)return requested;}return travel;};
+  // A symmetric window preserves position on a straight gesture and smoothly
+  // shrinks at either endpoint. Blending a large asymmetric window with the raw
+  // points reintroduced hand jitter at high strengths in the previous filter.
+  const window=Math.min(requested,reach(-1),reach(1));if(window<1e-8)return point;
+  const sigma=window/3,variance=2*sigma*sigma;let sumX=0,sumY=0,total=0;
   for(const direction of [-1,1]){
     let previous=point,travel=0;
     for(let step=1;step<=PRECISION_LOOKAHEAD-2;step++){
       const nextIndex=index+step*direction;if(nextIndex<0||nextIndex>=points.length)break;
-      const next=at(nextIndex),length=Math.hypot(next.x-previous.x,next.y-previous.y);if(length<1e-8){previous=next;continue;}
+      const next=at(nextIndex),length=segmentLength(Math.min(nextIndex,nextIndex-direction));if(length<1e-8){previous=next;continue;}
       const segment=Math.min(length,window-travel),middle=travel+segment*.5,weight=segment*Math.exp(-middle*middle/variance),fraction=segment/(2*length);
       sumX+=(previous.x+(next.x-previous.x)*fraction)*weight;sumY+=(previous.y+(next.y-previous.y)*fraction)*weight;total+=weight;travel+=segment;
       if(travel>=window)break;previous=next;
     }
-    if(direction<0)left=travel;else right=travel;
   }
   if(total<1e-12)return point;
-  // Preserve the exact pen-down/up position and ease the nearby fit into it.
-  const amount=Math.min(1,left/window,right/window);
-  return {x:point.x+(sumX/total-point.x)*amount,y:point.y+(sumY/total-point.y)*amount,r:point.r};
+  return {x:sumX/total,y:sumY/total,r:point.r};
 }
 function cubicBetween(a:StrokePoint,b:StrokePoint,c:StrokePoint,d:StrokePoint):StrokeCubic{
   const ab=Math.max(.0001,Math.sqrt(Math.hypot(b.x-a.x,b.y-a.y))),bc=Math.max(.0001,Math.sqrt(Math.hypot(c.x-b.x,c.y-b.y))),cd=Math.max(.0001,Math.sqrt(Math.hypot(d.x-c.x,d.y-c.y)));
@@ -81,9 +86,10 @@ export function strokeGeometry(stroke:Stroke):StrokeGeometry{
 }
 /** Compute only the requested raw-segment range and its local tangent neighbours. */
 export function strokeGeometryRange(stroke:Stroke,start=0,end=stroke.points.length-1):StrokeGeometry{
-  const raw=stroke.points,precision=stroke.precision??stroke.tool==='pen',smoothing=stroke.precisionSmoothing??8,from=Math.max(0,start),to=Math.min(raw.length-1,end),memo=new Map<number,StrokePoint>(),rawMemo=new Map<number,StrokePoint>();
+  const raw=stroke.points,precision=stroke.precision??stroke.tool==='pen',smoothing=stroke.precisionSmoothing??8,from=Math.max(0,start),to=Math.min(raw.length-1,end),memo=new Map<number,StrokePoint>(),rawMemo=new Map<number,StrokePoint>(),lengths=new Map<number,number>();
   const rawAt=(i:number)=>{let point=rawMemo.get(i);if(!point){point=safePoint(raw[i]!);rawMemo.set(i,point);}return point;};
-  const at=(i:number)=>{const index=Math.max(0,Math.min(raw.length-1,i));let p=memo.get(index);if(!p){p=precision?precisionPoint(raw,index,smoothing,rawAt):rawAt(index);memo.set(index,p);}return p;};
+  const segmentLength=(i:number)=>{let length=lengths.get(i);if(length===undefined){const a=rawAt(i),b=rawAt(i+1);length=Math.hypot(b.x-a.x,b.y-a.y);lengths.set(i,length);}return length;};
+  const at=(i:number)=>{const index=Math.max(0,Math.min(raw.length-1,i));let p=memo.get(index);if(!p){p=precision?precisionPoint(raw,index,smoothing,rawAt,segmentLength):rawAt(index);memo.set(index,p);}return p;};
   const knots:StrokePoint[]=[],curves:StrokeCubic[]=[],points:StrokePoint[]=[];
   for(let i=from;i<=to;i++)knots.push(at(i));
   if(precision&&raw.length>2&&knots.length>1){
@@ -116,7 +122,13 @@ export function strokeBounds(stroke: Stroke) {
   const bounds={minX,minY,maxX,maxY};boundsCache.set(geometry,bounds);return bounds;
 }
 
+export function strokeErasuresContain(stroke:Stroke,p:Vec):boolean{
+  for(const area of stroke.erasures??[]){const points=area.points;if(points.length===1&&Math.hypot(p.x-points[0]!.x,p.y-points[0]!.y)<=area.radius)return true;for(let i=1;i<points.length;i++){const a=points[i-1]!,b=points[i]!,dx=b.x-a.x,dy=b.y-a.y,length=dx*dx+dy*dy,t=length?Math.max(0,Math.min(1,((p.x-a.x)*dx+(p.y-a.y)*dy)/length)):0;if(Math.hypot(p.x-a.x-t*dx,p.y-a.y-t*dy)<=area.radius)return true;}}
+  return false;
+}
+
 export function distanceToStroke(p: Vec, stroke: Stroke): number {
+  if(strokeErasuresContain(stroke,p))return Infinity;
   let best = Infinity;
   const points=strokeGeometry(stroke).points;
   for (let i = 1; i < points.length; i++) {

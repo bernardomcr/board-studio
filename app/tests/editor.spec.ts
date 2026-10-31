@@ -18,7 +18,8 @@ async function fixture(page:Page){await page.evaluate(async()=>{
 async function select(page:Page,ids:string[]){await page.evaluate(ids=>window.__board.bus.exec({op:'SELECTION_SET',payload:ids}),ids);}
 async function menu(page:Page,id:string){
   const details=page.locator(`#selection-properties details[data-menu="${id}"]`);
-  await expect(details).toBeVisible();if(!await details.evaluate(el=>el.open))await details.locator('summary').click();
+  if(['size','arrange'].includes(id)){const more=page.locator('#selection-properties details[data-menu="more"]');if(!await more.evaluate(el=>el.open))await more.locator(':scope > summary').click();}
+  await expect(details).toBeVisible();if(!await details.evaluate(el=>el.open))await details.locator(':scope > summary').click();
   await expect(details).toHaveAttribute('open','');return details;
 }
 async function number(page:Page,label:string,value:string){const input=page.getByRole('spinbutton',{name:label,exact:true});if(await input.count()){await input.fill(value);await input.press('Tab');return;}const slider=page.getByRole('slider',{name:label,exact:true});await slider.focus();await slider.evaluate((element,value)=>{element.value=value;element.dispatchEvent(new Event('input',{bubbles:true}));element.dispatchEvent(new Event('change',{bubbles:true}));},value);await slider.press('Tab');}
@@ -78,7 +79,7 @@ test('brush preview and committed paths agree after pan and at multiple zoom lev
   await blank(page);
   for(const scale of [.5,1,3]){
     await page.evaluate(scale=>{const b=window.__board;b.bus.exec({op:'SELECTION_SET',payload:[]});b.camera.x=1300;b.camera.y=-800;b.camera.scale=scale;},scale);
-    await page.locator('[data-tool="brush"]').click();await page.mouse.move(450,500);await page.mouse.down();await page.mouse.move(650,520,{steps:20});
+    const brush=page.locator('#toolbar [data-tool="brush"]');if(!await brush.evaluate(el=>el.classList.contains('active')))await brush.click();await page.mouse.move(450,500);await page.mouse.down();await page.mouse.move(650,520,{steps:20});
     await page.evaluate(()=>new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve))));
     const live=await page.evaluate(()=>{const b=window.__board,g=b.gesture(),r=b.app.stage.children.find(n=>n.label==='brush-preview').getBounds();return {x:r.x,right:r.x+r.width,radius:g.points[0].r};});
     expect(Math.abs(live.x-(450-live.radius*scale))).toBeLessThan(2);expect(Math.abs(live.right-(650+live.radius*scale))).toBeLessThan(2);
@@ -86,12 +87,12 @@ test('brush preview and committed paths agree after pan and at multiple zoom lev
   }
 });
 
-test('partial eraser and lasso work on sparse geometry and undo',async({page})=>{
+test('precision and common erasers preserve independent history on sparse geometry without a lasso tool',async({page})=>{
   await blank(page);await page.evaluate(()=>{const b=window.__board;b.bus.exec({op:'STROKE_CREATE',payload:{id:'erase',type:'stroke',tool:'pen',color:'#000000',z:0,points:[{x:-200,y:0,r:2},{x:200,y:0,r:2}]}});});
-  await page.locator('[data-tool="eraser"]').click();await page.getByRole('combobox',{name:'Modo da borracha'}).selectOption('partial');
-  await page.mouse.move(800,500);await page.mouse.down();await page.mouse.up();expect(await page.evaluate(()=>window.__board.state.strokes.size)).toBe(2);
-  await page.keyboard.press('Control+z');expect(await page.evaluate(()=>window.__board.state.strokes.has('erase'))).toBe(true);
-  const validation=await page.evaluate(async()=>{const {lassoHits}=await import('/src/core/lasso.ts');return lassoHits(window.__board.state,[{x:-10,y:-20},{x:10,y:-20},{x:10,y:20},{x:-10,y:20}]);});expect(validation).toContain('erase');
+  await page.locator('[data-tool="eraser"]').click();await page.getByRole('radio',{name:'Borracha de precisão',exact:true}).click();
+  await page.mouse.move(800,500);await page.mouse.down();await page.mouse.up();expect(await page.evaluate(()=>window.__board.state.strokes.size)).toBe(1);expect(await page.evaluate(()=>window.__board.state.strokes.get('erase').erasures?.length??0)).toBeGreaterThan(0);
+  await page.keyboard.press('Control+z');expect(await page.evaluate(()=>window.__board.state.strokes.get('erase').erasures??[])).toEqual([]);
+  await page.getByRole('radio',{name:'Borracha comum',exact:true}).click();await page.mouse.click(800,500);expect(await page.evaluate(()=>window.__board.state.strokes.size)).toBe(0);await page.keyboard.press('Control+z');expect(await page.evaluate(()=>window.__board.state.strokes.get('erase').points)).toEqual([{x:-200,y:0,r:2},{x:200,y:0,r:2}]);await expect(page.locator('#toolbar [data-tool="lasso"]')).toHaveCount(0);
 });
 
 test('all font choices load real local faces and rich formatting round-trips',async({page})=>{
@@ -172,7 +173,7 @@ test('icon toolbars and popovers stay inside the viewport near both edges',async
     await expect(toolbar.locator('details[open]')).toHaveCount(1);await menu(page,'text');await expect(toolbar.locator('details[open]')).toHaveCount(1);
     await toolbar.locator('summary[aria-label="Texto"]').click();
   }
-  expect(await toolbar.locator('summary').evaluateAll(items=>items.every(el=>el.textContent.trim()===''))).toBe(true);await menu(page,'border');await page.screenshot({path:'../work/v5-ui-menu-viewport.png'});
+  expect(await toolbar.locator(':scope > details > summary').evaluateAll(items=>items.every(el=>el.textContent.trim()===''))).toBe(true);await menu(page,'border');await page.screenshot({path:'../work/v5-ui-menu-viewport.png'});
   await page.keyboard.press('Escape');await expect(toolbar.locator('details[open]')).toHaveCount(0);
 });
 

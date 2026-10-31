@@ -11,7 +11,7 @@ import type { BoardState } from "../core/commands";
 import { widgetAABB, rectsIntersect, widgetCorners, type Rect } from "../core/geometry";
 import {visibleFrames,frameForWidget} from '../core/frame-visibility';
 import { connectorGeometry, connectorBounds, connectorCaptionPoints,type ConnectorGeometry } from "../core/connectors";
-import { strokeBounds, type StrokePoint } from "../core/strokes";
+import { strokeBounds, type StrokePoint, type Stroke } from "../core/strokes";
 import {paintStroke,strokeRenderKey} from './stroke-paint';
 import type { Run } from "../core/richtext";
 import { paintConnector } from "./connector-paint";
@@ -22,7 +22,7 @@ import {fitTextResolution,textRasterDensity,TEXT_SAMPLING,sharedTextStyle} from 
 import {mindNodeHidden,mindConnectorHidden,mindTopicText} from '../core/mindmap';
 import {audioSignature,paintAudioCard,paintAudioLabels} from './audio-paint';
 import {renderStructuredText} from './structured-text';
-import {textFontScale,wrapRichLines} from '../core/text-layout';
+import {textFontScale,wrapRichLines,fitBoxText,isBoxText,isFreeText,trimTextLine,TEXT_DESIGN_SIZE,type BoxTextFit} from '../core/text-layout';
 import {LargeTextRaster,needsLargeTextRaster} from './large-text';
 
 interface Node {
@@ -35,6 +35,8 @@ interface Node {
   sig: string;
   backgroundSig: string;
   largeText?:LargeTextRaster;
+  /** Per-node retention avoids global LRU thrashing on boards with many labels. */
+  boxFit?:{content:string;kind:string;style:Widget['style'];width:number;height:number;fit:BoxTextFit};
 }
 
 export class BoardScene {
@@ -48,7 +50,7 @@ export class BoardScene {
   private connectorLabels = new Map<string, Text[]>();
   private connectorPaintKeys=new Map<string,{geometry:ConnectorGeometry;style:string}>();
   private strokeNodes = new Map<string, Graphics>();
-  private strokePaintKeys=new Map<string,{points:StrokePoint[];length:number;lastX:number;lastY:number;lastR:number;color:string;tool:string;opacity?:number;precision?:boolean;precisionSmoothing?:number;displayKey:string}>();
+  private strokePaintKeys=new Map<string,{points:StrokePoint[];length:number;lastX:number;lastY:number;lastR:number;color:string;tool:string;opacity?:number;precision?:boolean;precisionSmoothing?:number;erasures?:Stroke['erasures'];displayKey:string}>();
   private clipContainers = new Map<string, { container: Container; mask: Graphics; sig:string }>();
   /** retângulos clicáveis de link, em coordenadas locais do objeto */
   private links = new Map<string, Array<{ x: number; y: number; w: number; h: number; url: string }>>();
@@ -86,8 +88,8 @@ export class BoardScene {
         node.label=id;this.layer.addChild(node);
       }
       const last=stroke.points[stroke.points.length-1]!,key=this.strokePaintKeys.get(id),displayKey=strokeRenderKey(stroke,this.zoom);
-      if(!key||key.points!==stroke.points||key.length!==stroke.points.length||key.lastX!==last.x||key.lastY!==last.y||key.lastR!==last.r||key.color!==stroke.color||key.tool!==stroke.tool||key.opacity!==stroke.opacity||key.precision!==stroke.precision||key.precisionSmoothing!==stroke.precisionSmoothing||key.displayKey!==displayKey){
-        paintStroke(node,stroke,{zoom:this.zoom});this.strokePaintKeys.set(id,{points:stroke.points,length:stroke.points.length,lastX:last.x,lastY:last.y,lastR:last.r,color:stroke.color,tool:stroke.tool,opacity:stroke.opacity,precision:stroke.precision,precisionSmoothing:stroke.precisionSmoothing,displayKey});
+      if(!key||key.points!==stroke.points||key.length!==stroke.points.length||key.lastX!==last.x||key.lastY!==last.y||key.lastR!==last.r||key.color!==stroke.color||key.tool!==stroke.tool||key.opacity!==stroke.opacity||key.precision!==stroke.precision||key.precisionSmoothing!==stroke.precisionSmoothing||key.erasures!==stroke.erasures||key.displayKey!==displayKey){
+        paintStroke(node,stroke,{zoom:this.zoom});this.strokePaintKeys.set(id,{points:stroke.points,length:stroke.points.length,lastX:last.x,lastY:last.y,lastR:last.r,color:stroke.color,tool:stroke.tool,opacity:stroke.opacity,precision:stroke.precision,precisionSmoothing:stroke.precisionSmoothing,erasures:stroke.erasures,displayKey});
       }
 
       node.visible=!stroke.hidden&&(!visible||rectsIntersect(visible,strokeBounds(stroke)));
@@ -268,7 +270,7 @@ export class BoardScene {
 
   private paint(node: Node, w: Widget,rasterVisible=true): void {
     if(node.type!==w.type){
-      node.largeText?.destroy();node.largeText=undefined;
+      node.largeText?.destroy();node.largeText=undefined;node.boxFit=undefined;
       for(const child of node.text.removeChildren())child.destroy({children:true});
       node.text.visible=true;node.type=w.type;node.sig='';node.backgroundSig='';this.links.delete(w.id);
     }
@@ -296,9 +298,16 @@ export class BoardScene {
     if(w.audio){node.sig='';paintAudioLabels(node.text,w,this.textResolution);return;}
     if(renderStructuredText(node.text,w,this.textResolution)){node.sig='';return;}
     for (const child of node.text.children) if (child instanceof Text){const resolution=fitTextResolution(child,this.textResolution*Math.abs(child.scale.x));if(child.resolution!==resolution)child.resolution=resolution;}
-    const pad = w.type==='text'?0:10;
-    const maxWidth = Math.max(1, w.width - pad * 2);
     const content = w.type === "frame" ? w.title : mindTopicText(w);
+    let fit:BoxTextFit|undefined;
+    if(isBoxText(w)){
+      const cached=node.boxFit,kind=w.mind?'mind':w.type==='shape'?w.shape:w.type;
+      if(cached&&cached.kind===kind&&cached.content===content&&cached.style===w.style&&cached.width===w.width&&cached.height===w.height)fit=cached.fit;
+      else{fit=fitBoxText(w,content);node.boxFit={content,kind,style:w.style,width:w.width,height:w.height,fit};}
+    }else node.boxFit=undefined;
+    if(fit&&fit.fontSize!==w.style.fontSize)w={...w,style:{...w.style,fontSize:fit.fontSize}};
+    const pad = fit?.insets.top??(w.type==='text'?0:10),left=fit?.insets.left??pad,right=fit?.insets.right??pad,bottom=fit?.insets.bottom??pad;
+    const maxWidth = Math.max(Number.MIN_VALUE, w.width - left - right);
 
     const sig = [
       content,
@@ -311,7 +320,7 @@ export class BoardScene {
       w.style.color,
       w.style.textAlign,
       w.style.textAlignVertical,
-      w.type==='text'?w.width:Math.round(maxWidth),
+      maxWidth,
       w.type,
     ].join("|");
 
@@ -339,22 +348,22 @@ export class BoardScene {
       }
 
       const collected: Array<{ x: number; y: number; w: number; h: number; url: string }> = [];
-      this.buildRich(node.text, content, w, maxWidth, collected);
+      this.buildRich(node.text, content, w, maxWidth, collected,fit?.lines);
       this.links.set(w.id, collected);
     }
 
     if (w.type === "frame") { node.text.position.set(0, 0); return; }
 
     // alinhamento vertical do bloco
-    const blockHeight = node.text.height;
+    const blockHeight = fit?.blockHeight??node.text.height;
     if (w.style.textAlignVertical === "middle") {
-      node.text.position.y = Math.max(pad, (w.height - blockHeight) / 2);
+      node.text.position.y = pad+Math.max(0, ((fit?.height??w.height-pad-bottom) - blockHeight) / 2);
     } else if (w.style.textAlignVertical === "bottom") {
-      node.text.position.y = Math.max(pad, w.height - blockHeight - pad);
+      node.text.position.y = Math.max(pad, w.height - blockHeight - bottom);
     } else {
       node.text.position.y = pad;
     }
-    node.text.position.x = pad;
+    node.text.position.x = left;
 
   }
 
@@ -364,8 +373,9 @@ export class BoardScene {
     w: Widget,
     maxWidth: number,
     collected: Array<{ x: number; y: number; w: number; h: number; url: string }>,
+    prepared?:Run[][],
   ): void {
-    const lines = wrapRichLines(content,w.type==='text'?Infinity:maxWidth,w.style);
+    const lines = prepared??wrapRichLines(content,isFreeText(w)?Infinity:maxWidth,w.style);
     const lineHeight = w.style.fontSize * 1.35;
     const align = w.style.textAlign;
 
@@ -385,7 +395,7 @@ export class BoardScene {
         y += lineHeight;
       };
 
-      for (const run of runs) {
+      for (const run of isBoxText(w)?trimTextLine(runs).runs:runs) {
         for (const token of splitWords(run)) {
           const node = makeRunText(token, run, w, this.textResolution);
           const width = node.width;
@@ -406,7 +416,7 @@ function splitWords(run: Run): string[] {
 
 function makeRunText(token: string, run: Run, w: Widget, resolution: number): Text {
   const isLink = Boolean(run.link);
-  const {fontSize,scale}=textFontScale(w.style.fontSize);
+  const {fontSize,scale}=isBoxText(w)?{fontSize:TEXT_DESIGN_SIZE,scale:w.style.fontSize/TEXT_DESIGN_SIZE}:textFontScale(w.style.fontSize);
   const node=new Text({
     ...TEXT_SAMPLING,
     text: token,

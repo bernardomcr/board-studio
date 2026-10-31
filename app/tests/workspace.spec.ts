@@ -20,7 +20,7 @@ test('selection toggles navigation without a separate hand button and returns to
   await expect(page.locator('[data-tool="hand"]')).toHaveCount(0);await expect(select).toHaveAttribute('aria-pressed','true');
   await select.click();await expect(select).toHaveAttribute('aria-pressed','false');await expect(page.locator('#app canvas')).toHaveCSS('cursor','grab');
   await expect(page.getByRole('toolbar',{name:'Propriedades da seleção'})).toBeHidden();
-  await page.mouse.move(800,500);await page.mouse.down();await page.mouse.move(920,580,{steps:10});await page.mouse.up();
+  await page.mouse.move(800,500);await page.mouse.down();await page.mouse.move(920,580,{steps:10});await page.waitForTimeout(150);await page.mouse.up();
   expect(await page.evaluate(()=>({x:window.__board.camera.x,y:window.__board.camera.y,widget:window.__board.state.widgets.get('source').x}))).toEqual({x:-120,y:-80,widget:-80});
   await page.mouse.dblclick(920,580);expect(await page.locator('#inline-editor').count()).toBe(0);
   await select.click();await expect(select).toHaveAttribute('aria-pressed','true');
@@ -41,7 +41,7 @@ test('background colors, grid and independent boards survive reload and history'
   const toggle=page.getByRole('button',{name:'Fundo do board',exact:true});await toggle.click();
   const panel=page.getByRole('dialog',{name:'Fundo do board',exact:true});await panel.getByRole('button',{name:'Fundo escuro',exact:true}).click();
   expect(await page.evaluate(()=>window.__board.state.background.color)).toBe('#16181d');
-  await panel.getByRole('checkbox',{name:'Mostrar grade',exact:true}).uncheck();
+  await panel.getByRole('button',{name:'Sem malha',exact:true}).click();
   await panel.locator('input[type="color"]').fill('#284b63');await panel.locator('input[type="color"]').press('Tab');
   expect(await page.evaluate(()=>window.__board.state.background)).toEqual({color:'#284b63',grid:false});
   await page.keyboard.press('Escape');await page.keyboard.press('Control+z');expect(await page.evaluate(()=>window.__board.state.background.color)).toBe('#16181d');

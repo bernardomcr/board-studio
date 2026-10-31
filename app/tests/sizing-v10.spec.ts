@@ -6,17 +6,17 @@ async function blank(page){
  await page.goto('/');await page.waitForFunction(()=>window.__board?.booted);
  await page.getByRole('button',{name:'Criar board',exact:true}).click();await page.getByRole('dialog',{name:'Criar board'}).getByRole('button',{name:'Criar board',exact:true}).click();await expect(page.locator('#board-home')).toBeHidden();
 }
-async function menu(page,id){const item=page.locator(`#selection-properties details[data-menu="${id}"]`);await expect(item).toBeVisible();if(!await item.evaluate(el=>el.open))await item.locator('summary').click();await expect(item).toHaveAttribute('open','');return item;}
+async function menu(page,id){const item=page.locator(`#selection-properties details[data-menu="${id}"]`);if(['size','arrange'].includes(id)){const more=page.locator('#selection-properties details[data-menu="more"]');if(!await more.evaluate(e=>e.open))await more.locator(':scope > summary').click();}await expect(item).toBeVisible();if(!await item.evaluate(el=>el.open))await item.locator(':scope > summary').click();await expect(item).toHaveAttribute('open','');return item;}
 async function settle(page){await page.evaluate(()=>new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve))));}
 
 test('connector thickness uses a growing slider and buttons beyond the former thirty-unit cap',async({page})=>{
  await blank(page);await page.evaluate(()=>{const b=window.__board;b.bus.exec({op:'CONNECTOR_CREATE',payload:{id:'thick',type:'connector',shape:'curved',start:{kind:'point',x:-220,y:-80},end:{kind:'point',x:220,y:80},style:{strokeColor:'#3859ff',strokeWidth:2,endCap:'none'},z:0}});b.bus.exec({op:'SELECTION_SET',payload:['thick']});});
  await menu(page,'stroke');await expect(page.getByRole('spinbutton',{name:'Espessura da linha',exact:true})).toHaveCount(0);
- let slider=page.getByRole('slider',{name:'Espessura da linha',exact:true});await slider.press('End');expect(await page.evaluate(()=>window.__board.state.connectors.get('thick').style.strokeWidth)).toBe(32);
+ let slider=page.getByRole('slider',{name:'Espessura da linha',exact:true});await slider.press('End');expect(await page.evaluate(()=>window.__board.state.connectors.get('thick').style.strokeWidth)).toBe(256);
  await page.getByRole('button',{name:'Aumentar espessura da linha',exact:true}).click();await page.getByRole('button',{name:'Aumentar espessura da linha',exact:true}).click();
- expect(await page.evaluate(()=>window.__board.state.connectors.get('thick').style.strokeWidth)).toBe(128);slider=page.getByRole('slider',{name:'Espessura da linha',exact:true});await expect(slider).toHaveValue('128');expect(Number(await slider.getAttribute('max'))).toBeGreaterThan(128);
- await page.keyboard.press('Control+z');expect(await page.evaluate(()=>window.__board.state.connectors.get('thick').style.strokeWidth)).toBe(64);await page.keyboard.press('Control+Shift+z');
- await page.evaluate(()=>window.__board.saveNow());await page.reload();await page.waitForFunction(()=>window.__board?.booted);expect(await page.evaluate(()=>window.__board.state.connectors.get('thick').style.strokeWidth)).toBe(128);
+ expect(await page.evaluate(()=>window.__board.state.connectors.get('thick').style.strokeWidth)).toBe(1024);slider=page.getByRole('slider',{name:'Espessura da linha',exact:true});await expect(slider).toHaveValue('1024');expect(Number(await slider.getAttribute('max'))).toBeGreaterThan(1024);
+ await page.keyboard.press('Control+z');expect(await page.evaluate(()=>window.__board.state.connectors.get('thick').style.strokeWidth)).toBe(512);await page.keyboard.press('Control+Shift+z');
+ await page.evaluate(()=>window.__board.saveNow());await page.reload();await page.waitForFunction(()=>window.__board?.booted);expect(await page.evaluate(()=>window.__board.state.connectors.get('thick').style.strokeWidth)).toBe(1024);
 });
 
 test('text grows beyond ten thousand through the font field and drag handles and borders exceed fifty percent',async({page})=>{
@@ -31,9 +31,9 @@ test('text grows beyond ten thousand through the font field and drag handles and
 });
 
 test('brush and eraser slider ranges keep growing and restore sizes above their old caps',async({page})=>{
- await blank(page);await page.locator('[data-tool="brush"]').click();await page.getByRole('button',{name:'Tamanho: 40',exact:true}).click();for(let i=0;i<7;i++)await page.getByRole('button',{name:'Aumentar tamanho do pincel',exact:true}).click();await expect(page.getByRole('slider',{name:'Tamanho do pincel',exact:true})).toHaveValue('5120');
- await page.locator('[data-tool="eraser"]').click();for(let i=0;i<5;i++)await page.getByRole('button',{name:'Aumentar tamanho da borracha',exact:true}).click();await expect(page.getByRole('slider',{name:'Raio da borracha em pixels',exact:true})).toHaveValue('384');
- await page.reload();await page.waitForFunction(()=>window.__board?.booted);await page.locator('[data-tool="brush"]').click();await expect(page.getByRole('slider',{name:'Tamanho do pincel',exact:true})).toHaveValue('5120');await page.locator('[data-tool="eraser"]').click();await expect(page.getByRole('slider',{name:'Raio da borracha em pixels',exact:true})).toHaveValue('384');
+ await blank(page);await page.locator('[data-tool="brush"]').click();const brush=page.getByRole('slider',{name:'Tamanho do pincel',exact:true});await brush.press('End');await expect(brush).toHaveValue('4096');await brush.press('End');await expect(brush).toHaveValue('8192');expect(Number(await brush.getAttribute('max'))).toBeGreaterThan(8192);
+ await page.locator('[data-tool="eraser"]').click();const eraser=page.getByRole('slider',{name:'Raio da borracha em pixels',exact:true});await eraser.press('End');await expect(eraser).toHaveValue('512');await eraser.press('End');await expect(eraser).toHaveValue('1024');
+ await page.reload();await page.waitForFunction(()=>window.__board?.booted);await page.locator('[data-tool="brush"]').click();await expect(page.getByRole('slider',{name:'Tamanho do pincel',exact:true})).toHaveValue('8192');await page.locator('[data-tool="eraser"]').click();await expect(page.getByRole('slider',{name:'Raio da borracha em pixels',exact:true})).toHaveValue('1024');
 });
 
 test('project files accept large finite geometry and reject non-finite dimensions without relaxing opacity or file budgets',async({page})=>{

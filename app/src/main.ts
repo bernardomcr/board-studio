@@ -1,5 +1,8 @@
 import { Application, Container, Graphics } from "pixi.js";
 import { Camera } from "./core/camera";
+import {PanMomentum} from './core/pan-momentum';
+import {resizeCursor,ROTATE_CURSOR} from './core/cursors';
+import {paintBoardGrid} from './render/grid-paint';
 import { gridStateAt, snapPoint, type GridState } from "./core/grid";
 import { CommandBus, type AlignMode, type BoardState, type Command } from "./core/commands";
 import { nextId, createWidget, STICKY_COLORS, type Widget, type WidgetType, type Style, type ShapeWidget } from "./core/model";
@@ -49,8 +52,7 @@ import {positionContextPanel} from "./context-position";
 import {readStoredBoard,writeStoredBoard} from "./core/board-storage";
 import { installProjectFiles } from "./project-files";
 import {groupLeaves,memberSelection,enclosingGroup,groupSelection,ungroupSelection,captureSelection,duplicateSnapshot,transformSnapshot,selectedBounds,itemLocked,type EntitySnapshot} from "./core/groups";
-import {eraseStrokePoints} from "./core/eraser";
-import {lassoHits} from "./core/lasso";
+import {eraseStrokeArea,strokeIntersectsEraser} from "./core/eraser";
 import { installDrawingUI, type DrawingSettings } from "./drawing-ui";
 import {installBrushPreview,installBrushCursor} from './brush-preview';
 import {isClipboardEditor} from './clipboard-images';
@@ -58,7 +60,7 @@ import {creationWidgetAt,installCreationPreview} from './render/creation-preview
 import {installZoomUI} from './zoom-ui';
 import { installBackground } from "./background";
 import { DEFAULT_BACKGROUND, validateBoardBackground, type BoardBackground } from "./core/background";
-import {naturalText,resizeFreeText,textFontScale,isFreeText} from './core/text-layout';
+import {naturalText,resizeFreeText,textFontScale,isFreeText,effectiveTextFontSize,boxTextInsets,fitBoxText,isBoxText} from './core/text-layout';
 import {snapshotUserFonts,restoreUserFonts,type UserFont} from './user-fonts';
 import {boundedSvgBitmap} from './render/svg-bitmap';
 import {installLayers} from './layers';
@@ -85,6 +87,11 @@ await app.init({
 host.appendChild(app.canvas);
 
 const camera = new Camera();
+const momentum=new PanMomentum();
+window.addEventListener('pointerdown',()=>momentum.stop(),true);
+window.addEventListener('keydown',()=>momentum.stop(),true);
+window.addEventListener('blur',()=>momentum.stop());
+document.addEventListener('visibilitychange',()=>{if(document.hidden)momentum.stop();});
 const world = new Container();
 const gridLayer = new Graphics();
 const overlay = new Graphics();
@@ -222,31 +229,7 @@ let lastCamera = { x: camera.x, y: camera.y, scale: camera.scale };
 
 function drawGrid(): void {
   gridState = gridStateAt(camera.scale);
-  const cell = gridState.visualCell;
-  const stepPx = cell * camera.scale;
-  gridLayer.clear();
-  if(state.background?.grid===false)return;
-  if (stepPx < 6) return;
-
-  const radius = Math.min(2, Math.max(0.75, stepPx / 40));
-  const alpha = Math.min(1, Math.max(0.18, stepPx / 24));
-  const rect = camera.visibleWorldRect();
-  const startX = Math.floor(rect.minX / cell) * cell;
-  const startY = Math.floor(rect.minY / cell) * cell;
-
-  const maxDots = 60_000;
-  let count = 0;
-  for (let wx = startX; wx <= rect.maxX; wx += cell) {
-    for (let wy = startY; wy <= rect.maxY; wy += cell) {
-      if (++count > maxDots) break;
-      const p = camera.worldToScreen({ x: wx, y: wy });
-      gridLayer.circle(p.x, p.y, radius);
-    }
-    if (count > maxDots) break;
-  }
-  const rgb=Number.parseInt((state.background?.color??DEFAULT_BACKGROUND.color).slice(1),16);
-  const dark=((rgb>>16)*.2126+((rgb>>8)&255)*.7152+(rgb&255)*.0722)<110;
-  gridLayer.fill({ color: dark?0x767b88:0xc9c8c3, alpha:dark?alpha*.45:alpha });
+  paintBoardGrid(gridLayer,camera,state.background);
 }
 
 // ------------------------------------------------------------- selection
@@ -372,11 +355,12 @@ function editorContent(w: Widget): string {
 
 function positionEditor(w: Widget): void {
   if (!editor) return;
+  const content=fromHtml(editor.innerHTML),current:Widget={...w,...(w.type==='frame'?{title:content}:{content})};
   // usa o centro + tamanho escalado: funciona igual com rotação
   const center = camera.worldToScreen({ x: w.x + w.width / 2, y: w.y + w.height / 2 });
-  const width = Math.max(w.type==='text'?8:40, w.width * camera.scale);
-  const height = Math.max(w.type==='text'?8:24, w.height * camera.scale);
-  const font=textFontScale(Math.max(.1,w.style.fontSize*camera.scale));
+  const width = Math.max(isFreeText(w)?8:.000001, w.width * camera.scale);
+  const height = Math.max(isFreeText(w)?8:.000001, w.height * camera.scale);
+  const font=textFontScale(effectiveTextFontSize(current)*camera.scale);
   const topLeft=w.rotation===0&&width===w.width*camera.scale&&height===w.height*camera.scale?camera.worldToScreen({x:w.x,y:w.y}):(()=>{const offset=rotate({x:-width/2,y:-height/2},w.rotation);return {x:center.x+offset.x,y:center.y+offset.y};})();
   editor.style.left = topLeft.x + "px";
   editor.style.top = topLeft.y + "px";
@@ -385,7 +369,11 @@ function positionEditor(w: Widget): void {
   editor.style.transform = `rotate(${w.rotation}rad) scale(${font.scale})`;
   editor.style.transformOrigin = '0 0';
   editor.style.fontSize = font.fontSize + "px";
-  editor.style.padding=w.type==='text'?'0':`${10*camera.scale/font.scale}px`;
+  if(isFreeText(w))editor.style.padding='0';else{
+    const insets=boxTextInsets(w),fit=isBoxText(current)?fitBoxText(current):null,block=fit?.blockHeight??0;
+    const top=!fit||w.style.textAlignVertical==='top'?insets.top:w.style.textAlignVertical==='bottom'?Math.max(insets.top,w.height-insets.bottom-block):insets.top+Math.max(0,(fit.height-block)/2),ratio=camera.scale/font.scale;
+    editor.style.padding=`${top*ratio}px ${insets.right*ratio}px ${insets.bottom*ratio}px ${insets.left*ratio}px`;
+  }
 }
 
 /** Editor WYSIWYG: mostra o texto formatado, não a marcação. */
@@ -404,11 +392,11 @@ function beginEdit(w: Widget): void {
   Object.assign(el.style, {
     position: "fixed",
     margin: "0",
-    padding: w.type==='text'?"0":"10px",
+    padding: isFreeText(w)?"0":"10px",
     border: "none",
-    outline: w.type==='text'?"none":"2px solid #3859ff",
+    outline: isFreeText(w)?"none":"2px solid #3859ff",
     borderRadius: "2px",
-    overflow: w.type==='text'?"visible":"auto",
+    overflow: isFreeText(w)?"visible":"hidden",
     boxSizing: "border-box",
     background: w.type === "sticky_note" ? (STICKY_COLORS[styleKey(w)] ?? "#fff9b1") : "#ffffff",
     color: w.style.color,
@@ -417,8 +405,8 @@ function beginEdit(w: Widget): void {
     fontSize: Math.max(.1, w.style.fontSize * camera.scale) + "px",
     lineHeight: "1.35",
     textAlign: w.style.textAlign,
-    whiteSpace: w.type==='text'?"pre":"pre-wrap",
-    wordBreak: w.type==='text'?"normal":"break-word",
+    whiteSpace: isFreeText(w)?"pre":"pre-wrap",
+    wordBreak: isFreeText(w)?"normal":"break-word",
     zIndex: "50",
   });
 
@@ -460,7 +448,7 @@ function beginEdit(w: Widget): void {
   });
 
   el.addEventListener("blur", () => {if(!linkUI?.editing())endEdit(true);});
-  if(w.type==='text')el.addEventListener('input',()=>positionEditor(naturalText({...w,content:fromHtml(el.innerHTML)})));
+  el.addEventListener('input',()=>positionEditor(isFreeText(w)?naturalText({...w,content:fromHtml(el.innerHTML)}):w));
 }
 
 function styleKey(w: Widget): string {
@@ -572,7 +560,7 @@ function drawSelection(): void {
 
 // ---------------------------------------------------------------- tools
 
-type Tool = "lasso" | "select" | "hand" | "connector" | "brush" | "highlighter" | "eraser" | WidgetType;
+type Tool = "select" | "hand" | "connector" | "brush" | "highlighter" | "eraser" | WidgetType;
 let pendingConnection: Extract<Gesture,{kind:"connect"}> | null = null;
 let connectorDefault: {shape:ConnectorShape; arrow:boolean} = {shape:"curved",arrow:true};
 let tool: Tool = "select";
@@ -586,6 +574,7 @@ const creationPreview=installCreationPreview({parent:world,camera,canvas:app.can
 }});
 
 function setTool(next: Tool): void {
+  momentum.stop();
   if(next!=='sticky_note')stickyStackMode=false;
   creationPreview.clear();
   connectorCompletion?.close();
@@ -593,7 +582,7 @@ function setTool(next: Tool): void {
   if(next !== "connector") { pendingConnection=null; connectPreview=null; connectionMagnet=null; }
   if (next !== "shape") editorUI?.closePanels();
   for (const btn of toolbar.querySelectorAll<HTMLButtonElement>("button[data-tool]")) {
-    btn.classList.toggle("active", btn.dataset.tool === next);
+    btn.classList.toggle("active", btn.dataset.tool === next||btn.dataset.tool==='shape'&&next==='connector');
     if(btn.dataset.tool==="select"){btn.setAttribute("aria-pressed",String(next==="select"));btn.dataset.label=next==="select"?"Desativar seleção e navegar":"Selecionar e mover objetos (V)";}
   }
   document.body.classList.toggle("navigation-mode",next==="hand");
@@ -605,9 +594,13 @@ function setTool(next: Tool): void {
 }
 
 function updateCursor(): void {
-  if(tool==='connector'||gesture.kind==='connect'||gesture.kind==='reconnect'||pendingConnection){app.canvas.style.cursor='default';return;}
+  if(gesture.kind==='pan'||gesture.kind==='drag'||gesture.kind==='bend'||gesture.kind==='reconnect'){app.canvas.style.cursor='grabbing';return;}
+  if(gesture.kind==='resize'||gesture.kind==='multi-resize'){app.canvas.style.cursor=resizeCursor(gesture.handle,gesture.kind==='resize'?gesture.startWidget.rotation:gesture.box.rotation);return;}
+  if(gesture.kind==='rotate'||gesture.kind==='multi-rotate'){app.canvas.style.cursor=ROTATE_CURSOR;return;}
+  if(gesture.kind==='connect'||pendingConnection){app.canvas.style.cursor='default';return;}
+  if(tool==='connector'){app.canvas.style.cursor='crosshair';return;}
   connectionMagnet=null;
-  if(tool==='brush'||tool==='highlighter'){app.canvas.style.cursor=spaceDown?'grab':'none';return;}
+  if(tool==='brush'||tool==='highlighter'||tool==='eraser'){app.canvas.style.cursor=spaceDown?'grab':'none';return;}
   app.canvas.style.cursor =
     tool === "hand" ? "grab" : tool === "select" ? "default" : "crosshair";
 }
@@ -619,6 +612,7 @@ toolbar.addEventListener("click", (e) => {
   if (btn.dataset.tool === "shape") { editorUI?.openShapes(); return; }
   if (btn.dataset.tool === "connector") { if(tool==='connector')editorUI?.openConnectors();else setTool('connector');return; }
   if (btn.dataset.tool === "select") {setTool(tool==="select"?"hand":"select");return;}
+  if((btn.dataset.tool==='brush'||btn.dataset.tool==='eraser')&&tool===btn.dataset.tool){setTool('hand');return;}
   setTool(btn.dataset.tool as Tool);
 });
 
@@ -778,8 +772,8 @@ type Gesture =
   | { kind: "reconnect"; id: string; which: "start" | "end"; current: Vec;snapDisabled?:boolean }
   | { kind: "draw"; points: StrokePoint[]; tool: "brush" | "highlighter"; color:string; width:number; opacity:number;precision:boolean;precisionStrength?:number;precisionSmoothing?:number }
   | {kind:'brush-adjust';start:Vec;tool:'brush'|'highlighter';initial:DrawingSettings}
-  | {kind:"lasso";points:Vec[]}
-  | { kind: "erase"; radius: number;partial:boolean };
+  | {kind:'eraser-adjust';start:Vec;radius:number}
+  | { kind: "erase"; radius: number;partial:boolean;last:Vec;pending:Vec[] };
 
 let gesture: Gesture = { kind: "none" };
 let cursorWorld: Vec = { x: 0, y: 0 };
@@ -1001,6 +995,12 @@ app.canvas.addEventListener("dblclick", (e) => {
 });
 
 app.canvas.addEventListener("pointerdown", (e) => {
+  momentum.stop();
+  if(e.button===2&&e.altKey&&(tool==='brush'||tool==='eraser')){
+    e.preventDefault();app.canvas.setPointerCapture(e.pointerId);pointers.set(e.pointerId,{x:e.clientX,y:e.clientY});
+    gesture=tool==='eraser'?{kind:'eraser-adjust',start:{x:e.clientX,y:e.clientY},radius:drawingUI?.eraserRadius()??12}:{kind:'brush-adjust',start:{x:e.clientX,y:e.clientY},tool:'brush',initial:drawingUI!.settings('brush')};brushCursor?.move(e.clientX,e.clientY);brushCursor?.adjusting(true);return;
+  }
+  if(e.button===2)return;
   flushGestureUpdate();
   clickedObjectLink=null;
   app.canvas.setPointerCapture(e.pointerId);
@@ -1015,12 +1015,12 @@ app.canvas.addEventListener("pointerdown", (e) => {
   const p = camera.screenToWorld(screen);
   cursorWorld = p;
 
-  if (e.button === 2) return;
   connectorCompletion?.close();
   editorUI?.closePanels();
   if (e.button === 1 || spaceDown || tool === "hand") {
     creationPreview.clear();
     gesture = { kind: "pan", pointerId: e.pointerId };
+    momentum.begin({x:e.clientX,y:e.clientY},performance.now());
     app.canvas.style.cursor = "grabbing";
     return;
   }
@@ -1050,11 +1050,10 @@ app.canvas.addEventListener("pointerdown", (e) => {
     return;
   }
 
-  if(tool==="lasso"){gesture={kind:"lasso",points:[p]};return;}
   if (tool === "eraser") {
     const radius=(drawingUI?.eraserRadius() ?? 12)/camera.scale;
     const partial=drawingUI?.eraserMode()==="partial";bus.beginTransaction(partial?"Apagar parte do traço":"Apagar traços");
-    gesture = { kind: "erase", radius,partial };
+    gesture = { kind: "erase", radius,partial,last:p,pending:[] };
     eraseAt(p, radius,partial);
     return;
   }
@@ -1186,7 +1185,7 @@ if (state.selection.size > 1) {
 });
 
 app.canvas.addEventListener("pointermove", (e) => {
-  if(tool==='brush'||tool==='highlighter')brushCursor?.move(e.clientX,e.clientY);
+  if(tool==='brush'||tool==='highlighter'||tool==='eraser')brushCursor?.move(e.clientX,e.clientY);
   const prev = pointers.get(e.pointerId);
   if (prev) pointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
 
@@ -1207,16 +1206,19 @@ app.canvas.addEventListener("pointermove", (e) => {
     return;
   }
 
-  if (gesture.kind === "none" && tool === "select") {
-    hoveredLink = linkUnder(p)??topmostAt(p)?.link??null;
+  if(gesture.kind!=='none')updateCursor();
+  if (gesture.kind === "none" && (tool === "select"||tool==='shape')) {
+    const hoveredWidget=topmostAt(p);
+    hoveredLink = linkUnder(p)??hoveredWidget?.link??null;
     const hover=hoverConnectionTarget(p),nextHover=hover?.id??null;
     if(nextHover!==hoveredConnectionWidget){hoveredConnectionWidget=nextHover;drawSelection();}
     const atDot=hover&&connectionHandles(hover).some(h=>Math.hypot(h.point.x-screen.x,h.point.y-screen.y)<=10);
     const selected=state.selection.size===1?state.connectors.get([...state.selection][0]!):undefined,geometry=selected&&!selected.locked?connectorGeometry(selected,state.widgets):null;
     const grab=geometry&&[geometry.points[0]!,geometry.points.at(-1)!,...connectorEditPoints(selected!,geometry)].some(point=>{const s=camera.worldToScreen(point);return Math.hypot(s.x-screen.x,s.y-screen.y)<=10;});
-    app.canvas.style.cursor = atDot?"pointer":grab?'grab':hoveredLink ? "pointer" : "default";
+    const locked=[...state.selection].some(id=>itemLocked(state,id)),handle=!locked?handleAtScreen(screen):null,rotating=!locked&&rotateHandleAtScreen(screen),box=state.selection.size===1?state.widgets.get([...state.selection][0]!):selectionBox();
+    app.canvas.style.cursor=handle?resizeCursor(handle,box?.rotation??0):rotating?ROTATE_CURSOR:atDot?'pointer':grab?'grab':hoveredLink?'pointer':hoveredWidget?.locked?'not-allowed':hoveredWidget?(isFreeText(hoveredWidget)&&state.selection.has(hoveredWidget.id)?'text':'move'):tool==='shape'?'crosshair':'default';
   }
-  if(gesture.kind==='none'&&tool==='connector'){const hover=hoverConnectionTarget(p),nextHover=hover?.id??null;if(nextHover!==hoveredConnectionWidget){hoveredConnectionWidget=nextHover;drawSelection();}app.canvas.style.cursor=!pendingConnection&&hover&&connectionHandles(hover).some(h=>Math.hypot(h.point.x-screen.x,h.point.y-screen.y)<=10)?'pointer':'default';}
+  if(gesture.kind==='none'&&tool==='connector'){const hover=hoverConnectionTarget(p),nextHover=hover?.id??null;if(nextHover!==hoveredConnectionWidget){hoveredConnectionWidget=nextHover;drawSelection();}app.canvas.style.cursor=!pendingConnection&&hover&&connectionHandles(hover).some(h=>Math.hypot(h.point.x-screen.x,h.point.y-screen.y)<=10)?'pointer':pendingConnection?'default':'crosshair';}
 
   if(pendingConnection && gesture.kind === "none") {pendingConnection.current=connectionPointer(p,pendingConnection.fromAnchor,e.shiftKey);pendingConnection.snapDisabled=e.ctrlKey||e.metaKey;connectPreview={from:resolveEndpoint(pendingConnection.fromAnchor,state.widgets)!,to:pendingConnection.current};drawSelection();}
   switch (gesture.kind) {
@@ -1225,7 +1227,8 @@ app.canvas.addEventListener("pointermove", (e) => {
       drawingUI?.adjust(gesture.tool,{width:gesture.initial.width+dx/Math.max(.02,camera.scale)*.4,opacity:gesture.initial.opacity-dy*.005},false);
       return;
     }
-    case "bend": {const index=gesture.index,c=state.connectors.get(gesture.id),points=gesture.points.map((v,i)=>i===index?p:v);const singleCurve=(c?.shape==='curved'||c?.shape==='elbowed')&&!c.waypoints?.length&&points.length===1;bus.exec({op:"CONNECTOR_UPDATE",payload:{id:gesture.id,patch:singleCurve?{controlPoint:points[0],waypoints:null}:{waypoints:points,controlPoint:null,...(c?.shape==="straight"?{shape:"curved"}:{})}}});return;}
+    case 'eraser-adjust':drawingUI?.adjustEraserRadius(gesture.radius+(e.clientX-gesture.start.x)*.5,false);brushCursor?.update();return;
+    case "bend": {const id=gesture.id,index=gesture.index,c=state.connectors.get(id),points=gesture.points.map((v,i)=>i===index?p:v);const singleCurve=(c?.shape==='curved'||c?.shape==='elbowed')&&!c.waypoints?.length&&points.length===1;const patch=singleCurve?{controlPoint:points[0],waypoints:null}:{waypoints:points,controlPoint:null,...(c?.shape==="straight"?{shape:"curved" as const}:{})};queueGestureUpdate(()=>bus.exec({op:'CONNECTOR_UPDATE',payload:{id,patch}}));return;}
     case "multi-rotate":{let angle=Math.atan2(p.y-gesture.center.y,p.x-gesture.center.x)-gesture.angle;if(e.shiftKey)angle=Math.round(angle/(Math.PI/12))*Math.PI/12;bus.exec({op:"BATCH",payload:{label:"Girar seleção",commands:transformSnapshot(state,gesture.initial,0,0,1,1,gesture.center,angle)}});return;}
     case "create": {
       let dx = p.x - gesture.start.x, dy = p.y - gesture.start.y;
@@ -1237,6 +1240,7 @@ app.canvas.addEventListener("pointermove", (e) => {
     case "pan": {
       if (!prev) return;
       camera.panByScreen(e.clientX - prev.x, e.clientY - prev.y);
+      momentum.move({x:e.clientX,y:e.clientY},performance.now());
       gridDirty = true;
       return;
     }
@@ -1286,9 +1290,8 @@ app.canvas.addEventListener("pointermove", (e) => {
       brushPreview.update(gesture.points,gesture);
       return;
     }
-    case "lasso":{gesture.points.push(p);const points=gesture.points.map(p=>camera.worldToScreen(p));overlay.clear().poly(points.flatMap(p=>[p.x,p.y])).fill({color:0x3859ff,alpha:.05}).stroke({color:0x3859ff,width:1});return;}
     case "erase": {
-      eraseAt(p, gesture.radius,gesture.partial);
+      const erasing=gesture;erasing.pending.push(p);queueGestureUpdate(()=>{const points=erasing.pending;erasing.pending=[];if(points.length){erasePath([erasing.last,...points],erasing.radius,erasing.partial);erasing.last=points.at(-1)!;}});
       const cursor=camera.worldToScreen(p);overlay.clear().circle(cursor.x,cursor.y,gesture.radius*camera.scale).stroke({width:1,color:0x3859ff});
       return;
     }
@@ -1303,11 +1306,7 @@ app.canvas.addEventListener("pointermove", (e) => {
           const anchor = picked!.anchor;
           endpoint = { kind: "anchor", widgetId: target.id, x: anchor.x, y: anchor.y };
         }
-        bus.exec({
-          op: "CONNECTOR_UPDATE",
-          payload: { id: gesture.id, patch: gesture.which === "start" ? { start: endpoint } : { end: endpoint } },
-        });
-        drawSelection();
+        const id=gesture.id,patch=gesture.which==='start'?{start:endpoint}:{end:endpoint};queueGestureUpdate(()=>bus.exec({op:'CONNECTOR_UPDATE',payload:{id,patch}}));
       }
       return;
     }
@@ -1315,7 +1314,7 @@ app.canvas.addEventListener("pointermove", (e) => {
       gesture.current = connectionPointer(p,gesture.fromAnchor,e.shiftKey);gesture.snapDisabled=e.ctrlKey||e.metaKey;
       app.canvas.style.cursor='default';
       connectPreview = {from:resolveEndpoint(gesture.fromAnchor,state.widgets)??p,to:gesture.current};
-      drawSelection();
+      queueGestureUpdate(drawSelection);
       return;
     }
     case "marquee": {
@@ -1363,16 +1362,14 @@ app.canvas.addEventListener("pointermove", (e) => {
 
 let lastMarqueeRect: Rect | null = null;
 
-function eraseAt(p:Vec,radius:number,partial=false):void {
-  for(const id of [...state.strokeOrder]){const stroke=state.strokes.get(id);if(!stroke||stroke.hidden||stroke.locked||distanceToStroke(p,stroke)>radius)continue;
-    if(!partial){bus.exec({op:"STROKE_REMOVE",payload:id});continue;}
-    const fragments=eraseStrokePoints(stroke,p,radius);
-    if(fragments.length===1&&JSON.stringify(fragments[0])===JSON.stringify(stroke.points))continue;
-    const groups=[...state.groups].map(([gid,members])=>[gid,[...members]] as [string,string[]]);
-    bus.exec({op:"STROKE_REMOVE",payload:id});const ids:string[]=[];
-    for(const points of fragments){const next=nextId("stroke");ids.push(next);bus.exec({op:"STROKE_CREATE",payload:{...stroke,id:next,points}});}
-    if(ids.length)for(const [gid,members]of groups)bus.exec({op:"GROUP_CREATE",payload:{id:gid,items:members.flatMap(member=>member===id?ids:[member])}});
+function eraseAt(p:Vec,radius:number,partial=false,from:Vec=p):void {erasePath([from,p],radius,partial);}
+function erasePath(points:Vec[],radius:number,partial:boolean):void {
+  if(points.length<2)return;let minX=Infinity,minY=Infinity,maxX=-Infinity,maxY=-Infinity;for(const p of points){minX=Math.min(minX,p.x);maxX=Math.max(maxX,p.x);minY=Math.min(minY,p.y);maxY=Math.max(maxY,p.y);}const commands:Command[]=[];
+  for(const id of state.strokeOrder){const stroke=state.strokes.get(id);if(!stroke||stroke.hidden||stroke.locked)continue;const bounds=strokeBounds(stroke);if(bounds.maxX<minX-radius||bounds.minX>maxX+radius||bounds.maxY<minY-radius||bounds.minY>maxY+radius)continue;let erased=stroke;
+    for(let i=1;i<points.length;i++){if(partial)erased=eraseStrokeArea(erased,points[i-1]!,points[i]!,radius);else if(strokeIntersectsEraser(stroke,points[i-1]!,points[i]!,radius)){commands.push({op:'STROKE_REMOVE',payload:id});break;}}
+    if(partial&&erased!==stroke)commands.push({op:'STROKE_UPDATE',payload:{id,patch:{erasures:erased.erasures}}});
   }
+  if(commands.length)bus.exec({op:'BATCH',payload:{label:partial?'Apagar área do desenho':'Apagar traços',commands}});
 }
 
 function marqueeRect(a: Vec, b: Vec): Rect {
@@ -1399,6 +1396,7 @@ function endGesture(e: PointerEvent): void {
   let completionId:string|undefined;
   switch (gesture.kind) {
     case 'brush-adjust':drawingUI?.commitSettings();brushCursor?.adjusting(false);break;
+    case 'eraser-adjust':drawingUI?.adjustEraserRadius(drawingUI.eraserRadius());brushCursor?.adjusting(false);break;
     case "create": {
       if (e.type === "pointercancel") break;
       const {widget,start,current} = gesture;
@@ -1409,9 +1407,9 @@ function endGesture(e: PointerEvent): void {
       break;
     }
     case "pan":
+      momentum.release(performance.now());scheduleSave();
       updateCursor();
       break;
-    case "lasso":{const hits=lassoHits(state,gesture.points);bus.exec({op:"SELECTION_SET",payload:[...new Set(hits.flatMap(id=>memberSelection(state,id,isolatedGroup)))]});setTool("select");break;}
     case "drag": {if(gesture.ids.length===1&&state.widgets.get(gesture.ids[0]!)?.mind&&Math.hypot(gesture.delta.x,gesture.delta.y)*camera.scale>5){const rect=app.canvas.getBoundingClientRect();mindmapUI?.commitDrop(gesture.ids[0]!,camera.screenToWorld({x:e.clientX-rect.left,y:e.clientY-rect.top}));}mindmapUI?.clearDrop();break;}
     case "draw": {
       const raw = gesture.points;
@@ -1488,6 +1486,7 @@ function endGesture(e: PointerEvent): void {
   bus.endTransaction();
   if(objectLink&&e.type==='pointerup'){const rect=app.canvas.getBoundingClientRect(),point=camera.screenToWorld({x:e.clientX-rect.left,y:e.clientY-rect.top});if(Math.hypot(point.x-objectLink.start.x,point.y-objectLink.start.y)*camera.scale<4&&state.widgets.has(objectLink.id))window.open(objectLink.url,'_blank','noopener,noreferrer');}
   gesture = { kind: "none" };
+  updateCursor();
   refreshChrome();
   activeGuides = [];
   connectPreview = null;
@@ -1501,6 +1500,7 @@ app.canvas.addEventListener("pointerleave",()=>{if(gesture.kind==="none"&&hovere
 app.canvas.addEventListener(
   "wheel",
   (e) => {
+    momentum.stop();
     e.preventDefault();
     connectorCompletion?.close();
     if (e.ctrlKey || !e.shiftKey) {
@@ -1598,7 +1598,7 @@ window.addEventListener("keydown", (e) => {
   }
 
   switch (e.key) {
-    case "l":case "L":setTool("lasso");break;
+
     case "v":
     case "V":
       setTool("select");
@@ -1634,10 +1634,6 @@ window.addEventListener("keydown", (e) => {
     case "e":
     case "E":
       setTool("eraser");
-      break;
-    case "h":
-    case "H":
-      setTool("highlighter");
       break;
     case "?":
       e.preventDefault();
@@ -1723,7 +1719,6 @@ async function copySelectionImage(){
   const svg=boundedSvgBitmap(await embedSvgFonts(boardToSvg(subset,{background:"none"}),[...subset.widgets.values()].map(w=>w.style.fontFamily))),url=URL.createObjectURL(new Blob([svg],{type:"image/svg+xml"}));
   try{const img=new Image();img.src=url;await img.decode();const canvas=document.createElement("canvas"),scale=Math.min(2,4096/Math.max(img.width,img.height));canvas.width=Math.max(1,Math.ceil(img.width*scale));canvas.height=Math.max(1,Math.ceil(img.height*scale));canvas.getContext("2d")!.drawImage(img,0,0,canvas.width,canvas.height);const blob=await new Promise<Blob|null>(resolve=>canvas.toBlob(resolve));if(blob){try{await navigator.clipboard.write([new ClipboardItem({"image/png":blob})]);}catch{downloadBlob(blob,"selecao.png");}}}finally{URL.revokeObjectURL(url);}
 }
-const lassoButton=document.createElement("button");lassoButton.dataset.tool="lasso";lassoButton.dataset.label="Selecionar com laço (L)";lassoButton.setAttribute("aria-label","Laço");lassoButton.title="Laço (L)";lassoButton.innerHTML='<svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M8 17c-9-1-7-13 4-13 11 0 13 11 3 13-6 2-11 0-8-3 3-2 7 3 3 7"/></svg>';toolbar.querySelector('[data-tool="eraser"]')?.after(lassoButton);
 // Local editor controls
 images = installImages({state,bus,camera,app,world,getBoardKey:mediaBoardKey,nodeAt:id=>scene.nodeAt(id),onChange:()=>{syncScene();refreshChrome();}});
 backgroundUI=installBackground({state,bus,camera,app,world,getBoardKey:mediaBoardKey,onChange:()=>{gridDirty=true;syncScene();refreshChrome();}});
@@ -1756,11 +1751,12 @@ editorUI = installEditorUI({state,bus,camera,setTool:t=>setTool(t as Tool),getTo
     bus.exec({op:"WIDGET_UPDATE",payload:{id:w.id,patch:{x:w.x+(w.width-width)/2,y:w.y+(w.height-height)/2,width,height}}});
   },
   onReplaceImage:()=>images?.replaceSelected(),onFlipImage:axis=>images?.flipSelected(axis),onDownloadImage:()=>images?.downloadSelected(),
+  onCreateChecklist:()=>structuredUI?.configureChecklist(state.widgets.get([...state.selection][0]!)),onCreateTable:()=>structuredUI?.configureTable(state.widgets.get([...state.selection][0]!)),
   getGroupScope:()=>isolatedGroup,onExitGroup:()=>{const group=isolatedGroup;isolatedGroup=null;if(group)bus.exec({op:"SELECTION_SET",payload:groupLeaves(state,group)});refreshChrome();},
   onAddWaypoint:()=>editWaypoint(false),onRemoveWaypoint:()=>editWaypoint(true),onCopyImage:()=>{void copySelectionImage();}});
 installIcons();
 drawingUI=installDrawingUI({getTool:()=>tool,setTool:t=>setTool(t as Tool),onChange:()=>brushCursor?.update()});
-brushCursor=installBrushCursor({camera,getTool:()=>tool,getSettings:()=>drawingUI!.settings(tool==='highlighter'?'highlighter':'brush'),temporaryHand:()=>spaceDown||gesture.kind==='pan'});
+brushCursor=installBrushCursor({camera,getTool:()=>tool,getSettings:()=>drawingUI!.settings(tool==='highlighter'?'highlighter':'brush'),getEraserRadius:()=>drawingUI?.eraserRadius()??12,temporaryHand:()=>spaceDown||gesture.kind==='pan'});
 app.canvas.addEventListener('pointerleave',()=>brushCursor?.leave());
 const projectFiles=installProjectFiles({state,bus,camera,getBoardKey:mediaBoardKey,sync:()=>{boardEpoch++;gridDirty=true;syncScene();drawSelection();refreshChrome();if(home&&!home.currentId())void home.adoptCurrent();else{home?.updateCurrent();scheduleSave();}}});
 const title=document.getElementById("board-title")!;title.contentEditable="true";title.setAttribute("role","textbox");title.setAttribute("aria-label","Nome do board");title.setAttribute("spellcheck","false");title.addEventListener("keydown",e=>{if(e.key==="Enter"){e.preventDefault();title.blur();}});title.addEventListener("blur",()=>{if(!title.textContent?.trim())title.textContent="Board sem título";home?.updateCurrent({title:title.textContent??"Board"});scheduleSave();});
@@ -1772,6 +1768,7 @@ let fps = 0;
 let fpsAt = performance.now();
 
 app.ticker.add(() => {
+  if(momentum.active){if(gesture.kind!=='none'||document.hidden||home?.transitioning()||document.body.classList.contains('home-visible'))momentum.stop();else{const delta=momentum.tick(performance.now());camera.panByScreen(delta.x,delta.y);gridDirty=true;if(!momentum.active)scheduleSave();}}
   const resolution=Math.min(window.devicePixelRatio||1,3);
   if(resolution!==app.renderer.resolution){const width=app.screen.width,height=app.screen.height;app.renderer.resolution=resolution;app.renderer.resize(width,height);syncSize();syncScene();brushPreview.request();creationPreview.refresh();gridDirty=true;}
   if (camera.scale !== lastScale) {
@@ -1824,7 +1821,7 @@ app.ticker.add(() => {
   ].join("\n");}
 });
 
-home=installBoardHome({capture:savedBoard,afterTransition:()=>refreshChrome(),beforeTransition:()=>{audioUI?.pauseAll();flushGestureUpdate();endEdit(true);editorUI?.finalizePropertyGestures();bus.endTransaction();gesture={kind:'none'};pointers.clear();brushPreview.clear();creationPreview.clear();connectorCompletion?.close();},open:async data=>{
+home=installBoardHome({capture:savedBoard,afterTransition:()=>refreshChrome(),beforeTransition:()=>{momentum.stop();audioUI?.pauseAll();flushGestureUpdate();endEdit(true);editorUI?.finalizePropertyGestures();bus.endTransaction();gesture={kind:'none'};pointers.clear();brushPreview.clear();creationPreview.clear();connectorCompletion?.close();},open:async data=>{
   if(saveTimer){clearTimeout(saveTimer);saveTimer=null;}endEdit(true);bus.endTransaction();gesture={kind:"none"};isolatedGroup=null;
   await restoreUserFonts((data as SavedBoard).userFonts);
   await Promise.all([...new Set((data as SavedBoard).widgets.map(w=>(w as Widget).style.fontFamily))].map(loadBoardFont));
@@ -1845,6 +1842,7 @@ const bootPromise=home.start();
   lastMarquee: () => lastMarqueeRect,
   gesture: () => gesture,
   eraseAt,
+  navigation:{stop:()=>momentum.stop(),active:()=>momentum.active},
   load: loadBoard,
   saveNow: persistBoard,
   booted: false,

@@ -2,7 +2,7 @@
 import {test,expect} from '@playwright/test';
 async function blank(page){await page.goto('/');await page.waitForFunction(()=>window.__board?.booted);await page.getByRole('button',{name:'Criar board',exact:true}).click();await page.getByRole('dialog',{name:'Criar board',exact:true}).getByRole('button',{name:'Criar board',exact:true}).click();await expect(page.locator('#board-home')).toBeHidden();}
 async function shape(page,type='shape',content='**Alpha**\nBeta\nGamma'){await page.evaluate(async({type,content})=>{const b=window.__board,{createWidget}=await import('/src/core/model.ts');b.bus.exec({op:'WIDGET_CREATE',payload:{...createWidget(type,{x:-120,y:-75,width:240,height:150,content}),id:'item'}});b.bus.exec({op:'SELECTION_SET',payload:['item']});},{type,content});}
-async function menu(page,label){await page.locator(`#selection-properties summary[aria-label="${label}"]`).click();}
+async function menu(page,label){if(label==='Listas e recuos'&&!await page.locator('#selection-properties summary[aria-label="Listas e recuos"]').count())label='Texto';await page.locator(`#selection-properties summary[aria-label="${label}"]`).click();}
 async function model(page){return page.evaluate(()=>window.__board.state.widgets.get('item'));}
 
 test('type style and alignment use uniform icon rows with real state and one-step undo',async({page})=>{

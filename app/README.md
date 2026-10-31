@@ -17,16 +17,15 @@ No Windows, `../TESTAR.cmd` compila e abre `http://localhost:4173`. Os boards fi
 |---|---|
 | Selecionar / navegar | V; clicar novamente no botão de seleção ativa a mão |
 | Navegar temporariamente | Espaço + arrastar ou botão do meio |
-| Pincel / marca-texto / borracha | B (ou P) / H / E |
-| Ajustar pincel | Alt + botão esquerdo; horizontal = tamanho, vertical = opacidade |
+| Pincel / borracha | B (ou P) / E; clicar novamente fecha o painel e ativa a mão |
+| Ajustar pincel | Alt + botão direito (ou esquerdo); horizontal = tamanho, vertical = opacidade |
 | Suavizar pincel | Marcar Precisão no painel |
-| Laço | L |
 | Forma / texto / nota / quadro | R / T / S / F |
 | Repetir uma forma | Desenhar mantém a mesma ferramenta; V volta à seleção |
-| Escrever dentro de uma forma | Duplo clique; o texto quebra dentro da área da forma |
+| Escrever dentro de uma forma | Duplo clique; a fonte se adapta à área sem alterar o tamanho preferido |
 | Texto novo | Canto superior esquerdo no centro da tela; tamanho inicial adaptado ao zoom |
 | Fontes próprias | Abrir o seletor de fonte e escolher Adicionar fontes |
-| Conector | C ou puxar uma porta de um objeto |
+| Conector | Formas e linhas, C ou puxar uma porta de um objeto |
 | Mapa mental selecionado | Tab adiciona filho; Enter adiciona irmão; Shift+Enter adiciona irmão acima |
 | Editar tópico | Enter confirma; Shift+Enter quebra linha; Escape cancela |
 | Recolher um ramo | Espaço com um tópico selecionado ou botão de recolher |
@@ -35,6 +34,7 @@ No Windows, `../TESTAR.cmd` compila e abre `http://localhost:4173`. Os boards fi
 | Suspender encaixe de conector | Ctrl (Command no macOS) |
 | Restringir direção de conector | Shift |
 | Redimensionar | Arrastar alças; texto muda o tamanho das letras |
+| Focar uma camada | Duplo clique no objeto listado; F2 renomeia |
 | Agrupar / desagrupar | Ctrl+G / Ctrl+Shift+G |
 | Entrar em grupo | Duplo clique; Alt+clique seleciona um membro |
 | Ampliar/reduzir seleção | Shift+clique; grupos mistos entram e saem como uma unidade |

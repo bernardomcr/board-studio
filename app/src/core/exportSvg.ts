@@ -22,7 +22,7 @@ import {resolvedWidgetStyle} from './style-scale';
 import {mindNodeHidden,mindConnectorHidden,mindTopicText} from './mindmap';
 import {audioCardSvg} from '../render/audio-paint';
 import {structuredSvgContent} from '../render/structured-text';
-import {measureTextRun,textFontScale,wrapRichLines} from './text-layout';
+import {measureTextRun,textFontScale,wrapRichLines,fitBoxText,isBoxText,isFreeText,trimTextLine} from './text-layout';
 
 const escapeXml = (value: string): string =>
   value
@@ -171,30 +171,33 @@ function borderSvg(style: Style): string {
 
 function textSvg(w: Widget): string {
   const content=w.type==='frame'?'':mindTopicText(w);if(!content.trim())return '';
+  const preferred=w.style.fontSize,fit=isBoxText(w)?fitBoxText(w,content):undefined;
+  if(fit)w={...w,style:{...w.style,fontSize:fit.fontSize}};
   const {fontSize,scale}=textFontScale(w.style.fontSize),style={...w.style,fontSize},width=w.width/scale,height=w.height/scale;
-  const pad=(w.type==='text'?0:10)/scale,maxWidth=w.type==='text'?Infinity:Math.max(10/scale,width-pad*2),lineHeight=fontSize*1.35;
+  const pad=(fit?.insets.top??(w.type==='text'?0:10))/scale,left=(fit?.insets.left??pad*scale)/scale,right=(fit?.insets.right??pad*scale)/scale,bottom=(fit?.insets.bottom??pad*scale)/scale,maxWidth=isFreeText(w)?Infinity:Math.max(Number.MIN_VALUE,width-left-right),lineHeight=fontSize*1.35;
   const anchor=w.style.textAlign==='center'?'middle':w.style.textAlign==='right'?'end':'start';
-  const x=w.style.textAlign==='center'?width/2:w.style.textAlign==='right'?width-pad:pad;
-  const lines=wrapRichLines(content,maxWidth,style),blockHeight=lines.length*lineHeight;
-  let firstY=pad+fontSize;if(w.style.textAlignVertical==='middle')firstY=Math.max(pad,(height-blockHeight)/2)+fontSize;else if(w.style.textAlignVertical==='bottom')firstY=Math.max(pad,height-blockHeight-pad)+fontSize;
+  const x=w.style.textAlign==='center'?left+(width-left-right)/2:w.style.textAlign==='right'?width-right:left;
+  const lines=fit?.lines??wrapRichLines(content,maxWidth,style),blockHeight=lines.length*lineHeight;
+  let firstY=pad+fontSize;if(w.style.textAlignVertical==='middle')firstY=pad+Math.max(0,(height-pad-bottom-blockHeight)/2)+fontSize;else if(w.style.textAlignVertical==='bottom')firstY=Math.max(pad,height-blockHeight-bottom)+fontSize;
   const n=(value:number)=>String(Number(value.toPrecision(14)));
   const highlights:string[]=[],tspans:string[]=[];
   lines.forEach((line,index)=>{
-    const y=firstY+index*lineHeight,width=line.reduce((sum,run)=>sum+measureRichToken(run.text,run,style),0);
+    const visible=fit?trimTextLine(line):{runs:line,trailing:[]},y=firstY+index*lineHeight,width=visible.runs.reduce((sum,run)=>sum+measureRichToken(run.text,run,style),0);
     if(w.style.highlightColor&&w.style.highlightColor!=='transparent'){
       const left=anchor==='middle'?x-width/2:anchor==='end'?x-width:x;
       highlights.push('<rect x="'+n(left)+'" y="'+n(y-fontSize)+'" width="'+n(width)+'" height="'+n(lineHeight)+'" fill="'+escapeXml(w.style.highlightColor)+'"/>');
     }
-    const inner=line.map(run=>{
+    const inner=visible.runs.map(run=>{
       const decorations=[run.underline||w.style.textDecoration==='underline'?'underline':'',run.strike||w.style.textDecoration==='line-through'?'line-through':''].filter(Boolean).join(' ');
       const attrs=[run.bold?'font-weight="700"':'',run.italic?'font-style="italic"':'',decorations?'text-decoration="'+decorations+'"':'',run.link?'fill="#3859ff"':''].filter(Boolean).join(' ');
       const span='<tspan'+(attrs?' '+attrs:'')+'>'+escapeXml(run.text)+'</tspan>';
       return run.link?'<a href="'+escapeXml(run.link)+'">'+span+'</a>':span;
-    }).join('');
+    }).join('')+visible.trailing.map(run=>'<tspan font-size="0">'+escapeXml(run.text)+'</tspan>').join('');
     tspans.push('<tspan x="'+n(x)+'" y="'+n(y)+'">'+inner+'</tspan>');
   });
   const body=highlights.join('')+'<text xml:space="preserve" font-family="'+escapeXml(w.style.fontFamily)+'" font-size="'+fontSize+'" font-weight="'+(w.style.fontWeight==='bold'?'700':'400')+'" font-style="'+(w.style.fontStyle??'normal')+'" fill="'+escapeXml(w.style.color)+'" text-anchor="'+anchor+'">'+tspans.join('')+'</text>';
-  return scale===1?body:'<g transform="scale('+n(scale)+')" data-text-font-size="'+n(w.style.fontSize)+'">'+body+'</g>';
+  const normalized=scale===1?body:'<g transform="scale('+n(scale)+')" data-text-font-size="'+n(w.style.fontSize)+'">'+body+'</g>';
+  return fit?'<g data-text-box-id="'+escapeXml(w.id)+'" data-text-preferred-font-size="'+n(preferred)+'" data-text-fitted-font-size="'+n(fit.fontSize)+'">'+normalized+'</g>':normalized;
 }
 
 function measureRichToken(token:string,run:Run,style:Style):number {

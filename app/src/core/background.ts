@@ -11,6 +11,8 @@ export interface BackgroundImage {
 export interface BoardBackground {
   color: string;
   grid: boolean;
+  /** Omitted retains the original dotted grid. grid=false hides every pattern. */
+  gridStyle?:'dots'|'lines'|'crosses';
   image?: BackgroundImage;
 }
 
@@ -18,6 +20,8 @@ export interface BoardBackground {
 export interface BackgroundPatch {
   color?: string;
   grid?: boolean;
+  /** null restores the legacy dotted default without adding a stored property. */
+  gridStyle?:'dots'|'lines'|'crosses'|null;
   image?: BackgroundImage | null;
 }
 
@@ -30,6 +34,7 @@ export function validateBoardBackground(value: unknown): BoardBackground | null 
   const background = value as Record<string, unknown>;
   if (typeof background.color !== 'string' || !/^#[0-9a-f]{6}$/i.test(background.color) || typeof background.grid !== 'boolean') return null;
   const result: BoardBackground = { color: background.color.toLowerCase(), grid: background.grid };
+  if(background.gridStyle!==undefined&&background.gridStyle!==null){if(!['dots','lines','crosses'].includes(background.gridStyle as string))return null;result.gridStyle=background.gridStyle as BoardBackground['gridStyle'];}
   if (background.image === undefined || background.image === null) return result;
   if (typeof background.image !== 'object' || Array.isArray(background.image)) return null;
   const image = background.image as Record<string, unknown>;

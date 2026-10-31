@@ -1,6 +1,6 @@
 import type { BoardState, CommandBus } from './core/commands';
 import type { Camera } from './core/camera';
-import { captureSelection, duplicateSnapshot, groupLeaves, itemLocked } from './core/groups';
+import { captureSelection, duplicateSnapshot, groupLeaves, itemLocked,selectedBounds } from './core/groups';
 import { layerEntity, layerLabel, layerTree, layerUpdateCommand, orderEntities, reorderLayerCommands, type LayerNode, type LayerDestination } from './core/layers';
 import { icon } from './icons';
 
@@ -57,7 +57,7 @@ body.home-visible #layers-controls{display:none!important}
   let pointerInteraction=false,pendingRefresh=false,pointerRelease:ReturnType<typeof setTimeout>|undefined;
   const releasePointer=()=>{pointerInteraction=false;if(pendingRefresh){pendingRefresh=false;refresh();}};
   controls.addEventListener('pointerdown',()=>{if(pointerRelease)clearTimeout(pointerRelease);pointerInteraction=true;},true);
-  document.addEventListener('click',releasePointer);
+  document.addEventListener('click',event=>{if(event.detail>0&&(event.target as Element).closest('#layers-list [data-layer-select]')){if(pointerRelease)clearTimeout(pointerRelease);pointerRelease=setTimeout(releasePointer,420);}else releasePointer();});
   window.addEventListener('pointerup',()=>{if(pointerInteraction)pointerRelease=setTimeout(releasePointer,120);},true);
   window.addEventListener('pointercancel',releasePointer,true);
 
@@ -75,8 +75,9 @@ body.home-visible #layers-controls{display:none!important}
       ids=[...new Set(visibleIds.slice(Math.min(start,end),Math.max(start,end)+1).flatMap(leaves))];
     }else if(event.ctrlKey||event.metaKey){const next=new Set(state.selection);for(const item of ids)if(next.has(item))next.delete(item);else next.add(item);ids=[...next];}
     else anchorId=id;
-    bus.exec({op:'SELECTION_SET',payload:ids});api.onSelect?.(ids);changed();
+    bus.exec({op:'SELECTION_SET',payload:ids});api.onSelect?.(ids);for(const row of list.querySelectorAll<HTMLElement>('[data-layer-id]')){const members=leaves(row.dataset.layerId!),count=members.filter(item=>state.selection.has(item)).length;row.classList.toggle('selected',count>0&&count===members.length);row.classList.toggle('partly-selected',count>0&&count<members.length);}changed();
   }
+  function focusLayer(id:string){const ids=leaves(id),bounds=selectedBounds(state,ids);if(!bounds)return;bus.exec({op:'SELECTION_SET',payload:ids});api.onSelect?.(ids);api.camera.fit(bounds,64,{left:78,top:68,width:Math.max(100,panel.getBoundingClientRect().left-90),height:Math.max(100,api.camera.height-132)});changed();}
   function applyTo(id:string,patch:Record<string,unknown>,label:string){
     const commands=leaves(id).map(leaf=>layerUpdateCommand(state,leaf,patch));
     if(commands.length)bus.exec({op:'BATCH',payload:{label,commands}});changed();
@@ -110,7 +111,7 @@ body.home-visible #layers-controls{display:none!important}
     const expand=target.dataset.layerExpand;
     if(expand){if(collapsed.has(expand))collapsed.delete(expand);else collapsed.add(expand);renderKey='';refresh();}
     const id=target.closest<HTMLElement>('[data-layer-id]')?.dataset.layerId;
-    if(id&&target.hasAttribute('data-layer-select'))select(id,event);
+    if(id&&target.hasAttribute('data-layer-select')){select(id,event);if(event.detail===2)focusLayer(id);}
     if(id&&target.hasAttribute('data-layer-visibility'))applyTo(id,{hidden:!leaves(id).every(leaf=>layerEntity(state,leaf)?.hidden)},'Visibilidade da camada');
     if(id&&target.hasAttribute('data-layer-lock'))applyTo(id,{locked:!leaves(id).every(leaf=>itemLocked(state,leaf))},'Bloqueio da camada');
     const action=target.dataset.layerAction;
@@ -119,7 +120,7 @@ body.home-visible #layers-controls{display:none!important}
     if(action==='duplicate'){duplicateSnapshot(state,bus,captureSelection(state));changed();}
     if(action==='delete')removeSelection();
   });
-  list.addEventListener('dblclick',event=>{const button=(event.target as Element).closest<HTMLElement>('[data-layer-select]');const id=button?.closest<HTMLElement>('[data-layer-id]')?.dataset.layerId;if(id)startRename(id);});
+  list.addEventListener('dblclick',event=>{const button=(event.target as Element).closest<HTMLElement>('[data-layer-select]');const id=button?.closest<HTMLElement>('[data-layer-id]')?.dataset.layerId;if(id){event.preventDefault();focusLayer(id);}});
   list.addEventListener('focusout',event=>{if((event.target as HTMLElement).hasAttribute('data-layer-name'))commitRename();});
   panel.addEventListener('keydown',event=>{
     if((event.target as HTMLElement).hasAttribute('data-layer-name')){

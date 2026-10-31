@@ -2,9 +2,9 @@
 
 Execute `npm test` e `npm run build` em `app`.
 
-A suíte Playwright verifica os fluxos reais de biblioteca de boards, catálogo pesquisável, grupos aninhados com entidades mistas, duplicação de âncoras, bloqueio, estilos e rótulos de conectores, coordenadas do pincel em vários níveis de zoom, borracha parcial, laço, carregamento das fontes, texto rico, imagens e persistência após reload.
+A suíte Playwright verifica os fluxos reais de biblioteca de boards, catálogo pesquisável, grupos aninhados com entidades mistas, duplicação de âncoras, bloqueio, estilos e rótulos de conectores, coordenadas do pincel em vários níveis de zoom, borracha parcial, carregamento das fontes, texto rico, imagens e persistência após reload.
 
-São 162 cenários. A cobertura inclui recorte circular com bordas pela interface; transparência verificada nos pixels do canvas; seleção individual dentro de grupos; menu nas bordas da viewport; destino vazio de conectores; alternância seleção/navegação; formatação no primeiro clique após editar tamanho; cor e grade por board; imagem de fundo de 6.000 × 3.000 pixels, escalada para 12.000 × 6.000 unidades sem deformação, exportada/reimportada e reaberta após reload.
+São 255 cenários na rodada v13. A cobertura inclui recorte circular com bordas pela interface; transparência verificada nos pixels do canvas; seleção individual dentro de grupos; menu nas bordas da viewport; destino vazio de conectores; alternância seleção/navegação; formatação no primeiro clique após editar tamanho; cor e grade por board; imagem de fundo de 6.000 × 3.000 pixels, escalada para 12.000 × 6.000 unidades sem deformação, exportada/reimportada e reaberta após reload. As seções anteriores à v13 registram os resultados históricos das rodadas correspondentes.
 
 As verificações são feitas em um contexto novo do navegador. O servidor de teste usa `127.0.0.1:5174`; o conteúdo pessoal de outras origens não é utilizado. Capturas e traces de falhas ficam em `app/test-results`, fora do Git.
 
@@ -88,3 +88,39 @@ Validação integrada: **208 testes passaram em 3,9 minutos**, sem testes pulado
 O build de produção repetiu os cenários normal e pesado em 2%, além da cópia da cena inteira e dois percursos de interface. Na cena pesada, navegação processou 59,8 Hz, pincel de precisão 59,9 Hz e arraste 31,2 Hz; o p95 de quadro na navegação foi 24,9 ms. Colagem síncrona levou 824 ms, copiar/colar até os primeiros quadros 2,13 s, salvar 670 ms e reabrir 2,31 s. A maior long task da cópia foi 1,18 s. São amostras deste hardware, e o arraste pesado continua sendo um limite conhecido. A normalização das caixas de texto mudou o estado inicial em relação ao ensaio v11; estes números não são uma comparação controlada entre versões.
 
 Movimentos, pontos finais, grupos, âncoras, metadados, Undo e reload passaram nas comparações de integridade. Não houve erro de página/console nos percursos finais. A interface compilada passou por importação via seletor, colagem de File, recorte circular, link, ajuda, edição de tópico, texto com origem centralizada, prévias tipográficas, submenu B/I/U/tachado, edição dentro de forma e persistência. As capturas foram inspecionadas visualmente. Relatórios e imagens ficam em `work/qa-v12-final`, fora do Git; o ClipboardEvent de teste não substituiu a área de transferência pessoal do sistema.
+
+## Rodada v13 — caixas, pincel, navegação e menus
+
+O perfil separado do Chrome tornou o endpoint CDP acessível ao REA. A inspeção passiva do SFC registrou ouvintes do canvas e 202 fontes de scripts, entre 461 scripts inventariados, com aproximadamente 33,55 MB de código. Foram examinados os componentes de cálculo de linhas, formas e notas e o registro de cursores. O limite de captura não equivale a cobertura completa do Miro. Registro de evento e inspeção estática não provam execução de cada cursor ou de cada ramo do código. Assets originais e capturas com URLs de recursos ficam somente em `work/`, fora do Git; nenhuma credencial, corpo de requisição ou código original foi incluído no aplicativo.
+
+| Área | Regressões da rodada |
+| --- | --- |
+| Texto em caixa | Fonte preferida preservada, diminuição e recuperação até o teto, Undo/reload, tópicos sem expansão involuntária, conteúdo rico e itálico, espaços pendurados, editor sem rolagem e preferência de 1e50 em 2/100/2000%. |
+| Contornos | Proporções internas observadas nas formas; tinta de glifos dentro de círculo, triângulo e losango; conversão retângulo→triângulo invalida o ajuste. A leitura de pixels usa o stride retornado e desfaz a premultiplicação alfa para distinguir a borda amarela da tinta escura. |
+| Pincel | Painel sem presets, marca-texto ou borracha duplicada; tamanho/opacidade e suavização ampliada; amostras densas com curvas, reversões e cruzamentos em 2/100/2000%, sem cortes na cobertura interior. |
+| Borrachas | Comum por desenho inteiro e precisão por área tocada, inclusive passagem rápida entre eventos; opacidade 0,4, SVG, grupos, transformações, duplicação, arquivo editável, Undo/reload e descarte de recursos. |
+| Conectores | Controles numéricos de referência para tangentes regulares e de mapa mental, pontas livres, junções tangentes, curvas em escala macro, rotações, pontos repetidos, decorações e Undo. Barras se expandem além de 2000 unidades. |
+| Menus | Paletas sem check, borda em anel, ações específicas por tipo, Mais aninhado, cores da marca com CRUD/persistência, sem recolorir objetos implicitamente. Barra lateral sem conector dedicado ou laço e sem rolagem em viewports baixas. |
+| Navegação | Momentum em unidades de tela, desaceleração e interrupção, Alt+botão direito, oito direções de resize conforme rotação, enquadramento por camada e seleção sem consumir Undo/eliminar Redo. |
+| Fundo | Quatro malhas com pixels distintos, ancoragem no mundo, encaixe inalterado, arquivos, Undo/reload, isolamento entre boards e compatibilidade com a antiga propriedade booleana. |
+
+Duas revisões independentes adicionais foram realizadas nesta rodada. A primeira encontrou falsos positivos da borracha em traços afunilados e em buracos formados pela união de cortes sobrepostos. A interseção agora considera a cobertura real e a união das áreas removidas; regressões incluem controles positivos de tinta restante e escalas 0,001/1/1 milhão. A segunda encontrou momentum ainda ativo ao usar controles de zoom ou Shift+1; novos eventos de ponteiro e teclado cancelam a inércia antes dessas ações. Os relatórios privados são `work/v13-independent-review-1.md` e `work/v13-independent-review-2.md`.
+
+A integração também corrigiu a reconstrução da linha de camada entre os dois cliques, o atributo do cursor que colidia com seletores dos botões, a remoção assíncrona de um diálogo fechado que ainda capturava Ctrl+Z e a distinção entre seleção isolada e seleção incluída em uma ação de conteúdo. Selecionar outro objeto conserva Redo; desfazer um checkbox ainda restaura conteúdo e seleção anteriores em conjunto.
+
+Validação final: **255 testes passaram em 4,4 minutos**, sem falhas, testes pulados ou retentativas. TypeScript e Vite aprovaram `index-tJwYUvvt.js`, e o servidor local foi conferido contra esse marcador. Os testes cobrem os problemas encontrados nas revisões e na integração; ajustes de fixtures respeitam mudanças intencionais de menu, fonte normalizada e toggle do pincel.
+
+| Cena pesada em 2%, build v13 | Medição |
+| --- | ---: |
+| Navegação, entrada processada | 60,4 Hz |
+| Navegação, quadro p95 | 16,7 ms |
+| Pincel com precisão máxima, entrada processada | 60,1 Hz |
+| Arraste, entrada processada | 32,2 Hz |
+| Colagem síncrona da cena inteira | 743 ms |
+| Copiar/colar até os primeiros quadros | 1,78 s |
+| Maior long task durante a cópia | 1,08 s |
+| Salvar / reabrir | 547 ms / 1,89 s |
+
+As cenas normal e pesada conservaram movimentos, pontos finais, Undo, grupos, âncoras, metadados e digest após reload. O ensaio de navegação verifica a posição durante o arraste e a continuação após soltar; a inércia é interrompida antes de iniciar o próximo cenário. A cena pesada continua com 402 widgets, 200 conectores, 150 traços/240 mil amostras, 40 grupos e 20 imagens. Estes números não são uma comparação controlada com v12: houve mudanças de layout, geometria e método de navegação. O arraste extremo em torno de 32 Hz e a pausa de aproximadamente um segundo ao copiar toda a cena permanecem limites medidos.
+
+Dois percursos de produção passaram por arquivos de imagem e colagem, recorte circular, link, ajuda, tópicos, texto ajustado mantendo preferência 72, paleta sem check, fundo escuro quadriculado, suavização máxima, Alt+botão direito, desenho nativo, fechamento do painel e persistência. Não houve erro de página/console. As capturas dos menus, fundo e pincel foram inspecionadas. Relatórios e imagens ficam em `work/qa-v13-final`, fora do Git.

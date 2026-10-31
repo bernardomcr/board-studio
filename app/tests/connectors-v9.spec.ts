@@ -27,9 +27,8 @@ test('connector ports advertise nearby targets and magnetize without a crosshair
   await page.mouse.move(800,595);await expect(page.locator('#app canvas')).toHaveCSS('cursor','grab');
 });
 
-test('primary connector activates directly while quick-pull remains curved after an explicit straight choice',async({page})=>{
-  await fixture(page);const button=page.locator('[data-tool="connector"]');await button.click();await expect(page.locator('#connector-picker')).toBeHidden();await expect(button).toHaveClass(/active/);await expect(page.locator('#app canvas')).toHaveCSS('cursor','default');
-  await button.click();await page.getByRole('button',{name:'Linha reta sem seta',exact:true}).click();
+test('line choices in Shapes keep quick-pull curved after an explicit straight choice',async({page})=>{
+  await fixture(page);await expect(page.locator('#toolbar [data-tool="connector"]')).toHaveCount(0);const button=page.getByRole('button',{name:'Formas',exact:true});await button.click();await page.getByRole('button',{name:'Linha reta sem seta',exact:true}).click();await expect(button).toHaveClass(/active/);
   // A deliberate free straight line remains a straight line.
   await page.mouse.move(100,850);await page.mouse.down();await page.mouse.move(450,900,{steps:10});await page.mouse.up();
   expect(await page.evaluate(()=>[...window.__board.state.connectors.values()][0])).toMatchObject({shape:'straight',style:{endCap:'none'}});

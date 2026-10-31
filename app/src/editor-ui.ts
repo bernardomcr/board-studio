@@ -12,6 +12,7 @@ import {sizeRangeMaximum,multipliedSize,formatSize} from './size-controls';
 import {installFontPickers} from './font-picker';
 import {uiPalette,UI_COLORS} from './ui-palette';
 import {isFreeText,naturalText} from './core/text-layout';
+import {brandColorRevision} from './brand-colors';
 
 interface EditorUIApi {
   state: BoardState; bus: CommandBus; camera: Camera;
@@ -24,6 +25,7 @@ interface EditorUIApi {
   onReplaceImage?(): void; onFlipImage?(axis: 'x' | 'y'): void; onDownloadImage?(): void;
   onCopyImage?(): void; onAddWaypoint?(): void; onRemoveWaypoint?(): void;
   onLink?():void;
+  onCreateChecklist?():void;onCreateTable?():void;
   setStickyStackMode?(enabled:boolean):void;
   getGroupScope?(): string | null; onExitGroup?(): void;
   entityAt?(point:{x:number;y:number}):string|undefined;
@@ -111,7 +113,7 @@ export function installEditorUI(api: EditorUIApi) {
   }
   function renderShapes() {
     picker.classList.toggle('expanded', expandedShapes);
-    picker.innerHTML = `<header>${expandedShapes ? `<button data-shapes-back aria-label="Voltar às formas principais">${icon('arrow-left',18)}</button><span>Todas as formas</span>` : '<span>Formas</span>'}<button data-close aria-label="Fechar formas">${icon('close',18)}</button></header>${expandedShapes ? '<div class="shape-filter"><input aria-label="Buscar formas" id="shape-search" placeholder="Buscar formas…"><select aria-label="Categoria de formas" id="shape-category"><option value="">Todas</option><option value="basic">Básicas</option><option value="flowchart">Fluxograma</option></select></div>' : ''}<div class="shape-grid">${shapeButtons(expandedShapes ? SHAPE_OPTIONS : MAIN_SHAPES.map(id => SHAPE_OPTIONS.find(s => s.id === id)!))}</div>${expandedShapes ? '' : `<div class="picker-section">Linhas e setas</div><div class="shape-grid">${connectorChoices.slice(0,3).map((c,i) => `<button class="shape-choice" data-picker-line="${i}" aria-label="${c.label}">${lineSymbol(c)}<span>${c.label}</span></button>`).join('')}</div><button class="picker-more" data-more-shapes>${icon('plus',16)}Mais formas</button>`}<p class="editor-footnote">${shapeTargetSelection ? 'Escolha uma forma para transformar a seleção.' : 'Escolha e arraste no board para definir o tamanho. Shift mantém a proporção.'}</p>`;
+    picker.innerHTML = `<header>${expandedShapes ? `<button data-shapes-back aria-label="Voltar às formas principais">${icon('arrow-left',18)}</button><span>Todas as formas</span>` : '<span>Formas</span>'}<button data-close aria-label="Fechar formas">${icon('close',18)}</button></header>${expandedShapes ? '<div class="shape-filter"><input aria-label="Buscar formas" id="shape-search" placeholder="Buscar formas…"><select aria-label="Categoria de formas" id="shape-category"><option value="">Todas</option><option value="basic">Básicas</option><option value="flowchart">Fluxograma</option></select></div>' : ''}<div class="shape-grid">${shapeButtons(expandedShapes ? SHAPE_OPTIONS : MAIN_SHAPES.map(id => SHAPE_OPTIONS.find(s => s.id === id)!))}</div>${expandedShapes ? '' : `<div class="picker-section">Linhas e setas</div><div class="shape-grid">${connectorChoices.map((c,i) => `<button class="shape-choice" data-picker-line="${i}" aria-label="${c.label}">${lineSymbol(c)}<span>${c.label}</span></button>`).join('')}</div><button class="picker-more" data-more-shapes>${icon('plus',16)}Mais formas</button>`}<p class="editor-footnote">${shapeTargetSelection ? 'Escolha uma forma para transformar a seleção.' : 'Escolha e arraste no board para definir o tamanho. Shift mantém a proporção.'}</p>`;
   }
   function filterShapes() {
     const normalize = (v:string) => v.normalize('NFD').replace(/[\u0300-\u036f]/g,'').toLowerCase();
@@ -131,13 +133,16 @@ export function installEditorUI(api: EditorUIApi) {
   }
   function openShapes() {
     const open=picker.hidden; closePanels(); picker.hidden=!open; shapeTargetSelection=false; expandedShapes=false; renderShapes();
+    positionToolPicker(picker);
   }
   function openConnectors() {
     const open=connectorPicker.hidden; closePanels(); connectorPicker.hidden=!open;
+    positionToolPicker(connectorPicker);
     for(const b of connectorPicker.querySelectorAll<HTMLButtonElement>('[data-connector-choice]')){
       const c=connectorChoices[Number(b.dataset.connectorChoice)]!;b.setAttribute('aria-pressed',String(c.shape===connectorDefault.shape&&c.arrow===connectorDefault.arrow));
     }
   }
+  function positionToolPicker(panel:HTMLElement){const edge=document.getElementById('toolbar')?.getBoundingClientRect().right??68;panel.style.left=`${edge+10}px`;panel.style.maxWidth=`${Math.max(180,innerWidth-edge-22)}px`;}
   function chooseConnector(index:number) {
     const choice=connectorChoices[index];if(!choice)return;
     connectorDefault={shape:choice.shape,arrow:choice.arrow};api.setConnectorDefault?.(connectorDefault);api.setTool('connector');closePanels();refresh();
@@ -223,6 +228,8 @@ export function installEditorUI(api: EditorUIApi) {
   function canPasteStyle(){return !!copiedStyle&&[...state.selection].some(id=>!itemLocked(state,id)&&(copiedStyle!.kind==='widget'?state.widgets.has(id):copiedStyle!.kind==='connector'?state.connectors.has(id):state.strokes.has(id)));}
   function action(name:string) {
     if(name==='add-link'){api.onLink?.();return;}
+    if(name==='create-checklist'){api.onCreateChecklist?.();return;}
+    if(name==='create-table'){api.onCreateTable?.();return;}
     const ids=[...state.selection],unlocked=ids.filter(id=>!itemLocked(state,id));
     if(ids.some(id=>itemLocked(state,id))&&!['lock','duplicate','copy-style','copy-image','image','undo','redo','exit-group','download-image'].includes(name))return;
     if(name==='group')groupSelection(state,bus);if(name==='ungroup')ungroupSelection(state,bus);
@@ -270,7 +277,7 @@ export function installEditorUI(api: EditorUIApi) {
 
   const button=(name:string,label:string,symbol=name,extra='')=>`<button class="toolbar-button" data-action="${name}" title="${label}" aria-label="${label}" ${extra}>${icon(symbol)}</button>`;
   const menuAction=(name:string,label:string,symbol=name,key='',disabled=false)=>`<button class="menu-action" data-action="${name}" aria-label="${escapeHtml(label)}" ${disabled?'disabled':''}>${icon(symbol,17)}<span>${label}</span>${key?`<kbd>${key}</kbd>`:''}</button>`;
-  const menu=(id:string,label:string,symbol:string,body:string,wide=false)=>`<details class="property-menu" data-menu="${id}"><summary role="button" aria-label="${label}" title="${label}">${symbol}${icon('chevron-down',8).replace('<svg ','<svg class="menu-chevron" ' )}</summary><div class="property-popover${wide?' wide':''}"><p class="popover-title">${label}</p>${body}</div></details>`;
+  const menu=(id:string,label:string,symbol:string,body:string,wide=false)=>`<details class="property-menu" data-menu="${id}"><summary role="button" aria-label="${label}" title="${label}">${symbol}${id==='size'||id==='arrange'?`<span class="submenu-label">${label}</span>${icon('chevron-right',14).replace('<svg ','<svg class="submenu-arrow" ')}`:icon('chevron-down',8).replace('<svg ','<svg class="menu-chevron" ' )}</summary><div class="property-popover${wide?' wide':''}"><p class="popover-title">${label}</p>${body}</div></details>`;
   const options=(values:string[][],current:string)=>values.map(([v,l])=>`<option value="${escapeHtml(v)}" ${v===current?'selected':''}>${escapeHtml(l)}</option>`).join('');
   const select=(domain:string,field:string,label:string,values:string[][],value:string)=>`<label>${label}<select aria-label="${label}" data-${domain}="${field}">${options(values,value)}</select></label>`;
   const number=(domain:string,field:string,label:string,value:number,min=0,max=Infinity,step=1)=>`<label>${label}<input type="number" aria-label="${label}" data-${domain}="${field}" value="${formatSize(value)}" ${Number.isFinite(min)?`min="${min}"`:''} ${Number.isFinite(max)?`max="${max}"`:''} step="${step}"></label>`;
@@ -279,6 +286,7 @@ export function installEditorUI(api: EditorUIApi) {
   const choice=(domain:string,field:string,label:string,values:string[][],value:string,symbol:(value:string)=>string)=>`<div class="icon-choices" role="group" aria-label="${label}">${values.map(([id,name])=>`<button type="button" data-choice-domain="${domain}" data-choice-field="${field}" data-choice="${id}" aria-label="${label}: ${name!.toLowerCase()}" title="${name}" aria-pressed="${id===value}">${symbol(id!)}</button>`).join('')}<select hidden aria-hidden="true" tabindex="-1" data-${domain}="${field}">${options(values,value)}</select></div>`;
   const patternSymbol=(value:string)=>`<svg width="38" height="20" viewBox="0 0 38 20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M4 10h30"${value==='dashed'?' stroke-dasharray="6 5"':value==='dotted'?' stroke-dasharray="1 5"':''}/></svg>`;
   const colorSymbol=(value:string)=>`<span class="toolbar-color${value==='transparent'?' transparent':''}" style="background:${escapeHtml(value)}"></span>`;
+  const borderSymbol=(style:Style)=>`<span class="toolbar-border-color${style.borderColor==='transparent'?' transparent':''}" style="--border-color:${validColor(style.borderColor,'#a3aab5')};--border-alpha:${style.borderOpacity??1}"></span>`;
   function palette(domain:string,field:string,label:string,value:string) {
     return uiPalette(domain,field,label,value);
   }
@@ -287,7 +295,7 @@ export function installEditorUI(api: EditorUIApi) {
     const style=w.style,ratio=relativeBorderScale(w),percent=Number(formatSize(ratio*100));
     const presets=[['Sem',0],['Fina',.005],['Média',.02],['Grossa',.05]] as const;
     const scale=`<div class="range-control"><label for="border-scale">Espessura<output data-border-output for="border-scale">${formatSize(percent)}%</output></label><input id="border-scale" type="range" min="0" max="${sizeRangeMaximum(percent,50)}" step="0.05" aria-label="Espessura proporcional da borda" data-border-scale value="${percent}">${rangeActions('border')}<div class="border-presets">${presets.map(([name,value])=>`<button data-border-preset="${value}" title="Borda ${name.toLowerCase()}" aria-label="Borda ${name.toLowerCase()}" aria-pressed="${Math.abs(ratio-value)<.0001}"><span class="border-sample" style="--border-preview:${value===0?0:value<.01?1:value<.04?3:5}px"></span></button>`).join('')}</div></div>`;
-    return menu('border','Borda',icon('stroke'),scale+choice('field','borderStyle','Estilo da borda',LINE_STYLES,style.borderStyle,patternSymbol)+'<hr>'+opacity('field','borderOpacity','Opacidade da borda',style.borderOpacity??1)+palette('field','borderColor','Cor da borda',style.borderColor)+(corners?number('field','cornerRadius','Cantos arredondados',style.cornerRadius??16):''));
+    return menu('border','Borda',borderSymbol(style),choice('field','borderStyle','Estilo da borda',LINE_STYLES,style.borderStyle,patternSymbol)+scale+opacity('field','borderOpacity','Opacidade da borda',style.borderOpacity??1)+(corners?number('field','cornerRadius','Cantos arredondados',style.cornerRadius??16):'')+palette('field','borderColor','Cor da borda',style.borderColor));
   }
   function textMenus(w:Widget) {
     const s=w.style;
@@ -298,7 +306,8 @@ export function installEditorUI(api: EditorUIApi) {
     const styles=`<div class="icon-choices type-style-choices">${toggle('fontWeight','bold','Negrito','bold')}${toggle('fontStyle','italic','Itálico','italic')}${toggle('textDecoration','underline','Sublinhado','underline')}${toggle('textDecoration','line-through','Riscado','strike')}</div>`;
     const content=w.type==='frame'?w.title:w.content,listType=content.split('\n').every(line=>/^\s*•\s/.test(line))?'bullet':content.split('\n').every(line=>/^\s*\d+\.\s/.test(line))?'number':'';
     const lists=`<div class="icon-choices"><button type="button" data-text-list="bullet" aria-label="Lista com marcadores" title="Lista com marcadores" aria-pressed="${listType==='bullet'}">${icon('list')}</button><button type="button" data-text-list="number" aria-label="Lista numerada" title="Lista numerada" aria-pressed="${listType==='number'}">${icon('list-ordered')}</button></div><hr><div class="icon-choices"><button type="button" data-text-list="outdent" aria-label="Diminuir recuo" title="Diminuir recuo">${icon('indent-decrease')}</button><button type="button" data-text-list="indent" aria-label="Aumentar recuo" title="Aumentar recuo">${icon('indent-increase')}</button></div>`;
-    return `<select class="toolbar-font" aria-label="Fonte do texto" data-field="fontFamily">${options(fontOptions,s.fontFamily)}</select><input class="toolbar-fontsize" type="number" data-field="fontSize" aria-label="Texto" title="Tamanho do texto" min="1" value="${formatSize(s.fontSize)}">${separator}${menu('text-style','Estilo do texto',icon('bold'),styles)}${menu('text','Texto',icon(s.textAlign==='left'?'align-left':s.textAlign==='center'?'align-center':'align-right'),compact+alignments)}${selected().every(w=>!w.checklist&&!w.table&&!w.audio)?menu('text-list','Listas e recuos',icon('list'),lists):''}${state.selection.size===1?button('add-link','Adicionar link','link'):''}${menu('text-color','Cor do texto',icon('text-color'),palette('field','color','Cor do texto',s.color))}${menu('text-highlight','Realce do texto',icon('highlighter'),palette('field','highlightColor','Realce do texto',s.highlightColor??'transparent'))}`;
+    const plain=selected().every(w=>!w.checklist&&!w.table&&!w.audio);
+    return `<select class="toolbar-font" aria-label="Fonte do texto" data-field="fontFamily">${options(fontOptions,s.fontFamily)}</select><input class="toolbar-fontsize" type="number" data-field="fontSize" aria-label="Texto" title="Tamanho do texto" min="1" value="${formatSize(s.fontSize)}">${separator}${menu('text-style','Estilo do texto',icon('bold'),styles)}${menu('text','Texto',icon(s.textAlign==='left'?'align-left':s.textAlign==='center'?'align-center':'align-right'),compact+alignments+(!isFreeText(w)&&plain?'<hr>'+lists:''))}${isFreeText(w)&&plain?menu('text-list','Listas e recuos',icon('list'),lists):''}${state.selection.size===1?button('add-link','Adicionar link','link'):''}${menu('text-color','Cor do texto',icon('text-color'),palette('field','color','Cor do texto',s.color))}${menu('text-highlight','Realce do texto',icon('highlighter'),palette('field','highlightColor','Realce do texto',s.highlightColor??'transparent'))}`;
   }
   function shapeMenu(w:Widget) {
     const shapes=[...MAIN_SHAPES,'speech_bubble','parallelogram','star'] as ShapeWidget['shape'][];
@@ -318,14 +327,16 @@ export function installEditorUI(api: EditorUIApi) {
   function commonMenus(widgets:Widget[]) {
     const ids=[...state.selection],locked=ids.some(id=>itemLocked(state,id)),allLocked=ids.every(id=>itemLocked(state,id)),w=widgets[0];
     const link=w&&ids.length===1?`<hr><label>Link do objeto<input type="url" aria-label="Link do objeto" data-field="link" placeholder="https://" value="${escapeHtml(w.link)}"></label>`:'';
-    return `${separator}${w?.type==='image'&&ids.length===1?button('add-link','Adicionar link','link',locked?'disabled':''):''}${selectionRoots(state).length>=2?button('group','Agrupar','group',locked?'disabled':''):''}${groupIds().length?button('ungroup','Desagrupar','ungroup',locked?'disabled':''):''}${widgets.length||ids.length>1?arrangeMenu(widgets,locked):''}${button('lock',allLocked?'Desbloquear':'Bloquear',allLocked?'unlock':'lock')}${menu('more','Mais',icon('more'),menuAction('duplicate','Duplicar','duplicate','Ctrl+D')+menuAction('copy-image','Copiar como imagem','image')+'<hr>'+menuAction('copy-style','Copiar estilo','stroke','',ids.length!==1)+menuAction('paste-style','Colar estilo','fill','',!canPasteStyle()||locked)+(widgets.some(w=>w.type!=='image')?menuAction('clear','Limpar conteúdo','eraser','',locked):'')+link+'<hr>'+menuAction('delete','Excluir','trash','Del',locked))}`;
+    const advanced=(widgets.length||ids.length>1?arrangeMenu(widgets,locked):'')+(w&&ids.length===1?sizeMenu(w):'');
+    const structured=w&&ids.length===1&&w.type!=='image'&&!w.audio?'<hr>'+(w.table?'':menuAction('create-checklist',w.checklist?'Editar lista de tarefas':'Converter em lista de tarefas','checklist','',locked))+(w.checklist?'':menuAction('create-table',w.table?'Editar tabela':'Converter em tabela','grid','',locked)):'';
+    return `${separator}${w?.type==='image'&&ids.length===1?button('add-link','Adicionar link','link',locked?'disabled':''):''}${selectionRoots(state).length>=2?button('group','Agrupar','group',locked?'disabled':''):''}${groupIds().length?button('ungroup','Desagrupar','ungroup',locked?'disabled':''):''}${button('lock',allLocked?'Desbloquear':'Bloquear',allLocked?'unlock':'lock')}${menu('more','Mais',icon('more'),menuAction('duplicate','Duplicar','duplicate','Ctrl+D')+menuAction('copy-image','Copiar como imagem','image')+'<hr>'+advanced+'<hr>'+menuAction('copy-style','Copiar estilo','stroke','',ids.length!==1)+menuAction('paste-style','Colar estilo','fill','',!canPasteStyle()||locked)+structured+(widgets.some(w=>w.type!=='image')?menuAction('clear','Limpar conteúdo','eraser','',locked):'')+link+'<hr>'+menuAction('delete','Excluir','trash','Del',locked))}`;
   }
   function connectorToolbar(c:Connector) {
     const capIcon=(cap:string,start=false)=>{
       const capPath:Record<string,string>={none:'',arrow:'<path d="m13 6 6 6-6 6"/>',triangle:'<path d="m12 6 8 6-8 6z" fill="currentColor"/>',circle:'<circle cx="17" cy="12" r="4" fill="white"/>',diamond:'<path d="m12 12 5-5 5 5-5 5z" fill="white"/>',bar:'<path d="M19 5v14"/>'};
       return `<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><g${start?' transform="translate(24 0) scale(-1 1)"':''}><path d="M3 12h16"/>${capPath[cap]??''}</g></svg>`;
     };
-    const thickness=`<div class="range-control"><label for="connector-width">Espessura<output data-connector-width-output for="connector-width">${formatSize(c.style.strokeWidth)}</output></label><input id="connector-width" type="range" min="0.1" max="${sizeRangeMaximum(c.style.strokeWidth,32)}" step="0.1" aria-label="Espessura da linha" data-connector-width value="${c.style.strokeWidth}">${rangeActions('connector')}</div>`;
+    const thickness=`<div class="range-control"><label for="connector-width">Espessura<output data-connector-width-output for="connector-width">${formatSize(c.style.strokeWidth)}</output></label><input id="connector-width" type="range" min="0.1" max="${sizeRangeMaximum(c.style.strokeWidth*2,256)}" step="0.1" aria-label="Espessura da linha" data-connector-width value="${c.style.strokeWidth}">${rangeActions('connector')}</div>`;
     const routeSymbol=(shape:string)=>`<svg width="30" height="24" viewBox="0 0 36 28" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="${shape==='straight'?'M4 23 32 5':shape==='elbowed'?'M4 23h14V5h14':'M4 23C24 23 12 5 32 5'}"/></svg>`;
     const stroke=menu('stroke','Traço',routeSymbol(c.shape),choice('connector','shape','Tipo de linha',[['straight','Reta'],['elbowed','Cotovelo'],['curved','Curva']],c.shape,routeSymbol)+thickness+choice('connector','strokeStyle','Estilo da linha',LINE_STYLES,c.style.strokeStyle??'normal',patternSymbol));
     const route=menu('route','Caminho',icon('route'),`<div class="icon-choices">${button('add-waypoint','Adicionar ponto','plus')}${button('remove-waypoint','Remover ponto','minus',!(c.waypoints?.length)?'disabled':'')}${button('reset-route','Restaurar caminho','undo')}</div>`);
@@ -367,8 +378,8 @@ export function installEditorUI(api: EditorUIApi) {
     const input=event.target as HTMLInputElement;
     if(input.disabled)return;
     if(input.closest('.opacity-control')){if(opacityGesture){setOpacity(input,true);finishThicknessGesture();}else setOpacity(input,false);renderKey='';refresh();return;}
-    if(input.hasAttribute('data-border-scale')){const ratio=Number(input.value)/100;if(borderGesture)finishThicknessGesture();else if(selected().some(w=>Math.abs(relativeBorderScale(w)-ratio)>1e-12))setBorderScale(ratio);renderKey='';refresh();return;}
-    if(input.hasAttribute('data-connector-width')){const width=Number(input.value);if(connectorWidthGesture)finishThicknessGesture();else if(connectors().some(c=>c.style.strokeWidth!==width))setConnectorWidth(width);renderKey='';refresh();return;}
+    if(input.hasAttribute('data-border-scale')){const ratio=Number(input.value)/100;if(borderGesture)finishThicknessGesture();else if(selected().some(w=>Math.abs(relativeBorderScale(w)-ratio)>1e-12))setBorderScale(ratio);input.max=String(sizeRangeMaximum(ratio*100,50));renderKey='';refresh();return;}
+    if(input.hasAttribute('data-connector-width')){const width=Number(input.value);if(connectorWidthGesture)finishThicknessGesture();else if(connectors().some(c=>c.style.strokeWidth!==width))setConnectorWidth(width);input.max=String(sizeRangeMaximum(width*2,256));renderKey='';refresh();return;}
     if(input.hasAttribute('data-aspect-lock')){preserveAspect=input.checked;renderKey='';return;}
     if(input.dataset.image){bus.beginTransaction('Formatar imagem');for(const w of selected())if(w.type==='image'&&!w.locked)bus.exec({op:'WIDGET_UPDATE',payload:{id:w.id,patch:{[input.dataset.image]:input.dataset.image==='opacity'?Math.max(0,Math.min(100,Number(input.value)))/100:input.value}}});bus.endTransaction();}
     else if(input.dataset.captionIndex!==undefined||input.dataset.captionPosition!==undefined){const c=connectors()[0];if(!c||c.locked)return;const i=Number(input.dataset.captionIndex??input.dataset.captionPosition),captions=[...(c.captions??[])],captionPositions=captions.map((_,n)=>c.captionPositions?.[n]??(n+1)/(captions.length+1));if(input.dataset.captionIndex!==undefined)captions[i]=input.value;else captionPositions[i]=Math.max(.02,Math.min(.98,Number(input.value)/100));bus.exec({op:'CONNECTOR_UPDATE',payload:{id:c.id,patch:{captions,captionPositions}}});}
@@ -396,7 +407,7 @@ export function installEditorUI(api: EditorUIApi) {
   context.addEventListener('click',event=>{const b=(event.target as Element).closest<HTMLButtonElement>('[data-action]');if(b?.dataset.action&&!b.disabled)action(b.dataset.action);});
   document.addEventListener('pointerdown',event=>{
     const t=event.target as Element;
-    if(t.closest('.font-picker-popover'))return;
+    if(t.closest('.font-picker-popover,.brand-dialog'))return;
     if(!stickyPicker.contains(t)&&!t.closest('[data-tool="sticky_note"]'))stickyPicker.hidden=true;
     if(!picker.contains(t)&&!t.closest('[data-tool="shape"]')&&!t.closest('[data-action="more-shapes"]'))picker.hidden=true;
     if(!context.contains(t))context.hidden=true;
@@ -404,6 +415,7 @@ export function installEditorUI(api: EditorUIApi) {
   });
   window.addEventListener('keydown',event=>{if(event.key==='Escape')closePanels();});
   document.querySelector('#app canvas')?.addEventListener('contextmenu',event=>{
+    if((event as MouseEvent).altKey){event.preventDefault();return;}
     event.preventDefault();const e=event as MouseEvent,rect=(event.currentTarget as HTMLElement).getBoundingClientRect(),p=api.camera.screenToWorld({x:e.clientX-rect.left,y:e.clientY-rect.top});
     const hit=api.entityAt?.(p);
     if(hit&&!state.selection.has(hit))bus.exec({op:'SELECTION_SET',payload:memberSelection(state,hit,api.getGroupScope?.())});
@@ -430,7 +442,7 @@ export function installEditorUI(api: EditorUIApi) {
     const widgetKeys=widgets.map(w=>[w.id,w.type,w.x,w.y,w.width,w.height,w.rotation,w.locked,w.link,w.style,w.type==='shape'?w.shape:undefined,w.type==='image'?w.maskShape:undefined,w.type==='image'?w.opacity:undefined,!!w.checklist,!!w.table]);
     const connectorKeys=cs.map(c=>[c.id,c.locked,c.shape,c.style,c.captions,c.captionPositions,c.waypoints?.length??0]);
     const strokeKeys=strokes.map(s=>[s.id,s.locked,s.color,s.opacity,s.tool,strokes.length===ids.length?strokeWidth(s.points):undefined]);
-    const key=JSON.stringify([widgetKeys,connectorKeys,strokeKeys,selectionRoots(state),groupIds(),arrangementRoots(state,scope).length,scope,ids,!!copiedStyle]);if(key===renderKey)return;renderKey=key;
+    const key=JSON.stringify([widgetKeys,connectorKeys,strokeKeys,selectionRoots(state),groupIds(),arrangementRoots(state,scope).length,scope,ids,!!copiedStyle,brandColorRevision()]);if(key===renderKey)return;renderKey=key;
     const w=widgets[0],single=ids.length===1,locked=ids.some(id=>itemLocked(state,id)),allWidgets=widgets.length===ids.length,allText=allWidgets&&widgets.every(w=>w.type!=='image');
     let html=scope?button('exit-group','Sair do grupo','arrow-left')+separator:'';
     if(!single)html+=`<span class="selection-count">${groupIds().length===1&&selectionRoots(state).length===1?'Grupo':`${ids.length} objetos`}</span>`;
@@ -442,13 +454,12 @@ export function installEditorUI(api: EditorUIApi) {
       if(single&&w.type!=='frame'&&w.type!=='image'&&!w.audio&&!w.table&&!w.checklist)html+=shapeMenu(w)+separator;
       if(allText){
         html+=textMenus(w)+separator;
-        html+=fillMenu(w.style);
         if(widgets.every(w=>w.type==='shape'||w.type==='frame'))html+=borderMenu(w,widgets.every(w=>w.type==='shape'&&w.shape==='round_rectangle'));
+        html+=fillMenu(w.style);
       }
       if(single&&w.type==='image'){
         html+=button('crop','Recortar','crop')+menu('image','Imagem',icon('image'),choice('image','maskShape','Máscara da imagem',[['rectangle','Retângulo'],['ellipse','Elipse / círculo'],['round_rectangle','Cantos arredondados']],w.maskShape??'rectangle',value=>icon(value==='ellipse'?'crop-circle':value==='round_rectangle'?'corner-radius':'rectangle'))+opacity('image','opacity','Opacidade da imagem',(w.opacity??1)*100,100)+'<hr><div class="icon-choices image-choices">'+button('circle-crop','Recortar em círculo','crop-circle')+button('replace-image','Substituir imagem','image')+button('flip-x','Espelhar ↔','flip')+button('flip-y','Espelhar ↕','flip-vertical')+button('image-actual-size','Tamanho original','size')+button('reset-crop','Restaurar imagem','undo')+button('download-image','Baixar original','download')+'</div>')+separator+borderMenu(w,w.maskShape==='round_rectangle');
       }
-      if(single)html+=sizeMenu(w);
     }
     html+=commonMenus(widgets);
     properties.innerHTML=html;installFontPickers(properties);
@@ -465,5 +476,6 @@ export function installEditorUI(api: EditorUIApi) {
     if(label)[...properties.querySelectorAll<HTMLInputElement>('input[type="range"]')].find(input=>input.getAttribute('aria-label')===label)?.focus({preventScroll:true});
   }
   refresh();
+  window.addEventListener('board-brand-colors-changed',()=>{renderKey='';refresh();});
   return {refresh,openShapes,openConnectors,closePanels,finalizePropertyGestures:finishThicknessGesture,refreshAfterHistory};
 }

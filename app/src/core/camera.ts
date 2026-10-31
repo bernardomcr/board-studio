@@ -58,14 +58,14 @@ export class Camera {
   }
 
   /** Encaixa um retângulo de mundo na tela com margem. */
-  fit(bounds: { minX: number; minY: number; maxX: number; maxY: number }, padding = 64): void {
+  fit(bounds: { minX: number; minY: number; maxX: number; maxY: number }, padding = 64,viewport={left:0,top:0,width:this.width,height:this.height}): void {
     const w = Math.max(1, bounds.maxX - bounds.minX);
     const h = Math.max(1, bounds.maxY - bounds.minY);
-    const sx = (this.width - padding * 2) / w;
-    const sy = (this.height - padding * 2) / h;
+    const sx = Math.max(1,viewport.width - padding * 2) / w;
+    const sy = Math.max(1,viewport.height - padding * 2) / h;
     this.scale = clamp(Math.min(sx, sy), MIN_SCALE, MAX_SCALE);
-    this.x = (bounds.minX + bounds.maxX) / 2;
-    this.y = (bounds.minY + bounds.maxY) / 2;
+    this.x = (bounds.minX + bounds.maxX) / 2-(viewport.left+viewport.width/2-this.width/2)/this.scale;
+    this.y = (bounds.minY + bounds.maxY) / 2-(viewport.top+viewport.height/2-this.height/2)/this.scale;
   }
 
   /** Retângulo visível em coordenadas de mundo (para culling). */

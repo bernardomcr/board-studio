@@ -118,10 +118,11 @@ export function validateBoardFile(value: unknown): BoardFile {
   let totalPoints = 0;
   const strokes: Stroke[] = list(data.strokes).map(raw => {
     const s = record(raw), points = list(s.points, 200000); totalPoints += points.length;
+    const erasures=s.erasures===undefined?undefined:list(s.erasures,200000).map(value=>{const e=record(value),cutPoints=list(e.points,200000);if(!cutPoints.length)fail('Área apagada inválida.');totalPoints+=cutPoints.length;return {radius:number(e.radius,.000001),points:cutPoints.map(value=>{const p=record(value);return {x:number(p.x),y:number(p.y)};})};});
     if (totalPoints > 1000000) fail("O arquivo contém pontos de desenho demais.");
     return { id: id(s.id),name:s.name===undefined?undefined:str(s.name,1000),hidden:!!s.hidden,locked:!!s.locked,type: one(s.type, ["stroke"] as const), tool: one(s.tool, ["brush", "pen", "highlighter"] as const), color: color(s.color), z: number(s.z),
       opacity:s.opacity===undefined?undefined:number(s.opacity,0,1),precision:s.precision===undefined?undefined:typeof s.precision==='boolean'?s.precision:fail('Precisão de pincel inválida.'),precisionSmoothing:s.precisionSmoothing===undefined?undefined:number(s.precisionSmoothing,0),
-      points: points.map(value => { const p = record(value); return { x: number(p.x), y: number(p.y), r: number(p.r, .001) }; }) };
+      ...(erasures?{erasures}:{}),points: points.map(value => { const p = record(value); return { x: number(p.x), y: number(p.y), r: number(p.r, .001) }; }) };
   });
   const seen = new Set<string>(); unique(widgets, seen); unique(connectors, seen); unique(strokes, seen);
   const groupIds = new Set<string>();

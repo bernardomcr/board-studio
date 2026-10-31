@@ -4,6 +4,13 @@ import type { Camera } from './core/camera';
 import { BACKGROUND_MAX_BYTES, DEFAULT_BACKGROUND, type BackgroundImage, type BackgroundPatch, type BoardBackground } from './core/background';
 import { icon } from './icons';
 import {configureRasterSampling} from './render/raster-quality';
+import {boardGridPattern,type GridPattern} from './render/grid-paint';
+
+const gridPatterns:Array<[GridPattern,string]>= [['dots','Malha pontilhada'],['lines','Malha quadriculada'],['crosses','Malha de cruzetas'],['none','Sem malha']];
+function patternIcon(pattern:GridPattern):string{
+ const content=pattern==='dots'?'<circle cx="6" cy="6" r="1"/><circle cx="18" cy="6" r="1"/><circle cx="6" cy="18" r="1"/><circle cx="18" cy="18" r="1"/>':pattern==='lines'?'<path d="M3 3h18v18H3zM9 3v18M15 3v18M3 9h18M3 15h18"/>':pattern==='crosses'?'<path d="M3 6h6M6 3v6M15 6h6M18 3v6M3 18h6M6 15v6M15 18h6M18 15v6"/>':'<circle cx="12" cy="12" r="9"/><path d="m6 18 12-12"/>';
+ return '<svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">'+content+'</svg>';
+}
 
 interface BackgroundAPI {
   state: BoardState;
@@ -44,7 +51,8 @@ body.home-visible #board-background-controls{display:none!important}
 #board-background-panel label{display:flex;align-items:center;justify-content:space-between;gap:12px;min-height:34px;margin:5px 0}
 #board-background-panel input[type=color]{height:30px;width:44px;padding:2px;border:1px solid #deded9;border-radius:5px;background:white;cursor:pointer}
 #board-background-panel input[type=number]{height:31px;width:90px;border:1px solid #deded9;border-radius:5px;padding:5px 7px;background:white}
-#board-background-panel input[type=checkbox]{width:16px;height:16px;accent-color:#3859ff}
+
+#board-background-panel .background-grid-label{display:block;font-size:11px;color:#777d86;margin:12px 0 8px}#board-background-panel .background-grid-options{display:grid;grid-template-columns:repeat(4,1fr);gap:8px}#board-background-panel .background-grid-options button{height:38px;display:flex;align-items:center;justify-content:center}#board-background-panel .background-grid-options button[aria-pressed=true]{border-color:#4262ff;outline:1px solid #4262ff;background:#f1f4ff;color:#4262ff}
 #board-background-panel hr{border:0;border-top:1px solid #ededeb;margin:12px 0}
 #board-background-panel .background-action{display:flex;align-items:center;justify-content:center;gap:7px;width:100%;padding:9px;margin-top:7px}
 #board-background-panel .background-action svg{flex:none}
@@ -74,13 +82,12 @@ body.home-visible #board-background-controls{display:none!important}
     for (const input of panel.querySelectorAll<HTMLInputElement>('input[data-background-input]')) {
       if (input === document.activeElement) continue;
       const field = input.dataset.backgroundInput;
-      if (field === 'grid') input.checked = background.grid;
-      else if (field === 'color') input.value = background.color;
+      if (field === 'color') input.value = background.color;
       else if (image && (field === 'width' || field === 'height' || field === 'opacity')) input.value = String(field === 'opacity' ? Math.round(image.opacity * 100) : Math.round(image[field] * 100) / 100);
     }
     if (renderedBackground === background || panel.contains(document.activeElement) && document.activeElement?.matches('input')) return;
     renderedBackground = background;
-    panel.innerHTML = `<header><span>Fundo do board</span><button data-background-close aria-label="Fechar fundo do board">${icon('close',17)}</button></header><div class="background-themes"><button data-background-color="#fbfaf7" aria-label="Fundo claro" aria-pressed="${background.color === '#fbfaf7'}"><span style="background:#fbfaf7"></span>Claro</button><button data-background-color="#16181d" aria-label="Fundo escuro" aria-pressed="${background.color === '#16181d'}"><span style="background:#16181d"></span>Escuro</button></div><label>Cor personalizada<input type="color" aria-label="Cor de fundo" data-background-input="color" value="${background.color}"></label><label>Mostrar grade<input type="checkbox" aria-label="Mostrar grade" data-background-input="grid" ${background.grid ? 'checked' : ''}></label><hr><button class="background-action" data-background-import ${importing ? 'disabled' : ''}>${icon('image',17)}${importing ? 'Abrindo imagem…' : image ? 'Substituir imagem de fundo' : 'Usar imagem como fundo'}</button>${image ? `<label>Largura<input type="number" aria-label="Largura da imagem de fundo" data-background-input="width" value="${Math.round(image.width * 100) / 100}" min="1"></label><label>Altura<input type="number" aria-label="Altura da imagem de fundo" data-background-input="height" value="${Math.round(image.height * 100) / 100}" min="1"></label><label>Opacidade<input type="number" aria-label="Opacidade da imagem de fundo" data-background-input="opacity" value="${Math.round(image.opacity * 100)}" min="0" max="100"></label><button class="background-action" data-background-fit>${icon('size',17)}Ajustar à tela</button><button class="background-action" data-background-center>${icon('align',17)}Centralizar na tela</button><button class="background-action" data-background-remove>${icon('trash',17)}Remover imagem de fundo</button>` : ''}<p class="background-note">${image ? 'A imagem acompanha o board e mantém a proporção ao mudar o tamanho.' : 'PNG, JPEG ou WebP de até 25 MB. A imagem fica atrás dos objetos.'}</p>${importError ? '<p role="alert"></p>' : ''}`;
+    panel.innerHTML = `<header><span>Fundo do board</span><button data-background-close aria-label="Fechar fundo do board">${icon('close',17)}</button></header><div class="background-themes"><button data-background-color="#fbfaf7" aria-label="Fundo claro" aria-pressed="${background.color === '#fbfaf7'}"><span style="background:#fbfaf7"></span>Claro</button><button data-background-color="#16181d" aria-label="Fundo escuro" aria-pressed="${background.color === '#16181d'}"><span style="background:#16181d"></span>Escuro</button></div><label>Cor personalizada<input type="color" aria-label="Cor de fundo" data-background-input="color" value="${background.color}"></label><span class="background-grid-label">Malha</span><div class="background-grid-options" role="group" aria-label="Malha do fundo">${gridPatterns.map(([pattern,label])=>`<button type="button" data-background-grid="${pattern}" aria-label="${label}" title="${label}" aria-pressed="${boardGridPattern(background)===pattern}">${patternIcon(pattern)}</button>`).join('')}</div><hr><button class="background-action" data-background-import ${importing ? 'disabled' : ''}>${icon('image',17)}${importing ? 'Abrindo imagem…' : image ? 'Substituir imagem de fundo' : 'Usar imagem como fundo'}</button>${image ? `<label>Largura<input type="number" aria-label="Largura da imagem de fundo" data-background-input="width" value="${Math.round(image.width * 100) / 100}" min="1"></label><label>Altura<input type="number" aria-label="Altura da imagem de fundo" data-background-input="height" value="${Math.round(image.height * 100) / 100}" min="1"></label><label>Opacidade<input type="number" aria-label="Opacidade da imagem de fundo" data-background-input="opacity" value="${Math.round(image.opacity * 100)}" min="0" max="100"></label><button class="background-action" data-background-fit>${icon('size',17)}Ajustar à tela</button><button class="background-action" data-background-center>${icon('align',17)}Centralizar na tela</button><button class="background-action" data-background-remove>${icon('trash',17)}Remover imagem de fundo</button>` : ''}<p class="background-note">${image ? 'A imagem acompanha o board e mantém a proporção ao mudar o tamanho.' : 'PNG, JPEG ou WebP de até 25 MB. A imagem fica atrás dos objetos.'}</p>${importError ? '<p role="alert"></p>' : ''}`;
     const error = panel.querySelector('[role=alert]'); if (error) error.textContent = importError;
   }
 
@@ -136,6 +143,7 @@ body.home-visible #board-background-controls{display:none!important}
     const target = (event.target as Element).closest<HTMLButtonElement>('button'); if (!target) return;
     if (target.hasAttribute('data-background-close')) close();
     if (target.dataset.backgroundColor) patch({ color: target.dataset.backgroundColor });
+    if(target.dataset.backgroundGrid){const pattern=target.dataset.backgroundGrid as GridPattern;patch(pattern==='none'?{grid:false}:pattern==='dots'?{grid:true,gridStyle:null}:{grid:true,gridStyle:pattern});}
     if (target.hasAttribute('data-background-remove')) patch({ image: null });
     const image = current().image;
     if (image && target.hasAttribute('data-background-fit')) patch({ image: centered(image,true) });
@@ -149,7 +157,6 @@ body.home-visible #board-background-controls{display:none!important}
   panel.addEventListener('change',event => {
     const input = event.target as HTMLInputElement, field = input.dataset.backgroundInput; if (!field) return;
     if (field === 'color') patch({ color: input.value });
-    else if (field === 'grid') patch({ grid: input.checked });
     else {
       const image = current().image, value = Number(input.value); if (!image || !Number.isFinite(value)) return;
       if (field === 'opacity') patch({ image: { ...image, opacity: Math.max(0, Math.min(100, value)) / 100 } });

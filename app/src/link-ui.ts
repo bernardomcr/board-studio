@@ -73,6 +73,6 @@ export function installLinkUI(api:API){
   });
   // Preserve an inline text range while its floating-toolbar button is pressed.
   document.addEventListener('pointerdown',event=>{if((event.target as Element).closest('[data-action="add-link"],[data-mind-action="link"]'))event.preventDefault();},true);
-  window.addEventListener('keydown',event=>{if((event.ctrlKey||event.metaKey)&&event.key.toLowerCase()==='k'&&!document.body.classList.contains('home-visible')){event.preventDefault();event.stopImmediatePropagation();open();}},true);
+  window.addEventListener('keydown',event=>{if((event.ctrlKey||event.metaKey)&&event.key.toLowerCase()==='k'&&!document.body.classList.contains('home-visible')&&![...document.querySelectorAll('dialog[open]')].some(other=>other!==dialog)){event.preventDefault();event.stopImmediatePropagation();open();}},true);
   return {open,editing:()=>dialog.open,icon:()=>icon('link',20)};
 }

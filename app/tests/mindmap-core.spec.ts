@@ -7,14 +7,14 @@ test('mind branches use measured sizes, source-side defaults, no overlapping nod
   const m=await import('/src/core/mindmap.ts'),{CommandBus}=await import('/src/core/commands.ts');
   const state={widgets:new Map(),order:[],connectors:new Map(),connectorOrder:[],strokes:new Map(),strokeOrder:[],groups:new Map(),selection:new Set()},bus=new CommandBus(state,()=>{});
   const root=m.createMindMap(state,bus,{x:1850,y:-630}),ids=Array.from({length:6},(_,i)=>m.addMindChild(state,bus,root,'Tópico '+i)),child=m.addMindChild(state,bus,ids[0],'Um título bastante mais longo\ncom duas linhas'),leaf=m.addMindChild(state,bus,child,'Detalhe');
-  const topic=state.widgets.get(child);bus.exec({op:'WIDGET_UPDATE',payload:{id:child,patch:{style:{...topic.style,fontSize:78}}}});m.layoutMindMap(state,bus,root);
+  const topic=state.widgets.get(child),original={width:topic.width,height:topic.height};bus.exec({op:'WIDGET_UPDATE',payload:{id:child,patch:{style:{...topic.style,fontSize:78}}}});m.layoutMindMap(state,bus,root);const fitted=(await import('/src/core/text-layout.ts')).fitBoxText(state.widgets.get(child)).fontSize;
   const center={x:state.widgets.get(root).x+state.widgets.get(root).width/2,y:state.widgets.get(root).y+state.widgets.get(root).height/2},nodes=[...state.widgets.values()];
   const overlaps=[];for(let i=0;i<nodes.length;i++)for(let j=i+1;j<nodes.length;j++){const a=nodes[i],b=nodes[j];if(a.x<b.x+b.width&&a.x+a.width>b.x&&a.y<b.y+b.height&&a.y+a.height>b.y)overlaps.push([a.id,b.id]);}
   const sides=ids.map(id=>state.widgets.get(id).mind.side),before=JSON.stringify({nodes:[...state.widgets],connectors:[...state.connectors],order:state.order,selection:[...state.selection]});
   const added=m.addMindSibling(state,bus,leaf,'Irmão');bus.undo();const restored=before===JSON.stringify({nodes:[...state.widgets],connectors:[...state.connectors],order:state.order,selection:[...state.selection]});bus.redo();m.validateMindMapGraph([...state.widgets.values()],[...state.connectors.values()]);
-  return {center,overlaps,sides,width:state.widgets.get(child).width,restored,redone:state.widgets.has(added),curves:[...state.connectors.values()].every(c=>c.shape==='curved'&&c.style.endCap==='none'),count:state.widgets.size};
+  return {center,overlaps,sides,original,width:state.widgets.get(child).width,height:state.widgets.get(child).height,preferred:state.widgets.get(child).style.fontSize,fitted,restored,redone:state.widgets.has(added),curves:[...state.connectors.values()].every(c=>c.shape==='curved'&&c.style.endCap==='none'),count:state.widgets.size};
  });
- expect(result.center).toEqual({x:1850,y:-630});expect(result.overlaps).toEqual([]);expect(result.sides).toEqual(['right','right','right','right','right','left']);expect(result.width).toBeGreaterThan(1000);expect(result.restored).toBe(true);expect(result.redone).toBe(true);expect(result.curves).toBe(true);expect(result.count).toBe(10);
+ expect(result.center).toEqual({x:1850,y:-630});expect(result.overlaps).toEqual([]);expect(result.sides).toEqual(['right','right','right','right','right','left']);expect(result.width).toBe(result.original.width);expect(result.height).toBe(result.original.height);expect(result.preferred).toBe(78);expect(result.fitted).toBeGreaterThan(0);expect(result.fitted).toBeLessThan(78);expect(result.restored).toBe(true);expect(result.redone).toBe(true);expect(result.curves).toBe(true);expect(result.count).toBe(10);
 });
 
 test('collapse derives descendant visibility and bounds while preserving manual visibility and one-step delete',async({page})=>{

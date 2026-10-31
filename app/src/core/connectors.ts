@@ -24,7 +24,7 @@ export interface Connector {
 }
 export interface ConnectorCubic { p0: Vec; p1: Vec; p2: Vec; p3: Vec }
 export interface ConnectorGeometry { points: Vec[]; cubic?: ConnectorCubic; cubics?: ConnectorCubic[] }
-const geometryCache=new WeakMap<Connector,{start?:Widget;end?:Widget;shape:ConnectorShape;startEndpoint:Endpoint;endEndpoint:Endpoint;control?:Vec|null;waypoints?:Vec[]|null;geometry:ConnectorGeometry|null}>();
+const geometryCache=new WeakMap<Connector,{start?:Widget;end?:Widget;shape:ConnectorShape;mindBranch?:string;startEndpoint:Endpoint;endEndpoint:Endpoint;control?:Vec|null;waypoints?:Vec[]|null;geometry:ConnectorGeometry|null}>();
 const EPS = 1e-8;
 const mid = (a: Vec, b: Vec): Vec => ({ x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 });
 const length = (a: Vec, b: Vec) => Math.hypot(a.x - b.x, a.y - b.y);
@@ -118,10 +118,44 @@ function sampleCubic(p0: Vec, p1: Vec, p2: Vec, p3: Vec): Vec[] {
     walk(a, ab, abc, center, depth + 1); walk(center, bcd, cd, d, depth + 1);
   }; walk(p0, p1, p2, p3, 0); return points;
 }
+/** Curvature follows the attached edges and remains proportional to the chord.
+ * Mind branches use the axis distance and a small world-space minimum instead.
+ * Their model has no separate widget-scale component, so that minimum is 20. */
+function curveReach(connector:Connector,a:Vec,b:Vec):number{
+  if(!connector.mindBranch)return length(a,b)*.4;
+  const vertical=connector.start.kind==='anchor'&&connector.end.kind==='anchor'&&connector.start.x===.5&&connector.end.x===.5;
+  return Math.max(Math.abs(vertical?b.y-a.y:b.x-a.x)*.4,20);
+}
+function splineCubics(connector:Connector,knots:Vec[],widgets:Map<string,Widget>):ConnectorCubic[]{
+  const spans=knots.slice(1).map((end,index)=>curveReach(connector,knots[index]!,end));
+  const directions:Vec[]=knots.map((point,index)=>{
+    if(index===0)return connector.start.kind==='anchor'?anchorNormal(connector.start,widgets):{x:0,y:0};
+    if(index===knots.length-1){const normal=connector.end.kind==='anchor'?anchorNormal(connector.end,widgets):{x:0,y:0};return {x:-normal.x,y:-normal.y};}
+    const incoming=unit({x:point.x-knots[index-1]!.x,y:point.y-knots[index-1]!.y}),outgoing=unit({x:knots[index+1]!.x-point.x,y:knots[index+1]!.y-point.y});
+    return unit({x:incoming.x+outgoing.x,y:incoming.y+outgoing.y});
+  });
+  const handles=spans.map((span,index)=>({start:spans[index-1]&&spans[index-1]!<span?(spans[index-1]!+span)/2:span,end:spans[index+1]&&spans[index+1]!<span?(span+spans[index+1]!)/2:span}));
+  const curves=spans.map((_,index)=>{const p0=knots[index]!,p3=knots[index+1]!,start=directions[index]!,end=directions[index+1]!,sizes=handles[index]!;return {p0,p1:{x:p0.x+start.x*sizes.start,y:p0.y+start.y*sizes.start},p2:{x:p3.x-end.x*sizes.end,y:p3.y-end.y*sizes.end},p3};});
+  // Compute every join against the initial handles. Updating in place would make
+  // later joins depend on traversal order and disturb the following tangent.
+  const joins=curves.slice(1).map((next,index)=>{
+    const previous=curves[index]!,join=next.p0,incoming=unit({x:join.x-previous.p1.x,y:join.y-previous.p1.y}),outgoing=unit({x:next.p2.x-join.x,y:next.p2.y-join.y});
+    let direction=unit({x:incoming.x+outgoing.x,y:incoming.y+outgoing.y});
+    if(!direction.x&&!direction.y)direction=unit({x:next.p3.x-previous.p0.x,y:next.p3.y-previous.p0.y});
+    if(direction.x*(next.p1.x-previous.p2.x)+direction.y*(next.p1.y-previous.p2.y)<0)direction={x:-direction.x,y:-direction.y};
+    const before=handles[index]!.end,after=handles[index+1]!.start;
+    return {previous:{x:join.x-direction.x*before,y:join.y-direction.y*before},next:{x:join.x+direction.x*after,y:join.y+direction.y*after}};
+  });
+  joins.forEach((join,index)=>{curves[index]!.p2=join.previous;curves[index+1]!.p1=join.next;});
+  return curves;
+}
+function sampledSpline(curves:ConnectorCubic[]):ConnectorGeometry{
+  const points:Vec[]=[];curves.forEach((curve,index)=>points.push(...sampleCubic(curve.p0,curve.p1,curve.p2,curve.p3).slice(index?1:0)));return {points,cubics:curves};
+}
 export function connectorGeometry(connector: Connector, widgets: Map<string, Widget>): ConnectorGeometry | null {
   const start=connector.start.kind==='anchor'?widgets.get(connector.start.widgetId):undefined,end=connector.end.kind==='anchor'?widgets.get(connector.end.widgetId):undefined,cached=geometryCache.get(connector);
-  if(cached&&cached.start===start&&cached.end===end&&cached.shape===connector.shape&&cached.startEndpoint===connector.start&&cached.endEndpoint===connector.end&&cached.control===connector.controlPoint&&cached.waypoints===connector.waypoints)return cached.geometry;
-  const geometry=buildConnectorGeometry(connector,widgets);geometryCache.set(connector,{start,end,shape:connector.shape,startEndpoint:connector.start,endEndpoint:connector.end,control:connector.controlPoint,waypoints:connector.waypoints,geometry});return geometry;
+  if(cached&&cached.start===start&&cached.end===end&&cached.shape===connector.shape&&cached.mindBranch===connector.mindBranch&&cached.startEndpoint===connector.start&&cached.endEndpoint===connector.end&&cached.control===connector.controlPoint&&cached.waypoints===connector.waypoints)return cached.geometry;
+  const geometry=buildConnectorGeometry(connector,widgets);geometryCache.set(connector,{start,end,shape:connector.shape,mindBranch:connector.mindBranch,startEndpoint:connector.start,endEndpoint:connector.end,control:connector.controlPoint,waypoints:connector.waypoints,geometry});return geometry;
 }
 function buildConnectorGeometry(connector:Connector,widgets:Map<string,Widget>):ConnectorGeometry|null{
   const a = resolveEndpoint(connector.start, widgets), b = resolveEndpoint(connector.end, widgets); if (!a || !b) return null;
@@ -141,20 +175,7 @@ function buildConnectorGeometry(connector:Connector,widgets:Map<string,Widget>):
       }
       return {points:clean(path)};
     }
-    // Interpolating cubic segments pass through every waypoint. They remain a
-    // sampled path for hit-testing and patterned rendering, with exact curves
-    // retained for vector export and exact endpoint tangent decorations.
-    const cubics:ConnectorCubic[]=[], points:Vec[]=[];
-    for(let i=0;i<knots.length-1;i++) {
-      const before=knots[Math.max(0,i-1)]!, start=knots[i]!, end=knots[i+1]!, after=knots[Math.min(knots.length-1,i+2)]!;
-      let p1={x:start.x+(end.x-before.x)/6,y:start.y+(end.y-before.y)/6};
-      let p2={x:end.x-(after.x-start.x)/6,y:end.y-(after.y-start.y)/6};
-      if(i===0 && connector.start.kind==='anchor') {const n=anchorNormal(connector.start,widgets),reach=Math.min(120,length(start,end)/3);p1={x:start.x+n.x*reach,y:start.y+n.y*reach};}
-      if(i===knots.length-2 && connector.end.kind==='anchor') {const n=anchorNormal(connector.end,widgets),reach=Math.min(120,length(start,end)/3);p2={x:end.x+n.x*reach,y:end.y+n.y*reach};}
-      const cubic={p0:start,p1,p2,p3:end};cubics.push(cubic);
-      points.push(...sampleCubic(start,p1,p2,end).slice(i?1:0));
-    }
-    return {points,cubics};
+    return sampledSpline(splineCubics(connector,knots,widgets));
   }
   const control = connector.controlPoint;
   if (connector.shape === "straight") return { points: clean(control ? [a, control, b] : [a, b]) };
@@ -201,8 +222,10 @@ function buildConnectorGeometry(connector:Connector,widgets:Map<string,Widget>):
     };
     candidates.sort((p, q) => penalty(p) - penalty(q)); return { points: clean([a, ...candidates[0]!, b]) };
   }
-  const reach = Math.max(24, Math.min(600, length(a, b) * .5));
-  let p1={ x: a.x + n1.x * reach, y: a.y + n1.y * reach },p2={ x: b.x + n2.x * reach, y: b.y + n2.y * reach };
+  // Regular cubic connectors use the observed 0.4 chord-length tangent. Keeping
+  // it proportional also preserves the same bend on macro-scale layouts.
+  const curve=splineCubics(connector,[a,b],widgets)[0]!;
+  let {p1,p2}=curve;
   if(connector.start.kind==='point'&&connector.end.kind==='point'){
     // A deliberately curved free line should retain a visible, gentle bow.
     const d={x:b.x-a.x,y:b.y-a.y},normal={x:-fallback.y,y:fallback.x},bow=Math.min(120,length(a,b)*.18);
@@ -265,7 +288,7 @@ export function connectorInsertWaypoint(connector:Connector,geometry:ConnectorGe
 export function connectorCapSegment(geometry: ConnectorGeometry, which: "start" | "end"): { from: Vec; to: Vec } {
   const points = geometry.points, to = which === "start" ? points[0]! : points[points.length - 1]!;
   const curve=geometry.cubic ?? (which==='start'?geometry.cubics?.[0]:geometry.cubics?.at(-1));
-  if (curve) { const control = which === "start" ? curve.p1 : curve.p2; if (length(control, to) > EPS) return { from: control, to }; }
+  if (curve) {const controls=which==='start'?[curve.p1,curve.p2,curve.p3]:[curve.p2,curve.p1,curve.p0];const control=controls.find(point=>length(point,to)>EPS);if(control)return {from:control,to};}
   const rest = which === "start" ? points.slice(1) : points.slice(0, -1).reverse();
   return { from: rest.find(p => length(p, to) > EPS) ?? { x: to.x - 1, y: to.y }, to };
 }

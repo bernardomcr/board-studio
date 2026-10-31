@@ -24,7 +24,7 @@ export function positionContextPanel(panel:HTMLElement,state:BoardState,camera:C
 function workspaceLimits(){
   const layers=document.getElementById('layers-panel');
   const layerLeft=layers&&!layers.hidden&&document.body.classList.contains('layers-open')?layers.getBoundingClientRect().left-12:innerWidth-12;
-  const left=innerWidth>600?78:12;
+  const left=innerWidth>600?(innerHeight<=460?98:78):12;
   return {left,right:Math.max(left+220,layerLeft)};
 }
 
@@ -34,6 +34,13 @@ function positionPopover(menu:HTMLDetailsElement){
   body.style.position='fixed';body.style.right='auto';body.style.bottom='auto';
   body.style.maxWidth=`${limits.right-limits.left}px`;body.style.maxHeight=`${Math.max(120,innerHeight-100)}px`;
   const width=body.offsetWidth,height=body.offsetHeight;
+  const parentMenu=menu.parentElement?.closest<HTMLDetailsElement>('details');
+  if(parentMenu){
+    const parent=parentMenu.querySelector<HTMLElement>(':scope > .property-popover')?.getBoundingClientRect();
+    const left=parent&&parent.right+width+8<=limits.right?parent.right+8:parent?parent.left-width-8:anchor.left;
+    body.style.left=`${Math.max(limits.left,Math.min(limits.right-width,left))}px`;
+    body.style.top=`${Math.max(68,Math.min(innerHeight-height-12,anchor.top))}px`;return;
+  }
   const left=Math.max(limits.left,Math.min(limits.right-width,anchor.left));
   const below=innerHeight-anchor.bottom-24,above=anchor.top-80;
   let top=anchor.bottom+10;
@@ -52,22 +59,23 @@ export function compactContextPanel(panel:HTMLElement){
       if(!menu||menu.tagName!=='DETAILS'||!panel.contains(menu))return;
       event.preventDefault();
       const open=!menu.open;
-      for(const other of panel.querySelectorAll<HTMLDetailsElement>('details'))if(other!==menu)other.open=false;
-      if(open)panel.dataset.openMenu=menu.dataset.menu;else delete panel.dataset.openMenu;
+      for(const other of panel.querySelectorAll<HTMLDetailsElement>('details'))if(other!==menu&&!other.contains(menu)&&!menu.contains(other))other.open=false;
+      if(open)panel.dataset.openMenu=menu.dataset.menu;else{for(const child of menu.querySelectorAll<HTMLDetailsElement>('details'))child.open=false;const parent=menu.parentElement?.closest<HTMLDetailsElement>('details[open]');if(parent)panel.dataset.openMenu=parent.dataset.menu;else delete panel.dataset.openMenu;}
       menu.open=open;if(open)positionPopover(menu);
     });
     panel.addEventListener('toggle',event=>{
       const menu=event.target as HTMLDetailsElement;
       if(!menu.isConnected||menu.tagName!=='DETAILS')return;
       if(menu.open){
-        panel.dataset.openMenu=menu.dataset.menu;
-        for(const other of panel.querySelectorAll<HTMLDetailsElement>('details'))if(other!==menu)other.open=false;
+        if(!menu.querySelector('details[open]'))panel.dataset.openMenu=menu.dataset.menu;
+        for(const other of panel.querySelectorAll<HTMLDetailsElement>('details'))if(other!==menu&&!other.contains(menu)&&!menu.contains(other))other.open=false;
         positionPopover(menu);
       }else if(panel.dataset.openMenu===menu.dataset.menu)delete panel.dataset.openMenu;
     },true);
   }
+  const selected=[...panel.querySelectorAll<HTMLDetailsElement>('details')].find(menu=>menu.dataset.menu===panel.dataset.openMenu);
+  if(selected){selected.open=true;let parent=selected.parentElement?.closest<HTMLDetailsElement>('details');while(parent&&panel.contains(parent)){parent.open=true;parent=parent.parentElement?.closest<HTMLDetailsElement>('details');}}
   for(const menu of panel.querySelectorAll<HTMLDetailsElement>('details')){
-    if(menu.dataset.menu===panel.dataset.openMenu)menu.open=true;
     if(menu.open)positionPopover(menu);
   }
 }
@@ -89,6 +97,8 @@ export function installContextStyles(){
 #selection-properties .toolbar-fontsize::-webkit-inner-spin-button{opacity:1}
 #selection-properties .toolbar-fontsize:hover{background:#f4f5f8}
 #selection-properties .toolbar-color{display:block;width:22px;height:22px;border:1px solid #0002;border-radius:50%;box-sizing:border-box}
+#selection-properties .toolbar-border-color{display:block;width:23px;height:23px;border:4px solid var(--border-color);border-radius:50%;background:#fff;opacity:var(--border-alpha);box-sizing:border-box}
+#selection-properties .toolbar-border-color.transparent{border:1px solid #a3aab5;background:linear-gradient(135deg,transparent 46%,#969da8 47%,#969da8 51%,transparent 52%),#fff}
 #selection-properties .toolbar-color.transparent,.color-swatch.transparent{background:linear-gradient(135deg,transparent 46%,#969da8 47%,#969da8 51%,transparent 52%),#fff!important}
 #selection-properties .menu-count{position:absolute;right:2px;top:1px;border:1px solid #e7e9ed;background:white;color:#737b89;border-radius:5px;font:9px Inter,sans-serif;line-height:12px;min-width:12px;text-align:center}
 #selection-properties .property-popover,#mindmap-properties .property-popover{position:fixed;left:0;top:calc(100% + 8px);width:250px;min-width:0;max-height:min(470px,70vh);overflow:auto;overscroll-behavior:contain;padding:12px;display:flex;flex-direction:column;gap:12px;border:1px solid #e4e7ed;border-radius:14px;background:#fff;color:#323842;box-shadow:0 8px 32px #17223b24;box-sizing:border-box;z-index:44;font:12px Inter,'Segoe UI',sans-serif}
@@ -155,6 +165,10 @@ export function installContextStyles(){
 #selection-properties .caption-row button{padding:5px;width:25px}
 #selection-properties .control-note,#selection-properties .empty-message{margin:0;color:#8b94a2;font-size:11px;line-height:1.5}
 #selection-properties .compact-type-controls{display:none}
+#selection-properties :is([data-menu="size"],[data-menu="arrange"])>summary{width:100%;justify-content:flex-start;gap:10px;height:36px;min-width:210px;padding:8px}
+#selection-properties :is([data-menu="size"],[data-menu="arrange"]){width:100%}
+#selection-properties .submenu-label{flex:1;text-align:left;font-size:12px}
+#selection-properties summary>svg.submenu-arrow{width:14px;height:14px}
 #selection-properties[data-compact=true]>.font-picker,#selection-properties[data-compact=true]>.toolbar-fontsize{display:none}
 #selection-properties[data-compact=true] .compact-type-controls{display:flex;flex-direction:column;gap:9px;padding:6px;width:215px}
 #selection-properties :disabled,#mindmap-properties :disabled{opacity:.42;cursor:default}
@@ -185,7 +199,7 @@ export function installContextStyles(){
   document.head.append(css);
   document.addEventListener('pointerdown',event=>{
     const panel=document.getElementById('selection-properties');
-    if((event.target as Element).closest('.font-picker-popover'))return;
+    if((event.target as Element).closest('.font-picker-popover,.brand-dialog'))return;
     if(panel&&!panel.contains(event.target as Node)){delete panel.dataset.openMenu;for(const menu of panel.querySelectorAll<HTMLDetailsElement>('details'))menu.open=false;}
   });
 }
