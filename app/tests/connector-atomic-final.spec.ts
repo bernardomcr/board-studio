@@ -26,7 +26,7 @@ for(const count of [2,3])test(`adding a label to ${count} selected connectors at
   const after=await state(page,ids);expect(after.zoom).toBe(.02);expect(after.history-before.history).toBe(1);expect(after.selection).toEqual(ids);
   for(let i=0;i<count;i++){
     const old=before.connectors[i],next=after.connectors[i];expect(next.captions).toEqual([...old.captions,'Rótulo']);expect(next.captionPositions.slice(0,old.captionPositions.length)).toEqual(old.captionPositions);expect(next.captionPositions.at(-1)).toBeGreaterThan(0);expect(next.captionPositions.at(-1)).toBeLessThan(1);
-    const {captions,captionPositions,...remaining}=next,{captions:oldCaptions,captionPositions:oldPositions,...oldRemaining}=old;expect(remaining).toEqual(oldRemaining);
+    const {captions,captionPositions,captionStyles,...remaining}=next,{captions:oldCaptions,captionPositions:oldPositions,captionStyles:oldStyles,...oldRemaining}=old;expect(remaining).toEqual(oldRemaining);expect(captionStyles.at(-1)).toMatchObject({fontSize:14,color:old.style.strokeColor,followPath:false,side:'center'});
   }
   await expect(menu).toHaveAttribute('open','');await expect(menu.getByRole('textbox',{name:'Rótulo 2',exact:true})).toHaveValue('Rótulo');await expect(menu.getByRole('spinbutton',{name:'Posição do rótulo 1',exact:true})).toHaveValue('20');
   await page.keyboard.press('Control+z');const undone=await state(page,ids);expect(undone.connectors).toEqual(before.connectors);expect(undone.selection).toEqual(ids);expect(undone.history).toBe(before.history);

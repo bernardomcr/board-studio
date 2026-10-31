@@ -1,19 +1,22 @@
 import type { Graphics } from 'pixi.js';
-import { connectorCapSegment, connectorCaptionPoints, type Connector, type ConnectorGeometry } from '../core/connectors';
+import { connectorCapSegment, type Connector, type ConnectorGeometry } from '../core/connectors';
+import {connectorCaptionLayout,captionCutCubics,captionCutSegments,captionDotVisible} from '../core/connector-captions';
 import { capGeometry, patternedLineSegments } from '../core/line-decoration';
 import type { Vec } from '../core/geometry';
+import {screenStroke,screenDot} from './screen-coverage';
 
 /** Shared canvas paint for line patterns and all terminal decorations. */
-export function paintConnector(graphics:Graphics,connector:Connector,geometry:ConnectorGeometry,clear=true):void {
+export function paintConnector(graphics:Graphics,connector:Connector,geometry:ConnectorGeometry,clear=true,zoom=1):void {
   if(clear)graphics.clear();
   const color=connector.style.strokeColor,width=connector.style.strokeWidth;
   const line=patternedLineSegments(geometry.points,connector.style.strokeStyle,width);
-  const stroke={color,width,cap:'round' as const,join:'round' as const};
+  const captions=connectorCaptionLayout(connector,geometry);
+  const coverage=screenStroke(width,zoom),stroke={color,...coverage,cap:'round' as const,join:'round' as const};
   const curves=geometry.cubics??(geometry.cubic?[geometry.cubic]:[]);
   if((!connector.style.strokeStyle||connector.style.strokeStyle==='normal')&&curves.length){
-    graphics.moveTo(curves[0]!.p0.x,curves[0]!.p0.y);for(const c of curves)graphics.bezierCurveTo(c.p1.x,c.p1.y,c.p2.x,c.p2.y,c.p3.x,c.p3.y);graphics.stroke(stroke);
-  }else for(const segment of line.segments){if(segment.length<2)continue;graphics.moveTo(segment[0]!.x,segment[0]!.y);for(const point of segment.slice(1))graphics.lineTo(point.x,point.y);graphics.stroke(stroke);}
-  for(const dot of line.dots)graphics.circle(dot.x,dot.y,dot.radius).fill(color);
+    for(const c of captionCutCubics(curves,captions)){graphics.moveTo(c.p0.x,c.p0.y);graphics.bezierCurveTo(c.p1.x,c.p1.y,c.p2.x,c.p2.y,c.p3.x,c.p3.y);graphics.stroke(stroke);}
+  }else for(const source of line.segments)for(const segment of captionCutSegments(source,captions)){if(segment.length<2)continue;graphics.moveTo(segment[0]!.x,segment[0]!.y);for(const point of segment.slice(1))graphics.lineTo(point.x,point.y);graphics.stroke(stroke);}
+  for(const dot of line.dots)if(captionDotVisible(dot,dot.radius,captions)){const coverage=screenDot(dot.radius,zoom);graphics.circle(dot.x,dot.y,coverage.radius).fill({color,alpha:coverage.alpha});}
   for(const which of ['start','end'] as const){
     const tangent=connectorCapSegment(geometry,which),cap=capGeometry(connector.style[which==='start'?'startCap':'endCap'],tangent.from,tangent.to,width);
     for(const polygon of cap.polygons)graphics.poly(polygon).fill(color);
@@ -31,19 +34,20 @@ export function connectorSvgContent(connector:Connector,geometry:ConnectorGeomet
   const color=escaped(connector.style.strokeColor),width=connector.style.strokeWidth;
   const stroke=`fill="none" stroke="${color}" stroke-width="${n(width)}" stroke-linecap="round" stroke-linejoin="round"`;
   const line=patternedLineSegments(geometry.points,connector.style.strokeStyle,width),pieces:string[]=[];
+  const captions=connectorCaptionLayout(connector,geometry);
   if(!connector.style.strokeStyle||connector.style.strokeStyle==='normal') {
     const curves=geometry.cubics ?? (geometry.cubic?[geometry.cubic]:[]);
-    if(curves.length){const first=curves[0]!;pieces.push(`<path d="M${n(first.p0.x)} ${n(first.p0.y)} ${curves.map(c=>`C${n(c.p1.x)} ${n(c.p1.y)} ${n(c.p2.x)} ${n(c.p2.y)} ${n(c.p3.x)} ${n(c.p3.y)}`).join(' ')}" ${stroke}/>`);}
-    else for(const segment of line.segments)pieces.push(`<polyline points="${polyline(segment)}" ${stroke}/>`);
+    if(curves.length)for(const c of captionCutCubics(curves,captions))pieces.push(`<path d="M${n(c.p0.x)} ${n(c.p0.y)} C${n(c.p1.x)} ${n(c.p1.y)} ${n(c.p2.x)} ${n(c.p2.y)} ${n(c.p3.x)} ${n(c.p3.y)}" ${stroke}/>`);
+    else for(const source of line.segments)for(const segment of captionCutSegments(source,captions))pieces.push(`<polyline points="${polyline(segment)}" ${stroke}/>`);
   }else{
-    for(const segment of line.segments)pieces.push(`<polyline points="${polyline(segment)}" ${stroke}/>`);
-    for(const dot of line.dots)pieces.push(`<circle cx="${n(dot.x)}" cy="${n(dot.y)}" r="${n(dot.radius)}" fill="${color}"/>`);
+    for(const source of line.segments)for(const segment of captionCutSegments(source,captions))pieces.push(`<polyline points="${polyline(segment)}" ${stroke}/>`);
+    for(const dot of line.dots)if(captionDotVisible(dot,dot.radius,captions))pieces.push(`<circle cx="${n(dot.x)}" cy="${n(dot.y)}" r="${n(dot.radius)}" fill="${color}"/>`);
   }
   for(const which of ['start','end'] as const){const tangent=connectorCapSegment(geometry,which),cap=capGeometry(connector.style[which==='start'?'startCap':'endCap'],tangent.from,tangent.to,width);
     for(const polygon of cap.polygons)pieces.push(`<polygon points="${polygon.map(n).join(' ')}" fill="${color}"/>`);
     for(const segment of cap.lines)pieces.push(`<polyline points="${polyline(segment)}" ${stroke}/>`);
     for(const circle of cap.circles)pieces.push(`<circle cx="${n(circle.x)}" cy="${n(circle.y)}" r="${n(circle.radius)}" fill="${color}"/>`);
   }
-  if(includeCaptions)for(const caption of connectorCaptionPoints(connector,geometry))if(caption.text)pieces.push(`<text x="${n(caption.position.x)}" y="${n(caption.position.y-10)}" text-anchor="middle" dominant-baseline="central" font-family="Arial,sans-serif" font-size="12" fill="#42413a">${escaped(caption.text)}</text>`);
+  if(includeCaptions)for(const caption of captions)if(caption.text)pieces.push(`<text transform="translate(${n(caption.position.x)} ${n(caption.position.y)}) rotate(${n(caption.angle*180/Math.PI)})" text-anchor="middle" dominant-baseline="central" font-family="${escaped(caption.fontFamily)}" font-size="${n(caption.fontSize)}" fill="${escaped(caption.color)}">${escaped(caption.text)}</text>`);
   return pieces.join('');
 }

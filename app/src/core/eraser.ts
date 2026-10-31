@@ -1,5 +1,5 @@
 import type { Vec } from "./geometry";
-import {strokeGeometry,type Stroke,type StrokePoint} from "./strokes";
+import {strokeGeometry,visitStrokeSegmentsInBounds,type Stroke,type StrokePoint} from "./strokes";
 
 const EPS = 1e-9;
 const copy = (point: StrokePoint): StrokePoint => ({ ...point });
@@ -130,13 +130,11 @@ export function strokeIntersectsEraser(stroke:Stroke,from:Vec,to:Vec,radius:numb
   }}
   const hits=(paint:Primitive)=>query.some(part=>visibleIntersection(paint,part,holes));
   if(points.length===1)return hits({kind:'disk',center:points[0]!,radius:points[0]!.r});
-  for(let i=1;i<points.length;i++){
-    const a=points[i-1]!,b=points[i]!;
+  return visitStrokeSegmentsInBounds(stroke,queryBounds,(a,b)=>{
     // A cheap conservative phase precedes the actual tapered coverage test.
-    if(segmentDistance(a,b,from,to)>=radius+Math.max(a.r,b.r))continue;
-    if(segmentPrimitives(a,b,a.r,b.r).some(hits))return true;
-  }
-  return false;
+    if(segmentDistance(a,b,from,to)>=radius+Math.max(a.r,b.r))return false;
+    return segmentPrimitives(a,b,a.r,b.r).some(hits);
+  });
 }
 /** Exact area erasing is a persistent vector mask. The original brush samples,
  * radius and smoothing never change, even for a grazing or interior circular cut. */

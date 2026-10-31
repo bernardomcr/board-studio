@@ -5,6 +5,8 @@ import {strokeRenderPoints,strokeScreenCoverage,strokeMinimumWidth} from './stro
 export {strokeScreenCoverage,strokeRenderKey} from './stroke-lod';
 
 interface PaintOptions {
+  /** A live preview can reuse its fitted range for painting and filter bounds. */
+  geometry?:StrokeGeometry;
   clear?:boolean;
   transform?:(point:Vec)=>Vec;
   scale?:number;
@@ -61,14 +63,14 @@ function updateEraserMask(graphics:Graphics,stroke:Stroke,transform:(point:Vec)=
 export function paintStroke(graphics:Graphics,stroke:Stroke,options:PaintOptions={}):void{
   if(!stroke.points.length){clearStrokePaint(graphics);return;}
   const ranged=options.startSegment!==undefined||options.endSegment!==undefined;
-  const geometry=ranged?strokeGeometryRange(stroke,options.startSegment??0,options.endSegment??stroke.points.length-1):strokeGeometry(stroke),transform=options.transform??((p:Vec)=>p),color=stroke.color;
+  const geometry=options.geometry??(ranged?strokeGeometryRange(stroke,options.startSegment??0,options.endSegment??stroke.points.length-1):strokeGeometry(stroke)),transform=options.transform??((p:Vec)=>p),color=stroke.color;
   const scale=Math.abs(options.scale??1),zoom=Math.abs(options.zoom??1),minimum=strokeMinimumWidth(zoom),firstWidth=(stroke.points[0]?.r??0)*2*scale;
   const coverage=options.applyCoverage===false||!geometry.uniform?1:strokeScreenCoverage(firstWidth,zoom),opacity=strokeOpacity(stroke)*coverage;
   const retain=!ranged&&!options.transform&&options.clear!==false,key=[color,scale,zoom,globalThis.devicePixelRatio||1,opacity].join('|'),cached=retainedPaints.get(graphics);
   if(retain&&cached?.geometry===geometry&&cached.key===key&&graphics.context.instructions.length===1&&cached.instruction===graphics.context.instructions[0]){updateEraserMask(graphics,stroke,transform,scale,zoom);return;}
   retainedPaints.delete(graphics);if(options.clear!==false)graphics.clear();
   updateEraserMask(graphics,stroke,transform,scale,zoom);
-  if(opacity<1){let filter=opacityFilters.get(graphics);if(!filter){filter=new AlphaFilter({alpha:opacity});opacityFilters.set(graphics,filter);}filter.alpha=opacity;graphics.filters=[filter];}else graphics.filters=null;
+  if(opacity<1){let filter=opacityFilters.get(graphics);if(!filter){filter=new AlphaFilter({alpha:opacity,resolution:'inherit',antialias:'inherit'});opacityFilters.set(graphics,filter);}filter.alpha=opacity;graphics.filters=[filter];}else graphics.filters=null;
   const from=0,to=geometry.knots.length-1;
   if(geometry.knots.length===1){const p=transform(geometry.knots[0]!);capsulePath(graphics,[{...p,r:Math.max(geometry.radius*scale,minimum/2)}],zoom);graphics.fill(color);if(retain)retainedPaints.set(graphics,{geometry,key,instruction:graphics.context.instructions[0]});return;}
   if(from>=to)return;

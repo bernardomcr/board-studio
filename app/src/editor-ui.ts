@@ -2,7 +2,9 @@ import { FONT_OPTIONS, loadBoardFont } from './fonts';
 import { compactContextPanel, positionContextPanel, installContextStyles } from './context-position';
 import type { BoardState, CommandBus, Command } from './core/commands';
 import type { Camera } from './core/camera';
-import type { Connector, ConnectorShape } from './core/connectors';
+import type { Connector, ConnectorShape,ConnectorCaptionStyle } from './core/connectors';
+import {appendConnectorCaption,rememberCaptionDefaults} from './core/connector-captions';
+import type {ConnectorObjectChoice} from './core/connector-insert';
 import { SHAPE_OPTIONS, type ShapeWidget, type Style, type Widget, type TextWidget } from './core/model';
 import { groupSelection, ungroupSelection, selectionRoots, captureSelection, duplicateSnapshot, frameSelection, itemLocked, memberSelection, arrangementRoots, arrangeSelection, type ArrangeMode } from './core/groups';
 import { shapeIconSvg } from './core/shapes';
@@ -13,11 +15,15 @@ import {installFontPickers} from './font-picker';
 import {uiPalette,UI_COLORS} from './ui-palette';
 import {isFreeText,naturalText} from './core/text-layout';
 import {brandColorRevision} from './brand-colors';
+import {connectorDefaults,rememberConnectorDefaults} from './connector-defaults';
 
 interface EditorUIApi {
   state: BoardState; bus: CommandBus; camera: Camera;
   setTool(tool: string): void; getTool(): string;
   setConnectorDefault?(options: { shape: ConnectorShape; arrow: boolean }): void;
+  onInsertConnectorObject?(choice:ConnectorObjectChoice):boolean|void;
+  onNewConnectorCaption?():void;
+  canInsertConnectorObject?(choice?:ConnectorObjectChoice):boolean;
   setShape(shape: ShapeWidget['shape']): void; getShape(): ShapeWidget['shape'];
   onImage(): void; onCrop(): void; onResetCrop(): void;
   onCircleCrop?(): void; onEditText?(): void; onImageActualSize?(): void;
@@ -52,6 +58,7 @@ export function installEditorUI(api: EditorUIApi) {
 #editor-context{width:242px;padding:5px}#editor-context button{display:flex;align-items:center;gap:9px;width:100%;text-align:left;padding:9px;font-size:12px}#editor-context kbd{margin-left:auto;color:#92928c;font:10px 'Segoe UI',sans-serif}#editor-context hr{border:0;border-top:1px solid #e7e7e5;margin:5px}
 #tool-hint{position:fixed;bottom:18px;left:50%;transform:translateX(-50%);padding:8px 14px;background:#fffdf5ee;border:1px solid #e7e7e5;border-radius:8px;color:#73726c;font:12px 'Segoe UI',sans-serif;pointer-events:none;z-index:14;max-width:60vw;text-align:center}#tool-hint[hidden]{display:none}
 #selection-properties .size-range-actions{display:flex;align-items:center;gap:8px}#selection-properties .size-range-actions button{border:1px solid #e1e5ed;min-width:30px;height:30px;padding:5px;display:grid;place-items:center}#selection-properties .size-range-actions span{flex:1;font-size:11px;color:#7b8290;text-align:center}
+#selection-properties .caption-item{padding:5px 0 9px;border-bottom:1px solid #eceef3}#selection-properties .caption-options{display:flex;align-items:center;gap:3px;margin-top:7px}#selection-properties .caption-options button{display:grid;place-items:center;width:29px;height:29px;padding:4px}#selection-properties .caption-options button[aria-pressed=true]{background:#edf1ff;color:#3859ff}#selection-properties .caption-options input[type=number]{width:47px;min-width:0}#selection-properties .caption-options input[type=color]{width:27px;height:27px;padding:1px;border:1px solid #e2e5eb;border-radius:50%}#selection-properties .connector-insert-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:5px}#selection-properties .connector-insert-grid button{height:39px;display:grid;place-items:center;padding:6px}#selection-properties .connector-insert-grid svg{width:25px;height:25px}.connector-insert-note{font-size:11px;line-height:1.4;color:#838896;margin:10px 0 2px}
 #shape-picker,#connector-picker{max-width:calc(100vw - 94px);max-height:calc(100dvh - 100px);overflow:auto}
 #sticky-picker{width:142px;padding:12px;box-sizing:border-box;max-height:calc(100dvh - 130px);overflow:auto;border-radius:15px;z-index:36}#sticky-picker .sticky-colors{display:grid;grid-template-columns:repeat(2,50px);gap:8px}#sticky-picker .sticky-colors button{padding:0;width:50px;height:50px;border:1px solid #0002;border-radius:0;box-shadow:0 2px 4px #00000012}#sticky-picker .sticky-colors button[aria-pressed=true]{outline:2px solid #4262ff;outline-offset:2px}#sticky-picker .sticky-pad-open{display:flex;align-items:center;justify-content:center;gap:8px;margin-top:12px;width:100%;height:38px;padding:6px;border-radius:9px;background:#f1f2ef;font-weight:600}#sticky-picker.sticky-pad{width:280px;padding:15px 20px 30px}#sticky-picker.sticky-pad header{display:flex;align-items:center;justify-content:space-between;margin:0 -8px}#sticky-picker.sticky-pad h2{font-size:22px;line-height:1.3;font-weight:650;margin:2px 0 26px}#sticky-picker .sticky-pad-preview{display:block;position:relative;width:226px;height:226px;margin:0 auto 10px;padding:0;border:0;border-radius:0;background:var(--sticky-paper);box-shadow:0 16px 0 -1px #b59c35,0 22px 20px #0003;cursor:pointer}#sticky-picker .sticky-pad-preview:hover{transform:translateY(-3px);box-shadow:0 19px 0 -1px #b59c35,0 25px 22px #0003}
 `;
@@ -95,10 +102,9 @@ export function installEditorUI(api: EditorUIApi) {
   // Run after the toolbar's tool-switch handler; native event listeners can run
   // a microtask checkpoint between capture and bubble, before setTool closes menus.
   stickyTool?.closest('#toolbar')?.addEventListener('click',event=>{if((event.target as Element).closest('[data-tool="sticky_note"]')!==stickyTool)return;stickyPad=false;stickyPicker.hidden=!openStickyAfterTool;if(openStickyAfterTool)renderStickyPicker();});
-  let preserveAspect=true,borderGesture=false,connectorWidthGesture=false,opacityGesture=false;
+  let preserveAspect=true,borderGesture=false,connectorWidthGesture=false,opacityGesture=false,connectorShapeTarget=false;
   const finishThicknessGesture=()=>{if(!borderGesture&&!connectorWidthGesture&&!opacityGesture)return;borderGesture=false;connectorWidthGesture=false;opacityGesture=false;bus.endTransaction();};
   window.addEventListener('pointercancel',finishThicknessGesture,true);
-  let connectorDefault = { shape: 'curved' as ConnectorShape, arrow: true };
   const connectorChoices: Array<{label:string;shape:ConnectorShape;arrow:boolean;path:string}> = [
     {label:'Linha reta sem seta',shape:'straight',arrow:false,path:'M3 22L34 3'},
     {label:'Seta reta',shape:'straight',arrow:true,path:'M3 22L34 3 M25 3H34V12'},
@@ -129,23 +135,24 @@ export function installEditorUI(api: EditorUIApi) {
   }
   function closePanels() {
     if(picker.contains(document.activeElement)||connectorPicker.contains(document.activeElement))document.querySelector<HTMLButtonElement>('[data-tool="select"]')?.focus({preventScroll:true});
-    picker.hidden=true;connectorPicker.hidden=true;stickyPicker.hidden=true;context.hidden=true;closeMenus();
+    picker.hidden=true;connectorPicker.hidden=true;stickyPicker.hidden=true;context.hidden=true;connectorShapeTarget=false;closeMenus();
   }
   function openShapes() {
-    const open=picker.hidden; closePanels(); picker.hidden=!open; shapeTargetSelection=false; expandedShapes=false; renderShapes();
+    const open=picker.hidden; closePanels(); picker.hidden=!open; shapeTargetSelection=false;connectorShapeTarget=false; expandedShapes=false; renderShapes();
     positionToolPicker(picker);
   }
   function openConnectors() {
     const open=connectorPicker.hidden; closePanels(); connectorPicker.hidden=!open;
     positionToolPicker(connectorPicker);
+    const defaults=connectorDefaults();
     for(const b of connectorPicker.querySelectorAll<HTMLButtonElement>('[data-connector-choice]')){
-      const c=connectorChoices[Number(b.dataset.connectorChoice)]!;b.setAttribute('aria-pressed',String(c.shape===connectorDefault.shape&&c.arrow===connectorDefault.arrow));
+      const c=connectorChoices[Number(b.dataset.connectorChoice)]!;b.setAttribute('aria-pressed',String(c.shape===defaults.shape&&c.arrow===(defaults.style.endCap!=='none')));
     }
   }
   function positionToolPicker(panel:HTMLElement){const edge=document.getElementById('toolbar')?.getBoundingClientRect().right??68;panel.style.left=`${edge+10}px`;panel.style.maxWidth=`${Math.max(180,innerWidth-edge-22)}px`;}
   function chooseConnector(index:number) {
     const choice=connectorChoices[index];if(!choice)return;
-    connectorDefault={shape:choice.shape,arrow:choice.arrow};api.setConnectorDefault?.(connectorDefault);api.setTool('connector');closePanels();refresh();
+    const options={shape:choice.shape,arrow:choice.arrow};rememberConnectorDefaults({shape:choice.shape,style:{endCap:choice.arrow?'arrow':'none'}});api.setConnectorDefault?.(options);api.setTool('connector');closePanels();refresh();
   }
   picker.addEventListener('input',filterShapes);
   // Blurring search while pressing a result must not replace that pressed node.
@@ -158,7 +165,8 @@ export function installEditorUI(api: EditorUIApi) {
     if(b.dataset.pickerLine!==undefined)chooseConnector(Number(b.dataset.pickerLine));
     if(b.dataset.shape){
       const shape=b.dataset.shape as ShapeWidget['shape'];api.setShape(shape);
-      if(shapeTargetSelection)convertSelectionType('shape',shape);
+      if(connectorShapeTarget){if(api.onInsertConnectorObject?.({type:'shape',shape})===false)return;connectorShapeTarget=false;}
+      else if(shapeTargetSelection)convertSelectionType('shape',shape);
       else api.setTool('shape');
       picker.hidden=true;renderKey='';refresh();
     }
@@ -167,7 +175,8 @@ export function installEditorUI(api: EditorUIApi) {
 
   function applyStyle(patch: Partial<Style>) {
     const source=selected().find(w=>!w.locked);if(source)api.onStyleDefaults?.(source.type,patch);
-    bus.beginTransaction('Formatar seleção');for(const w of selected().filter(w=>!w.locked))bus.exec({op:'WIDGET_UPDATE',payload:{id:w.id,patch:{style:{...w.style,...patch}}}});bus.endTransaction();
+    const commands:Command[]=selected().filter(w=>!w.locked).map(w=>({op:'WIDGET_UPDATE',payload:{id:w.id,patch:{style:{...w.style,...patch}}}}));
+    if(commands.length)bus.exec({op:'BATCH',payload:{label:'Formatar seleção',commands}});
   }
   function convertSelectionType(type:'text'|'shape'|'sticky_note',shape:ShapeWidget['shape']='rectangle',stickyRatio=1){
     const node=selected()[0];if(state.selection.size!==1||!node||node.locked||node.type==='frame'||node.type==='image'||node.audio||node.table||node.checklist)return;
@@ -185,32 +194,42 @@ export function installEditorUI(api: EditorUIApi) {
     const items=selected().filter(w=>!w.locked);
     if(live&&!borderGesture){finishThicknessGesture();bus.beginTransaction('Espessura da borda');borderGesture=true;}
     else if(!live)bus.beginTransaction('Espessura da borda');
-    for(const w of items){const patch={borderScale:ratio,borderWidth:ratio*Math.min(w.width,w.height)};api.onStyleDefaults?.(w.type,patch);bus.exec({op:'WIDGET_UPDATE',payload:{id:w.id,patch:{style:{...w.style,...patch}}}});}
+    const commands:Command[]=items.map(w=>{const patch={borderScale:ratio,borderWidth:ratio*Math.min(w.width,w.height)};api.onStyleDefaults?.(w.type,patch);return {op:'WIDGET_UPDATE',payload:{id:w.id,patch:{style:{...w.style,...patch}}}};});
+    if(commands.length)bus.exec({op:'BATCH',payload:{label:'Espessura da borda',commands}});
     if(!live)bus.endTransaction();
     const output=properties.querySelector<HTMLOutputElement>('[data-border-output]');if(output)output.textContent=`${formatSize(ratio*100)}%`;
     const slider=properties.querySelector<HTMLInputElement>('[data-border-scale]');slider?.setAttribute('aria-valuetext',`${formatSize(ratio*100)}% do tamanho do objeto`);
     for(const button of properties.querySelectorAll<HTMLButtonElement>('[data-border-preset]'))button.setAttribute('aria-pressed',String(Math.abs(Number(button.dataset.borderPreset)-ratio)<.0001));
   }
   function applyConnector(field:string,value:string|number) {
-    bus.beginTransaction('Formatar conector');for(const c of connectors().filter(c=>!c.locked)){
+    if(connectors().some(c=>!c.locked))rememberConnectorDefaults(field==='shape'?{shape:value as ConnectorShape}:{style:{[field]:value}});
+    const commands:Command[]=connectors().filter(c=>!c.locked).map(c=>{
       const patch=field==='shape'?{shape:value,...(value==='straight'?{controlPoint:null,waypoints:null}:{})}:{style:{...c.style,[field]:value}};
-      bus.exec({op:'CONNECTOR_UPDATE',payload:{id:c.id,patch}});
-    }bus.endTransaction();
+      return {op:'CONNECTOR_UPDATE',payload:{id:c.id,patch}};
+    });if(commands.length)bus.exec({op:'BATCH',payload:{label:'Formatar conector',commands}});
+  }
+  function updateCaptionStyle(c:Connector,index:number,patch:ConnectorCaptionStyle){
+    if(c.locked||!c.captions||index<0||index>=c.captions.length)return;
+    const captionStyles=c.captions.map((_,i)=>({...c.captionStyles?.[i],...(i===index?patch:{})}));
+    rememberCaptionDefaults(patch);
+    bus.exec({op:'CONNECTOR_UPDATE',payload:{id:c.id,patch:{captionStyles}}});renderKey='';refresh();
   }
   function setConnectorWidth(width:number,live=false){
     if(!Number.isFinite(width)||width<=0)return;
+    if(connectors().some(c=>!c.locked))rememberConnectorDefaults({style:{strokeWidth:width}});
     if(live&&!connectorWidthGesture){finishThicknessGesture();bus.beginTransaction('Espessura do conector');connectorWidthGesture=true;}
     else if(!live)bus.beginTransaction('Espessura do conector');
-    for(const c of connectors().filter(c=>!c.locked))bus.exec({op:'CONNECTOR_UPDATE',payload:{id:c.id,patch:{style:{...c.style,strokeWidth:width}}}});
+    const commands:Command[]=connectors().filter(c=>!c.locked).map(c=>({op:'CONNECTOR_UPDATE',payload:{id:c.id,patch:{style:{...c.style,strokeWidth:width}}}}));
+    if(commands.length)bus.exec({op:'BATCH',payload:{label:'Espessura do conector',commands}});
     if(!live)bus.endTransaction();
     const output=properties.querySelector<HTMLOutputElement>('[data-connector-width-output]');if(output)output.textContent=formatSize(width);
     properties.querySelector<HTMLInputElement>('[data-connector-width]')?.setAttribute('aria-valuetext',`${formatSize(width)} unidades`);
   }
   function applyStroke(field:string,value:string|number) {
-    bus.beginTransaction('Formatar traço');for(const id of state.selection){const s=state.strokes.get(id);if(!s||s.locked)continue;
-      const average=s.points.reduce((sum,p)=>sum+p.r,0)/Math.max(1,s.points.length);
-      bus.exec({op:'STROKE_UPDATE',payload:{id,patch:field==='color'?{color:value}:field==='opacity'?{opacity:Math.max(0,Math.min(100,Number(value)))/100}:{points:s.points.map(p=>({...p,r:p.r*Math.max(.5,Number(value))/(Math.max(.05,average)*2)}))}}});
-    }bus.endTransaction();
+    const commands:Command[]=[];for(const id of state.selection){const s=state.strokes.get(id);if(!s||s.locked)continue;
+      const average=field==='color'||field==='opacity'?0:s.points.reduce((sum,p)=>sum+p.r,0)/Math.max(1,s.points.length);
+      commands.push({op:'STROKE_UPDATE',payload:{id,patch:field==='color'?{color:value}:field==='opacity'?{opacity:Math.max(0,Math.min(100,Number(value)))/100}:{points:s.points.map(p=>({...p,r:p.r*Math.max(.5,Number(value))/(Math.max(.05,average)*2)}))}}});
+    }if(commands.length)bus.exec({op:'BATCH',payload:{label:'Formatar traço',commands}});
   }
   function setOpacity(input:HTMLInputElement,live:boolean){
     const domain=input.dataset.field?'field':input.dataset.image?'image':'stroke',field=input.dataset.field??input.dataset.image??input.dataset.stroke!,raw=Number(input.value);
@@ -246,6 +265,7 @@ export function installEditorUI(api: EditorUIApi) {
         if(s&&appearance.kind==='stroke'){const factor=appearance.width/Math.max(.000001,strokeWidth(s.points));commands.push({op:'STROKE_UPDATE',payload:{id,patch:{color:appearance.color,opacity:appearance.opacity,points:s.points.map(point=>({...point,r:point.r*factor}))}}});}
       }
       if(commands.length)bus.exec({op:'BATCH',payload:{label:'Colar estilo',commands}});
+      if(commands.length&&appearance.kind==='connector')rememberConnectorDefaults({style:appearance.style});
     }
     if(name==='clear'){bus.beginTransaction('Limpar conteúdo');for(const w of selected().filter(w=>!w.locked&&w.type!=='image')){
       const patch=w.type==='frame'?{title:''}:{content:'',...(w.checklist?{checklist:{items:w.checklist.items.map(item=>({...item,text:'',checked:false}))}}:{}),...(w.table?{table:{...w.table,title:'',cells:w.table.cells.map(row=>row.map(()=>''))}}:{})};
@@ -262,16 +282,17 @@ export function installEditorUI(api: EditorUIApi) {
       const commands:Command[]=connectors().filter(c=>!c.locked).map(c=>({op:'CONNECTOR_UPDATE',payload:{id:c.id,patch:{controlPoint:null,waypoints:null}}}));
       if(commands.length)bus.exec({op:'BATCH',payload:{label:'Restaurar caminho',commands}});
     }
-    if(name==='reverse-connector'){bus.beginTransaction('Inverter direção');for(const c of connectors().filter(c=>!c.locked))bus.exec({op:'CONNECTOR_UPDATE',payload:{id:c.id,patch:{start:c.end,end:c.start,style:{...c.style,startCap:c.style.endCap??'none',endCap:c.style.startCap??'none'},waypoints:c.waypoints?[...c.waypoints].reverse():c.waypoints,captionPositions:(c.captions??[]).map((_,i)=>1-(c.captionPositions?.[i]??(i+1)/((c.captions?.length??0)+1)))}}});bus.endTransaction();}
+    if(name==='reverse-connector'){bus.beginTransaction('Inverter direção');for(const c of connectors().filter(c=>!c.locked))bus.exec({op:'CONNECTOR_UPDATE',payload:{id:c.id,patch:{start:c.end,end:c.start,style:{...c.style,startCap:c.style.endCap??'none',endCap:c.style.startCap??'none'},waypoints:c.waypoints?[...c.waypoints].reverse():c.waypoints,captionPositions:(c.captions??[]).map((_,i)=>1-(c.captionPositions?.[i]??(i+1)/((c.captions?.length??0)+1)))}}});bus.endTransaction();const c=connectors().find(c=>!c.locked);if(c)rememberConnectorDefaults({style:c.style});}
     if(name==='add-caption'){
+      if(api.onNewConnectorCaption&&connectors().length===1){closeMenus();api.onNewConnectorCaption();return;}
       properties.dataset.openMenu='captions';
       const commands:Command[]=connectors().filter(c=>!c.locked).map(c=>{
-        const captions=[...(c.captions??[]),'Rótulo'];const captionPositions=captions.map((_,i)=>c.captionPositions?.[i]??(i+1)/(captions.length+1));
-        return {op:'CONNECTOR_UPDATE',payload:{id:c.id,patch:{captions,captionPositions}}};
+        return {op:'CONNECTOR_UPDATE',payload:{id:c.id,patch:appendConnectorCaption(c)}};
       });
       if(commands.length)bus.exec({op:'BATCH',payload:{label:'Adicionar rótulo',commands}});
     }
-    if(name==='more-shapes'){closeMenus();expandedShapes=true;shapeTargetSelection=true;renderShapes();picker.hidden=false;picker.querySelector<HTMLInputElement>('input')?.focus();}
+    if(name==='more-connector-shapes'){closeMenus();expandedShapes=true;shapeTargetSelection=false;connectorShapeTarget=true;renderShapes();picker.hidden=false;positionToolPicker(picker);picker.querySelector<HTMLInputElement>('input')?.focus();}
+    if(name==='more-shapes'){closeMenus();expandedShapes=true;shapeTargetSelection=true;connectorShapeTarget=false;renderShapes();picker.hidden=false;picker.querySelector<HTMLInputElement>('input')?.focus();}
     context.hidden=true;renderKey='';refresh();
   }
 
@@ -329,7 +350,7 @@ export function installEditorUI(api: EditorUIApi) {
     const link=w&&ids.length===1?`<hr><label>Link do objeto<input type="url" aria-label="Link do objeto" data-field="link" placeholder="https://" value="${escapeHtml(w.link)}"></label>`:'';
     const advanced=(widgets.length||ids.length>1?arrangeMenu(widgets,locked):'')+(w&&ids.length===1?sizeMenu(w):'');
     const structured=w&&ids.length===1&&w.type!=='image'&&!w.audio?'<hr>'+(w.table?'':menuAction('create-checklist',w.checklist?'Editar lista de tarefas':'Converter em lista de tarefas','checklist','',locked))+(w.checklist?'':menuAction('create-table',w.table?'Editar tabela':'Converter em tabela','grid','',locked)):'';
-    return `${separator}${w?.type==='image'&&ids.length===1?button('add-link','Adicionar link','link',locked?'disabled':''):''}${selectionRoots(state).length>=2?button('group','Agrupar','group',locked?'disabled':''):''}${groupIds().length?button('ungroup','Desagrupar','ungroup',locked?'disabled':''):''}${button('lock',allLocked?'Desbloquear':'Bloquear',allLocked?'unlock':'lock')}${menu('more','Mais',icon('more'),menuAction('duplicate','Duplicar','duplicate','Ctrl+D')+menuAction('copy-image','Copiar como imagem','image')+'<hr>'+advanced+'<hr>'+menuAction('copy-style','Copiar estilo','stroke','',ids.length!==1)+menuAction('paste-style','Colar estilo','fill','',!canPasteStyle()||locked)+structured+(widgets.some(w=>w.type!=='image')?menuAction('clear','Limpar conteúdo','eraser','',locked):'')+link+'<hr>'+menuAction('delete','Excluir','trash','Del',locked))}`;
+    return `${separator}${selectionRoots(state).length>=2?button('group','Agrupar','group',locked?'disabled':''):''}${groupIds().length?button('ungroup','Desagrupar','ungroup',locked?'disabled':''):''}${button('lock',allLocked?'Desbloquear':'Bloquear',allLocked?'unlock':'lock')}${menu('more','Mais',icon('more'),menuAction('duplicate','Duplicar','duplicate','Ctrl+D')+menuAction('copy-image','Copiar como imagem','image')+'<hr>'+advanced+'<hr>'+menuAction('copy-style','Copiar estilo','stroke','',ids.length!==1)+menuAction('paste-style','Colar estilo','fill','',!canPasteStyle()||locked)+structured+(widgets.some(w=>w.type!=='image')?menuAction('clear','Limpar conteúdo','eraser','',locked):'')+link+'<hr>'+menuAction('delete','Excluir','trash','Del',locked))}`;
   }
   function connectorToolbar(c:Connector) {
     const capIcon=(cap:string,start=false)=>{
@@ -341,12 +362,20 @@ export function installEditorUI(api: EditorUIApi) {
     const stroke=menu('stroke','Traço',routeSymbol(c.shape),choice('connector','shape','Tipo de linha',[['straight','Reta'],['elbowed','Cotovelo'],['curved','Curva']],c.shape,routeSymbol)+thickness+choice('connector','strokeStyle','Estilo da linha',LINE_STYLES,c.style.strokeStyle??'normal',patternSymbol));
     const route=menu('route','Caminho',icon('route'),`<div class="icon-choices">${button('add-waypoint','Adicionar ponto','plus')}${button('remove-waypoint','Remover ponto','minus',!(c.waypoints?.length)?'disabled':'')}${button('reset-route','Restaurar caminho','undo')}</div>`);
     const captions=c.captions??[];
-    const labels=menu('captions',`Rótulos (${captions.length})`,icon('label')+`<span class="menu-count">${captions.length}</span>`,captions.length?captions.map((caption,i)=>`<div class="caption-row"><input type="text" aria-label="Rótulo ${i+1}" data-caption-index="${i}" value="${escapeHtml(caption)}"><input type="number" aria-label="Posição do rótulo ${i+1}" data-caption-position="${i}" min="2" max="98" value="${Math.round((c.captionPositions?.[i]??(i+1)/(captions.length+1))*100)}"><button data-remove-caption="${i}" aria-label="Excluir rótulo ${i+1}">${icon('close',15)}</button></div>`).join('')+'<hr>'+menuAction('add-caption','Adicionar rótulo','plus'):'<p class="empty-message">Adicione texto ao longo do conector.</p>'+menuAction('add-caption','Adicionar rótulo','plus'),true);
-    return menu('start-cap','Início da linha',capIcon(c.style.startCap??'none',true),choice('connector','startCap','Início da linha',CAP_OPTIONS,c.style.startCap??'none',v=>capIcon(v,true)))+button('reverse-connector','Inverter direção','swap')+menu('end-cap','Fim da linha',capIcon(c.style.endCap??'none'),choice('connector','endCap','Fim da linha',CAP_OPTIONS,c.style.endCap??'none',v=>capIcon(v)))+separator+stroke+menu('line-color','Cor do conector',colorSymbol(c.style.strokeColor),palette('connector','strokeColor','Cor do conector',c.style.strokeColor))+separator+labels+route;
+    const labels=menu('captions',`Rótulos (${captions.length})`,icon('label')+(captions.length?`<span class="menu-count">${captions.length}</span>`:''),captions.length?captions.map((caption,i)=>{
+      const s=c.captionStyles?.[i]??{},side=s.side??'center';
+      return `<div class="caption-item"><div class="caption-row"><input type="text" aria-label="Rótulo ${i+1}" data-caption-index="${i}" value="${escapeHtml(caption)}"><input type="number" aria-label="Posição do rótulo ${i+1}" title="Posição ao longo da linha (%)" data-caption-position="${i}" min="2" max="98" value="${Math.round((c.captionPositions?.[i]??(i+1)/(captions.length+1))*100)}"><button data-remove-caption="${i}" aria-label="Excluir rótulo ${i+1}">${icon('close',15)}</button></div><div class="caption-options"><button data-caption-follow="${i}" aria-pressed="${!!s.followPath}" title="Seguir a linha" aria-label="Rótulo ${i+1}: seguir a linha">${icon('connector',18)}</button>${(['above','center','below'] as const).map((sideValue,n)=>`<button data-caption-side="${i}" data-value="${sideValue}" aria-pressed="${side===sideValue}" aria-label="Rótulo ${i+1}: ${['acima da linha','no meio da linha','abaixo da linha'][n]}" title="${['Acima','No meio','Abaixo'][n]}">${icon(['align-top','align-center-y','align-bottom'][n]!,17)}</button>`).join('')}<input type="number" min="0.1" step="any" data-caption-font="${i}" aria-label="Tamanho do rótulo ${i+1}" title="Tamanho do texto" value="${formatSize(s.fontSize??14)}"><input type="color" data-caption-color="${i}" aria-label="Cor do rótulo ${i+1}" title="Cor do texto" value="${validColor(s.color??c.style.strokeColor)}"></div></div>`;
+    }).join('')+'<hr>'+menuAction('add-caption','Adicionar rótulo','plus'):'<p class="empty-message">Adicione texto ao longo do conector.</p>'+menuAction('add-caption','Adicionar rótulo','plus'),true);
+    const insertChoices:Array<ConnectorObjectChoice&{label:string}>=[{type:'text',label:'Texto'},{type:'sticky_note',ratio:1,label:'Nota quadrada'},{type:'sticky_note',ratio:1.6,label:'Nota retangular'},...(['rectangle','round_rectangle','circle','triangle','rhombus','speech_bubble','parallelogram','star'] as const).map(shape=>({type:'shape' as const,shape,label:SHAPE_OPTIONS.find(s=>s.id===shape)?.label??shape}))];
+    const insertion=menu('insert-object','Inserir objeto no conector',icon('shape'),`<div class="connector-insert-grid">${insertChoices.map(choice=>`<button data-connector-insert="${choice.type}" data-shape="${choice.shape??''}" data-ratio="${choice.ratio??1}" aria-label="Inserir ${choice.label.toLowerCase()} no conector" title="${api.canInsertConnectorObject?.(choice)===false?'Aumente o espaço entre os objetos':choice.label}" ${api.canInsertConnectorObject?.(choice)===false?'disabled':''}>${choice.type==='shape'?shapeIconSvg(choice.shape!):icon(choice.type==='text'?'text':'sticky')}</button>`).join('')}</div><hr>${menuAction('more-connector-shapes','Mais formas','plus','',api.canInsertConnectorObject?.()===false)}`);
+    return menu('start-cap','Início da linha',capIcon(c.style.startCap??'none',true),choice('connector','startCap','Início da linha',CAP_OPTIONS,c.style.startCap??'none',v=>capIcon(v,true)))+button('reverse-connector','Inverter direção','swap')+menu('end-cap','Fim da linha',capIcon(c.style.endCap??'none'),choice('connector','endCap','Fim da linha',CAP_OPTIONS,c.style.endCap??'none',v=>capIcon(v)))+separator+stroke+menu('line-color','Cor do conector',colorSymbol(c.style.strokeColor),palette('connector','strokeColor','Cor do conector',c.style.strokeColor))+separator+insertion+(api.onNewConnectorCaption?button('add-caption','Adicionar texto ao conector','text'):captions.length?'':labels)+(captions.length?labels:'')+route;
   }
 
   properties.addEventListener('click',event=>{
     const b=(event.target as Element).closest<HTMLButtonElement>('button');if(!b||b.disabled)return;
+    if(b.dataset.connectorInsert){api.onInsertConnectorObject?.({type:b.dataset.connectorInsert as ConnectorObjectChoice['type'],shape:(b.dataset.shape||undefined) as ShapeWidget['shape']|undefined,ratio:Number(b.dataset.ratio)});closeMenus();renderKey='';refresh();return;}
+    if(b.dataset.captionFollow!==undefined){const c=connectors()[0],index=Number(b.dataset.captionFollow);if(c)updateCaptionStyle(c,index,{followPath:!c.captionStyles?.[index]?.followPath});return;}
+    if(b.dataset.captionSide!==undefined){const c=connectors()[0];if(c)updateCaptionStyle(c,Number(b.dataset.captionSide),{side:b.dataset.value as ConnectorCaptionStyle['side']});return;}
     if(b.dataset.convertType){convertSelectionType(b.dataset.convertType as 'text'|'shape'|'sticky_note',(b.dataset.convertShape??'rectangle') as ShapeWidget['shape'],Number(b.dataset.stickyRatio??1));return;}
     if(b.dataset.choice!==undefined){const select=b.closest('.icon-choices')?.querySelector<HTMLSelectElement>('select');if(select){select.value=b.dataset.choice;select.dispatchEvent(new Event('change',{bubbles:true}));}return;}
     if(b.dataset.textList){
@@ -371,12 +400,13 @@ export function installEditorUI(api: EditorUIApi) {
     if(b.dataset.styleToggle){const field=b.dataset.styleToggle as keyof Style;applyStyle({[field]:selected()[0]?.style[field]===b.dataset.value?field==='textDecoration'?'none':'normal':b.dataset.value});renderKey='';refresh();}
     if(b.dataset.replaceShape){api.setShape(b.dataset.replaceShape as ShapeWidget['shape']);bus.beginTransaction('Mudar forma');for(const w of selected())if(w.type==='shape'&&!w.locked)bus.exec({op:'WIDGET_UPDATE',payload:{id:w.id,patch:{shape:b.dataset.replaceShape}}});bus.endTransaction();renderKey='';refresh();}
     if(b.dataset.align)arrangeSelection(state,bus,b.dataset.align as ArrangeMode,api.getGroupScope?.());
-    if(b.dataset.removeCaption!==undefined){const c=connectors()[0];if(c&&!c.locked){const i=Number(b.dataset.removeCaption),captions=c.captions??[];bus.exec({op:'CONNECTOR_UPDATE',payload:{id:c.id,patch:{captions:captions.filter((_,n)=>n!==i),captionPositions:captions.flatMap((_,n)=>n===i?[]:[c.captionPositions?.[n]??(n+1)/(captions.length+1)])}}});renderKey='';refresh();}}
+    if(b.dataset.removeCaption!==undefined){const c=connectors()[0];if(c&&!c.locked){const i=Number(b.dataset.removeCaption),captions=c.captions??[];bus.exec({op:'CONNECTOR_UPDATE',payload:{id:c.id,patch:{captions:captions.filter((_,n)=>n!==i),captionPositions:captions.flatMap((_,n)=>n===i?[]:[c.captionPositions?.[n]??(n+1)/(captions.length+1)]),...(c.captionStyles?{captionStyles:c.captionStyles.filter((_,n)=>n!==i)}:{})}}});renderKey='';refresh();}}
   });
   properties.addEventListener('input',event=>{const input=event.target as HTMLInputElement;if(input.hasAttribute('data-border-scale'))setBorderScale(Number(input.value)/100,true);else if(input.hasAttribute('data-connector-width'))setConnectorWidth(Number(input.value),true);else if(input.closest('.opacity-control'))setOpacity(input,true);});
   properties.addEventListener('change',async event=>{
     const input=event.target as HTMLInputElement;
     if(input.disabled)return;
+    if(input.dataset.captionFont!==undefined||input.dataset.captionColor!==undefined){const c=connectors()[0];if(!c)return;const i=Number(input.dataset.captionFont??input.dataset.captionColor);if(input.dataset.captionFont!==undefined){const fontSize=Number(input.value);if(!Number.isFinite(fontSize)||fontSize<=0)return;updateCaptionStyle(c,i,{fontSize});}else updateCaptionStyle(c,i,{color:input.value});return;}
     if(input.closest('.opacity-control')){if(opacityGesture){setOpacity(input,true);finishThicknessGesture();}else setOpacity(input,false);renderKey='';refresh();return;}
     if(input.hasAttribute('data-border-scale')){const ratio=Number(input.value)/100;if(borderGesture)finishThicknessGesture();else if(selected().some(w=>Math.abs(relativeBorderScale(w)-ratio)>1e-12))setBorderScale(ratio);input.max=String(sizeRangeMaximum(ratio*100,50));renderKey='';refresh();return;}
     if(input.hasAttribute('data-connector-width')){const width=Number(input.value);if(connectorWidthGesture)finishThicknessGesture();else if(connectors().some(c=>c.style.strokeWidth!==width))setConnectorWidth(width);input.max=String(sizeRangeMaximum(width*2,256));renderKey='';refresh();return;}
@@ -401,6 +431,9 @@ export function installEditorUI(api: EditorUIApi) {
       }
       else{let value:string|number=['fontSize','fillOpacity','borderOpacity','cornerRadius'].includes(field)?Number(input.value):input.value;if(typeof value==='number'){if(!Number.isFinite(value))return;if(field==='fillOpacity'||field==='borderOpacity')value=Math.max(0,Math.min(1,value));if(field==='fontSize')value=Math.max(1,value);if(field==='cornerRadius')value=Math.max(0,value);}applyStyle({[field]:value});}
     }
+    // Formatting may already have mounted and focused the replacement font
+    // trigger through the command bus. A second rebuild would discard it.
+    if(input.dataset.field==='fontFamily'&&!input.isConnected)return;
     renderKey='';refresh();
   });
   properties.addEventListener('focusout',()=>queueMicrotask(refresh));
@@ -440,7 +473,7 @@ export function installEditorUI(api: EditorUIApi) {
     if(!forceHistoryRefresh&&(properties.contains(document.activeElement)&&document.activeElement?.matches('input,select,textarea')||document.activeElement?.closest('.font-picker-popover')))return;
     // Toolbar controls never display media payloads, text bodies or stroke samples.
     const widgetKeys=widgets.map(w=>[w.id,w.type,w.x,w.y,w.width,w.height,w.rotation,w.locked,w.link,w.style,w.type==='shape'?w.shape:undefined,w.type==='image'?w.maskShape:undefined,w.type==='image'?w.opacity:undefined,!!w.checklist,!!w.table]);
-    const connectorKeys=cs.map(c=>[c.id,c.locked,c.shape,c.style,c.captions,c.captionPositions,c.waypoints?.length??0]);
+    const connectorKeys=cs.map(c=>[c.id,c.locked,c.shape,c.style,c.captions,c.captionPositions,c.captionStyles,c.start,c.end,c.waypoints?.length??0]);
     const strokeKeys=strokes.map(s=>[s.id,s.locked,s.color,s.opacity,s.tool,strokes.length===ids.length?strokeWidth(s.points):undefined]);
     const key=JSON.stringify([widgetKeys,connectorKeys,strokeKeys,selectionRoots(state),groupIds(),arrangementRoots(state,scope).length,scope,ids,!!copiedStyle,brandColorRevision()]);if(key===renderKey)return;renderKey=key;
     const w=widgets[0],single=ids.length===1,locked=ids.some(id=>itemLocked(state,id)),allWidgets=widgets.length===ids.length,allText=allWidgets&&widgets.every(w=>w.type!=='image');
@@ -458,7 +491,7 @@ export function installEditorUI(api: EditorUIApi) {
         html+=fillMenu(w.style);
       }
       if(single&&w.type==='image'){
-        html+=button('crop','Recortar','crop')+menu('image','Imagem',icon('image'),choice('image','maskShape','Máscara da imagem',[['rectangle','Retângulo'],['ellipse','Elipse / círculo'],['round_rectangle','Cantos arredondados']],w.maskShape??'rectangle',value=>icon(value==='ellipse'?'crop-circle':value==='round_rectangle'?'corner-radius':'rectangle'))+opacity('image','opacity','Opacidade da imagem',(w.opacity??1)*100,100)+'<hr><div class="icon-choices image-choices">'+button('circle-crop','Recortar em círculo','crop-circle')+button('replace-image','Substituir imagem','image')+button('flip-x','Espelhar ↔','flip')+button('flip-y','Espelhar ↕','flip-vertical')+button('image-actual-size','Tamanho original','size')+button('reset-crop','Restaurar imagem','undo')+button('download-image','Baixar original','download')+'</div>')+separator+borderMenu(w,w.maskShape==='round_rectangle');
+        html+=button('download-image','Baixar original','download')+menu('image','Mascarar imagem',icon(w.maskShape==='ellipse'?'crop-circle':w.maskShape==='round_rectangle'?'corner-radius':'rectangle'),choice('image','maskShape','Máscara da imagem',[['rectangle','Retângulo'],['ellipse','Elipse / círculo'],['round_rectangle','Cantos arredondados']],w.maskShape??'rectangle',value=>icon(value==='ellipse'?'crop-circle':value==='round_rectangle'?'corner-radius':'rectangle')))+button('crop','Recortar','crop')+separator+menu('image-opacity','Opacidade da imagem',icon('opacity'),opacity('image','opacity','Opacidade da imagem',(w.opacity??1)*100,100))+borderMenu(w,w.maskShape==='round_rectangle');
       }
     }
     html+=commonMenus(widgets);

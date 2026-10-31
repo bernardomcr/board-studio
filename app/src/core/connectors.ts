@@ -2,9 +2,16 @@
 import { rotate, widgetCenter, widgetAABB, worldToLocal, type Vec } from "./geometry";
 import { shapeContours,canonicalShape } from "./shapes";
 import type { Widget } from "./model";
+import {capGeometry,type CapGeometry} from './line-decoration';
 export type Endpoint = { kind: "anchor"; widgetId: string; x: number; y: number } | { kind: "point"; x: number; y: number };
 export type ConnectorShape = "straight" | "elbowed" | "curved";
 export type CapStyle = "none" | "arrow" | "triangle" | "circle" | "diamond" | "bar";
+export interface ConnectorCaptionStyle {
+  fontSize?:number; fontFamily?:string; color?:string;
+  /** Follow the local tangent while keeping letters upright. */
+  followPath?:boolean;
+  side?:'above'|'center'|'below';
+}
 export interface Connector {
   /** Child topic owning an automatically routed mind-map branch. */
   mindBranch?:string;
@@ -20,6 +27,7 @@ export interface Connector {
   captions?: string[];
   /** Fractions of path length; omitted positions are distributed evenly. */
   captionPositions?: number[];
+  captionStyles?: ConnectorCaptionStyle[];
   z: number;
 }
 export interface ConnectorCubic { p0: Vec; p1: Vec; p2: Vec; p3: Vec }
@@ -248,11 +256,19 @@ export function distanceToSegment(p: Vec, a: Vec, b: Vec): number { return lengt
 export function distanceToConnector(p: Vec, geometry: ConnectorGeometry): number {
   let best = Infinity; for (let i = 1; i < geometry.points.length; i++) best = Math.min(best, distanceToSegment(p, geometry.points[i - 1]!, geometry.points[i]!)); return best;
 }
+const pathMetricsCache=new WeakMap<ConnectorGeometry,{lengths:number[];total:number}>();
+function pathMetrics(geometry:ConnectorGeometry){
+  const cached=pathMetricsCache.get(geometry);if(cached)return cached;
+  const lengths:number[]=[];let total=0;
+  for(let i=1;i<geometry.points.length;i++){const size=length(geometry.points[i-1]!,geometry.points[i]!);lengths.push(size);total+=size;}
+  const metrics={lengths,total};pathMetricsCache.set(geometry,metrics);return metrics;
+}
+export const connectorPathLength=(geometry:ConnectorGeometry):number=>pathMetrics(geometry).total;
 /** Point at a fraction of actual path length, for centered captions and handles. */
 export function connectorPointAt(geometry: ConnectorGeometry, fraction = .5): Vec {
   const points = geometry.points; if (!points.length) return { x: 0, y: 0 };
-  const lengths = points.slice(1).map((p, i) => length(points[i]!, p));
-  let remaining = lengths.reduce((a, b) => a + b, 0) * Math.max(0, Math.min(1, fraction));
+  const {lengths,total}=pathMetrics(geometry);
+  let remaining = total * Math.max(0, Math.min(1, fraction));
   for (let i = 0; i < lengths.length; i++) { const size = lengths[i]!; if (remaining <= size && size > EPS) { const t = remaining / size, a = points[i]!, b = points[i + 1]!; return { x: a.x + (b.x - a.x) * t, y: a.y + (b.y - a.y) * t }; } remaining -= size; }
   return { ...points[points.length - 1]! };
 }
@@ -263,8 +279,7 @@ export function connectorCaptionPoints(connector:Connector,geometry:ConnectorGeo
 }
 /** Path-length fraction nearest a point, used to place and drag captions. */
 export function connectorClosestFraction(geometry:ConnectorGeometry,p:Vec):number {
-  const segments=geometry.points.slice(1).map((q,i)=>length(geometry.points[i]!,q));
-  const total=segments.reduce((a,b)=>a+b,0); if(total<EPS)return .5;
+  const {lengths:segments,total}=pathMetrics(geometry);if(total<EPS)return .5;
   let before=0,best=Infinity,result=0;
   for(let i=0;i<segments.length;i++) {const a=geometry.points[i]!,b=geometry.points[i+1]!,q=closestOnSegment(p,a,b),d=length(q,p);if(d<best){best=d;result=(before+length(a,q))/total;}before+=segments[i]!;}
   return Math.max(0,Math.min(1,result));
@@ -292,7 +307,9 @@ export function connectorCapSegment(geometry: ConnectorGeometry, which: "start" 
   const rest = which === "start" ? points.slice(1) : points.slice(0, -1).reverse();
   return { from: rest.find(p => length(p, to) > EPS) ?? { x: to.x - 1, y: to.y }, to };
 }
+const boundsCache=new WeakMap<ConnectorGeometry,{minX:number;minY:number;maxX:number;maxY:number}>();
 export function connectorBounds(geometry: ConnectorGeometry) {
+  const cached=boundsCache.get(geometry);if(cached)return cached;
   const points = [...geometry.points];
   for (const curve of geometry.cubics ?? (geometry.cubic?[geometry.cubic]:[])) {
     const { p0, p1, p2, p3 } = curve;
@@ -304,6 +321,29 @@ export function connectorBounds(geometry: ConnectorGeometry) {
       for (const t of roots) if (t > 0 && t < 1) points.push(at(t));
     }
   }
-  const xs = points.map(p => p.x), ys = points.map(p => p.y); return { minX: Math.min(...xs), minY: Math.min(...ys), maxX: Math.max(...xs), maxY: Math.max(...ys) };
+  const xs = points.map(p => p.x), ys = points.map(p => p.y),bounds={ minX: Math.min(...xs), minY: Math.min(...ys), maxX: Math.max(...xs), maxY: Math.max(...ys) };boundsCache.set(geometry,bounds);return bounds;
+}
+const visualCache=new WeakMap<Connector,{geometry:ConnectorGeometry;style:Connector['style'];bounds:{minX:number;minY:number;maxX:number;maxY:number};caps:CapGeometry[]}>();
+function connectorVisual(connector:Connector,geometry:ConnectorGeometry){
+  const cached=visualCache.get(connector);if(cached&&cached.geometry===geometry&&cached.style===connector.style)return cached;
+  const base=connectorBounds(geometry),radius=connector.style.strokeWidth/2,bounds={minX:base.minX-radius,minY:base.minY-radius,maxX:base.maxX+radius,maxY:base.maxY+radius};
+  const add=(x:number,y:number,padding=0)=>{bounds.minX=Math.min(bounds.minX,x-padding);bounds.minY=Math.min(bounds.minY,y-padding);bounds.maxX=Math.max(bounds.maxX,x+padding);bounds.maxY=Math.max(bounds.maxY,y+padding);};
+  const caps=(['start','end'] as const).map(which=>{const tangent=connectorCapSegment(geometry,which);return capGeometry(connector.style[which==='start'?'startCap':'endCap'],tangent.from,tangent.to,connector.style.strokeWidth);});
+  for(const cap of caps){for(const polygon of cap.polygons)for(let i=0;i<polygon.length;i+=2)add(polygon[i]!,polygon[i+1]!);for(const line of cap.lines)for(const point of line)add(point.x,point.y,radius);for(const circle of cap.circles)add(circle.x,circle.y,circle.radius);}
+  const result={geometry,style:connector.style,bounds,caps};visualCache.set(connector,result);return result;
+}
+/** Includes the actual painted stroke and endpoint decorations, not only its axis. */
+export const connectorVisualBounds=(connector:Connector,geometry:ConnectorGeometry)=>connectorVisual(connector,geometry).bounds;
+/** Broad phase is cached with the immutable geometry before testing any segment. */
+export function connectorContainsPoint(connector:Connector,geometry:ConnectorGeometry,point:Vec,tolerance=0):boolean{
+  const {bounds,caps}=connectorVisual(connector,geometry);
+  if(point.x<bounds.minX-tolerance||point.x>bounds.maxX+tolerance||point.y<bounds.minY-tolerance||point.y>bounds.maxY+tolerance)return false;
+  if(distanceToConnector(point,geometry)<=connector.style.strokeWidth/2+tolerance)return true;
+  for(const cap of caps){
+    for(const circle of cap.circles)if(Math.hypot(point.x-circle.x,point.y-circle.y)<=circle.radius+tolerance)return true;
+    for(const line of cap.lines)for(let i=1;i<line.length;i++)if(distanceToSegment(point,line[i-1]!,line[i]!)<=connector.style.strokeWidth/2+tolerance)return true;
+    for(const polygon of cap.polygons){let inside=false;for(let i=0,j=polygon.length-2;i<polygon.length;j=i,i+=2){const a={x:polygon[i]!,y:polygon[i+1]!},b={x:polygon[j]!,y:polygon[j+1]!};if(distanceToSegment(point,a,b)<=tolerance)return true;if((a.y>point.y)!==(b.y>point.y)&&point.x<(b.x-a.x)*(point.y-a.y)/(b.y-a.y)+a.x)inside=!inside;}if(inside)return true;}
+  }
+  return false;
 }
 export function widgetBounds(w: Widget) { return widgetAABB(w); }

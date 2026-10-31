@@ -1,9 +1,11 @@
 import {CanvasTextMetrics,Text,TextStyle,type Graphics,type Container} from 'pixi.js';
+import {destroyDisplayTree} from './destroy-tree';
 import type {Widget} from '../core/model';
 import {audioWaveform,formatAudioTime} from '../core/audio';
 import {resolvedWidgetStyle} from '../core/style-scale';
 import {borderPattern,patternedContour,shapeContours} from '../core/shapes';
 import {TEXT_SAMPLING,fitTextResolution} from './text-quality';
+import {screenStroke,screenDot} from './screen-coverage';
 
 export function audioSignature(widget:Widget):string{return widget.audio?[widget.audio.name,widget.audio.duration,widget.audio.waveform.join(',')].join('|'):'';}
 export function audioCardLayout(widget:Widget){const sx=widget.width/360,sy=widget.height/124,unit=Math.min(sx,sy);return {sx,sy,unit,playX:34*sx,playY:62*sy,playRadius:20*unit,waveX:76*sx,waveY:89*sy,waveWidth:260*sx,waveHeight:17*sy,titleX:76*sx,titleY:21*sy,durationY:45*sy};}
@@ -12,13 +14,13 @@ const foreground=(widget:Widget)=>widget.style.color==='transparent'?'#4262ff':w
 export function paintAudioCard(graphics:Graphics,widget:Widget,zoom=1):void{
   if(!widget.audio)return;const {width,height}=widget,style=resolvedWidgetStyle(widget),layout=audioCardLayout(widget),radius=Math.max(0,Math.min(style.cornerRadius??14,width/2,height/2));
   graphics.roundRect(0,0,width,height,radius).fill({color:style.fillColor,alpha:style.fillOpacity});
-  const pattern=borderPattern(style.borderWidth,style.borderStyle);
+  const pattern=borderPattern(style.borderWidth,style.borderStyle),coverage=screenStroke(style.borderWidth,zoom,undefined,style.borderOpacity??1);
   if(style.borderWidth>0){
-    if(pattern){for(const contour of shapeContours('round_rectangle',width,height,zoom,radius)){const parts=patternedContour(contour,pattern.dash,pattern.gap);if(pattern.dash===0){for(const p of parts)graphics.circle(p[0]!,p[1]!,style.borderWidth/2);graphics.fill({color:style.borderColor,alpha:style.borderOpacity??1});}else{for(const p of parts){graphics.moveTo(p[0]!,p[1]!);for(let i=2;i<p.length;i+=2)graphics.lineTo(p[i]!,p[i+1]!);}graphics.stroke({color:style.borderColor,alpha:style.borderOpacity??1,width:style.borderWidth});}}}
-    else graphics.stroke({color:style.borderColor,width:style.borderWidth,alpha:style.borderOpacity??1});
+    if(pattern){for(const contour of shapeContours('round_rectangle',width,height,zoom,radius)){const parts=patternedContour(contour,pattern.dash,pattern.gap);if(pattern.dash===0){const dot=screenDot(style.borderWidth/2,zoom,undefined,style.borderOpacity??1);for(const p of parts)graphics.circle(p[0]!,p[1]!,dot.radius);graphics.fill({color:style.borderColor,alpha:dot.alpha});}else{for(const p of parts){graphics.moveTo(p[0]!,p[1]!);for(let i=2;i<p.length;i+=2)graphics.lineTo(p[i]!,p[i+1]!);}graphics.stroke({color:style.borderColor,...coverage});}}}
+    else graphics.stroke({color:style.borderColor,...coverage});
   }
   const accent=foreground(widget);
-  graphics.circle(layout.playX,layout.playY,layout.playRadius).fill({color:accent,alpha:.07}).stroke({color:accent,width:Math.max(.01,layout.unit),alpha:.2});
+  graphics.circle(layout.playX,layout.playY,layout.playRadius).fill({color:accent,alpha:.07}).stroke({color:accent,...screenStroke(Math.max(.01,layout.unit),zoom,undefined,.2)});
   const r=layout.playRadius*.37;graphics.poly([layout.playX-r*.6,layout.playY-r,layout.playX+r,layout.playY,layout.playX-r*.6,layout.playY+r]).fill({color:accent,alpha:.9});
   const waveform=audioWaveform(widget.audio.waveform),count=64,gap=layout.waveWidth/count,barWidth=gap*.48;
   for(let i=0;i<count;i++){const amplitude=waveform[i]??0,h=Math.max(1.2*layout.sy,amplitude*layout.waveHeight*2);graphics.roundRect(layout.waveX+i*gap,layout.waveY-h/2,barWidth,h,barWidth/2).fill({color:accent,alpha:.58});}
@@ -34,7 +36,7 @@ function fittedTitle(widget:Widget):string{
 export function paintAudioLabels(target:Container,widget:Widget,resolution:number):void{
   if(!widget.audio)return;const layout=audioCardLayout(widget),font=widget.style.fontSize,color=foreground(widget),signature=[widget.type==='frame'?widget.title:widget.content,widget.audio.name,widget.audio.duration,widget.width,widget.height,widget.style.fontFamily,font,widget.style.fontWeight,widget.style.fontStyle,color,resolution].join('|');
   target.position.set(0,0);if(retained.get(target)===signature)return;retained.set(target,signature);
-  for(const child of target.removeChildren())child.destroy({children:true});
+  for(const child of target.removeChildren())destroyDisplayTree(child);
   const title=fittedTitle(widget),style=new TextStyle({fontFamily:widget.style.fontFamily,fontSize:font,fill:color,fontWeight:widget.style.fontWeight??'500',fontStyle:widget.style.fontStyle??'normal'});
   const heading=new Text({...TEXT_SAMPLING,text:title,resolution,style}),duration=new Text({...TEXT_SAMPLING,text:formatAudioTime(widget.audio.duration),resolution,style:{fontFamily:widget.style.fontFamily,fontSize:font*.75,fill:color}});
   heading.resolution=fitTextResolution(heading,resolution);duration.resolution=fitTextResolution(duration,resolution);heading.position.set(layout.titleX,layout.titleY);duration.position.set(layout.titleX,layout.durationY);target.addChild(heading,duration);

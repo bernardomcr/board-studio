@@ -5,7 +5,7 @@ import { SHAPE_OPTIONS, type Widget } from "./core/model";
 import type { Connector, Endpoint } from "./core/connectors";
 import type { Stroke } from "./core/strokes";
 import { DEFAULT_BACKGROUND, validateBoardBackground, type BoardBackground } from "./core/background";
-import {loadBoardFont} from './fonts';
+import {loadBoardFont,boardFontFamilies,fontFamilyName} from './fonts';
 import {validateUserFonts,snapshotUserFonts,restoreUserFonts,type UserFont} from './user-fonts';
 import {migrateFrameSnapshots} from './core/layer-migration';
 import {validateMindMetadata,validateMindMapGraph} from './core/mindmap';
@@ -95,7 +95,6 @@ export function validateBoardFile(value: unknown): BoardFile {
     return { ...base, type, content, src, crop, maskShape:w.maskShape===undefined?undefined:one(w.maskShape,["rectangle","ellipse","round_rectangle"] as const),flipX:!!w.flipX,flipY:!!w.flipY,opacity:w.opacity===undefined?undefined:number(w.opacity,0,1),naturalWidth: number(w.naturalWidth, 1), naturalHeight: number(w.naturalHeight, 1) };
   }) as Widget[];
   const embeddedFamilies=new Set(userFonts?.map(font=>font.family));
-  for(const widget of widgets)if(widget.style.fontFamily.startsWith('BoardCustom-')&&!embeddedFamilies.has(widget.style.fontFamily))fail('O arquivo não inclui os dados de uma fonte personalizada usada no board.');
   const widgetIds = new Set(widgets.map(widget => widget.id));
   const endpoint = (value: unknown): Endpoint => {
     const ep = record(value), kind = one(ep.kind, ["point", "anchor"] as const);
@@ -112,8 +111,10 @@ export function validateBoardFile(value: unknown): BoardFile {
         startCap: style.startCap === undefined ? undefined : one(style.startCap, ["none", "arrow","triangle","circle","diamond","bar"] as const),
         endCap: style.endCap === undefined ? undefined : one(style.endCap, ["none", "arrow","triangle","circle","diamond","bar"] as const) },
       captions: c.captions === undefined ? undefined : list(c.captions, 100).map(value => str(value)),
+      captionStyles:c.captionStyles===undefined?undefined:list(c.captionStyles,100).map(value=>{const s=record(value);return {fontSize:s.fontSize===undefined?undefined:number(s.fontSize,.000001),fontFamily:s.fontFamily===undefined?undefined:str(s.fontFamily,1000),color:s.color===undefined?undefined:color(s.color),followPath:s.followPath===undefined?undefined:!!s.followPath,side:s.side===undefined?undefined:one(s.side,['above','center','below'] as const)};}),
     };
   });
+  for(const family of boardFontFamilies(widgets,connectors)){const name=fontFamilyName(family);if(name.startsWith('BoardCustom-')&&!embeddedFamilies.has(name))fail('O arquivo não inclui os dados de uma fonte personalizada usada no board.');}
   validateMindMapGraph(widgets,connectors);
   let totalPoints = 0;
   const strokes: Stroke[] = list(data.strokes).map(raw => {
@@ -157,7 +158,7 @@ export function installProjectFiles(api: { state: BoardState; bus: CommandBus; c
   const input = document.createElement("input"); input.type = "file"; input.accept = ".board.json,.json,application/json"; input.hidden = true; document.body.append(input);
   saveButton.onclick = () => {
     const data: BoardFile = { format: "local-board", version: 1,layerOrderVersion:1, title: document.getElementById("board-title")?.textContent ?? "Board",
-      background:state.background??{...DEFAULT_BACKGROUND},userFonts:snapshotUserFonts([...state.widgets.values()].map(w=>w.style.fontFamily)),
+      background:state.background??{...DEFAULT_BACKGROUND},userFonts:snapshotUserFonts(boardFontFamilies(state.widgets.values(),state.connectors.values())),
       widgets: [...state.widgets.values()], order: [...state.order], connectors: [...state.connectors.values()], connectorOrder: [...state.connectorOrder],
       strokes: [...state.strokes.values()], strokeOrder: [...state.strokeOrder], groups: [...state.groups.entries()], camera: { x: camera.x, y: camera.y, scale: camera.scale } };
     const url = URL.createObjectURL(new Blob([JSON.stringify(data)], { type: "application/json" }));
@@ -173,7 +174,7 @@ export function installProjectFiles(api: { state: BoardState; bus: CommandBus; c
       const data = validateBoardFile(JSON.parse(await file.text()));
       if(api.getBoardKey&&boardKey!==api.getBoardKey()){status.textContent='O board mudou. Abra o arquivo novamente no destino desejado.';return;}
       await restoreUserFonts(data.userFonts);
-      await Promise.all([...new Set(data.widgets.map(w=>w.style.fontFamily))].map(loadBoardFont));
+      await Promise.all(boardFontFamilies(data.widgets,data.connectors).map(loadBoardFont));
       if(api.getBoardKey&&boardKey!==api.getBoardKey()){status.textContent='O board mudou. Abra o arquivo novamente no destino desejado.';return;}
       // Nothing changes until every field and reference has passed validation.
       const widgetById = new Map(data.widgets.map(w => [w.id, w]));

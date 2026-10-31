@@ -7,23 +7,26 @@
  */
 
 import { Container, Graphics, Text } from "pixi.js";
+import {destroyDisplayTree} from './destroy-tree';
 import type { BoardState } from "../core/commands";
 import { widgetAABB, rectsIntersect, widgetCorners, type Rect } from "../core/geometry";
 import {visibleFrames,frameForWidget} from '../core/frame-visibility';
-import { connectorGeometry, connectorBounds, connectorCaptionPoints,type ConnectorGeometry } from "../core/connectors";
+import { connectorGeometry, connectorVisualBounds,type ConnectorGeometry } from "../core/connectors";
+import {connectorCaptionLayout,connectorCaptionBounds,type CaptionLayout} from '../core/connector-captions';
 import { strokeBounds, type StrokePoint, type Stroke } from "../core/strokes";
 import {paintStroke,strokeRenderKey} from './stroke-paint';
 import type { Run } from "../core/richtext";
 import { paintConnector } from "./connector-paint";
 import type { Widget } from "../core/model";
 import { borderPattern, canonicalShape, patternedContour, shapeContours, shapePolygon, shapeDetails } from "../core/shapes";
-import {resolvedWidgetStyle} from '../core/style-scale';
+import {resolvedWidgetStyle,borderWidthFor} from '../core/style-scale';
 import {fitTextResolution,textRasterDensity,TEXT_SAMPLING,sharedTextStyle} from './text-quality';
 import {mindNodeHidden,mindConnectorHidden,mindTopicText} from '../core/mindmap';
 import {audioSignature,paintAudioCard,paintAudioLabels} from './audio-paint';
 import {renderStructuredText} from './structured-text';
 import {textFontScale,wrapRichLines,fitBoxText,isBoxText,isFreeText,trimTextLine,TEXT_DESIGN_SIZE,type BoxTextFit} from '../core/text-layout';
 import {LargeTextRaster,needsLargeTextRaster} from './large-text';
+import {screenStroke,screenDot,screenStrokeKey} from './screen-coverage';
 
 interface Node {
   container: Container;
@@ -37,7 +40,16 @@ interface Node {
   largeText?:LargeTextRaster;
   /** Per-node retention avoids global LRU thrashing on boards with many labels. */
   boxFit?:{content:string;kind:string;style:Widget['style'];width:number;height:number;fit:BoxTextFit};
+  layoutWidget?:Widget;
+  layoutDensity?:number;
+  layoutCoverage?:number;
+  decorations?:boolean;
+  paintedWidget?:Widget;
+  paintedZoom?:number;
+  paintedDpr?:number;
 }
+interface ConnectorLabelNode {container:Container;textLayer:Container;text:Text;caption?:CaptionLayout;largeText?:LargeTextRaster}
+function destroyConnectorLabel(node:ConnectorLabelNode):void{node.largeText?.destroy();destroyDisplayTree(node.container);}
 
 export class BoardScene {
   /** quadros ficam abaixo de traços/conectores/objetos */
@@ -47,8 +59,8 @@ export class BoardScene {
   readonly layer = new Container();
   private nodes = new Map<string, Node>();
   private connectorNodes = new Map<string, Graphics>();
-  private connectorLabels = new Map<string, Text[]>();
-  private connectorPaintKeys=new Map<string,{geometry:ConnectorGeometry;style:string}>();
+  private connectorLabels = new Map<string, ConnectorLabelNode[]>();
+  private connectorPaintKeys=new Map<string,{geometry:ConnectorGeometry;style:string;captions:CaptionLayout[];coverage:number}>();
   private strokeNodes = new Map<string, Graphics>();
   private strokePaintKeys=new Map<string,{points:StrokePoint[];length:number;lastX:number;lastY:number;lastR:number;color:string;tool:string;opacity?:number;precision?:boolean;precisionSmoothing?:number;erasures?:Stroke['erasures'];displayKey:string}>();
   private clipContainers = new Map<string, { container: Container; mask: Graphics; sig:string }>();
@@ -105,7 +117,7 @@ export class BoardScene {
         node.destroy();
         this.connectorNodes.delete(id);
         this.connectorPaintKeys.delete(id);
-        for (const label of this.connectorLabels.get(id) ?? []) label.destroy();
+        for (const label of this.connectorLabels.get(id) ?? []) destroyConnectorLabel(label);
         this.connectorLabels.delete(id);
       }
     }
@@ -122,35 +134,44 @@ export class BoardScene {
         this.connectorNodes.set(id, node);
         node.label=id;this.layer.addChild(node);
       }
-      const style=JSON.stringify(connector.style),retained=this.connectorPaintKeys.get(id);
-      if(!retained||retained.geometry!==geometry||retained.style!==style){paintConnector(node,connector,geometry);this.connectorPaintKeys.set(id,{geometry,style});}
+      const captions=connectorCaptionLayout(connector,geometry),style=JSON.stringify(connector.style),retained=this.connectorPaintKeys.get(id),coverage=screenStrokeKey(connector.style.strokeWidth,this.zoom);
+      if(!retained||retained.geometry!==geometry||retained.style!==style||retained.captions!==captions||retained.coverage!==coverage){paintConnector(node,connector,geometry,true,this.zoom);this.connectorPaintKeys.set(id,{geometry,style,captions,coverage});}
 
-      node.visible=!connector.hidden&&!mindConnectorHidden(state,connector)&&(!visible||rectsIntersect(visible,connectorBounds(geometry)));
+      const captionBounds=connectorCaptionBounds(captions);
+      node.visible=!connector.hidden&&!mindConnectorHidden(state,connector)&&(!visible||rectsIntersect(visible,connectorVisualBounds(connector,geometry))||!!captionBounds&&rectsIntersect(visible,captionBounds));
       node.zIndex = connector.z;
 
-      const captions = connectorCaptionPoints(connector, geometry);
       const labels = this.connectorLabels.get(id) ?? [];
-      while (labels.length > captions.length) labels.pop()!.destroy();
+      while (labels.length > captions.length) destroyConnectorLabel(labels.pop()!);
       for (let i = 0; i < captions.length; i++) {
         const caption = captions[i]!;
-        let label = labels[i];
-        if (!label) {
-          label = new Text({
+        let labelNode = labels[i];
+        if (!labelNode) {
+          const container=new Container(),textLayer=new Container(),text = new Text({
             ...TEXT_SAMPLING,
             text: "",
             resolution: this.textResolution,
-            style: sharedTextStyle({ fontFamily: "Arial, sans-serif", fontSize: 12, fill: "#42413a" }),
+            style: sharedTextStyle({ fontFamily: caption.fontFamily, fontSize: TEXT_DESIGN_SIZE, fill: caption.color }),
           });
-          label.anchor.set(0.5);
-          labels.push(label);
-          this.layer.addChild(label);
+          container.label=`${id}:caption:${i}`;textLayer.addChild(text);container.addChild(textLayer);
+          labelNode={container,textLayer,text};labels.push(labelNode);this.layer.addChild(container);
         }
-        label.text = caption.text;
-        const resolution=fitTextResolution(label,this.textResolution);
+        const label=labelNode.text,scale=caption.fontSize/TEXT_DESIGN_SIZE;
+        if(labelNode.caption!==caption){
+          label.text=caption.text;
+          label.style=sharedTextStyle({fontFamily:caption.fontFamily,fontSize:TEXT_DESIGN_SIZE,fill:caption.color});
+          label.scale.set(scale);label.position.set(-label.width/2,-label.height/2);
+          labelNode.container.position.set(caption.position.x,caption.position.y);labelNode.container.rotation=caption.angle;
+          labelNode.caption=caption;
+        }
+        const resolution=fitTextResolution(label,this.textResolution*scale);
         if (label.resolution !== resolution) label.resolution = resolution;
-        label.position.set(caption.position.x, caption.position.y - 10);
-        label.zIndex = connector.z + .5;
-        label.visible = node.visible && !!caption.text;
+        labelNode.container.zIndex=connector.z+.5;labelNode.container.visible=node.visible&&!!caption.text;
+        if(labelNode.largeText||needsLargeTextRaster(label,this.zoom)){
+          labelNode.largeText??=new LargeTextRaster(labelNode.container);
+          const pose={x:caption.position.x,y:caption.position.y,width:0,height:0,rotation:caption.angle} as Widget;
+          labelNode.largeText.update(pose,labelNode.textLayer,node.visible?visible:undefined,this.zoom);
+        }
       }
       this.connectorLabels.set(id, labels);
     }
@@ -224,7 +245,7 @@ export class BoardScene {
     for (const [id, node] of this.nodes) {
       if (!state.widgets.has(id)) {
         node.largeText?.destroy();
-        node.container.destroy({ children: true });
+        destroyDisplayTree(node.container);
         this.nodes.delete(id);
         this.links.delete(id);
       }
@@ -269,9 +290,14 @@ export class BoardScene {
   }
 
   private paint(node: Node, w: Widget,rasterVisible=true): void {
+    // Ordinary objects retain their local display list while the camera pans.
+    // Oversized text is the exception: its viewport tiles follow the camera.
+    const dpr=globalThis.devicePixelRatio||1;
+    if(node.paintedWidget===w&&node.paintedZoom===this.zoom&&node.paintedDpr===dpr&&!node.largeText)return;
+    node.paintedWidget=w;node.paintedZoom=this.zoom;node.paintedDpr=dpr;
     if(node.type!==w.type){
       node.largeText?.destroy();node.largeText=undefined;node.boxFit=undefined;
-      for(const child of node.text.removeChildren())child.destroy({children:true});
+      for(const child of node.text.removeChildren())destroyDisplayTree(child);
       node.text.visible=true;node.type=w.type;node.sig='';node.backgroundSig='';this.links.delete(w.id);
     }
     const { container, graphics, text } = node;
@@ -281,7 +307,7 @@ export class BoardScene {
     container.rotation = w.rotation;
 
     const style=w.style;
-    const backgroundSig=[w.type,w.width,w.height,w.type==='shape'?w.shape:'',style.fillColor,style.fillOpacity,style.borderColor,style.borderWidth,style.borderScale,style.borderStyle,style.borderOpacity,style.cornerRadius,audioSignature(w),Math.round(Math.log2(Math.max(.02,this.zoom))*2)].join('|');
+    const backgroundSig=[w.type,w.width,w.height,w.type==='shape'?w.shape:'',style.fillColor,style.fillOpacity,style.borderColor,style.borderWidth,style.borderScale,style.borderStyle,style.borderOpacity,style.cornerRadius,audioSignature(w),Math.round(Math.log2(Math.max(.02,this.zoom))*2),screenStrokeKey(borderWidthFor(w),this.zoom,dpr),w.audio?this.zoom*dpr:0].join('|');
     if(node.backgroundSig!==backgroundSig){node.backgroundSig=backgroundSig;graphics.clear();drawBackground(graphics,w,this.zoom);}
 
     this.layoutText(node, w);
@@ -295,10 +321,16 @@ export class BoardScene {
 
   private layoutText(node: Node, w: Widget): void {
     if (w.type === "image") return;
+    // Camera translation changes neither local text nor its raster density.
+    // Keep the existing label tree instead of revisiting every run and cell.
+    const coverage=w.checklist||w.table||node.decorations?this.zoom*(globalThis.devicePixelRatio||1):0;
+    if(node.layoutWidget===w&&node.layoutDensity===this.textResolution&&node.layoutCoverage===coverage)return;
+    node.layoutWidget=w;node.layoutDensity=this.textResolution;node.layoutCoverage=coverage;
     if(w.audio){node.sig='';paintAudioLabels(node.text,w,this.textResolution);return;}
-    if(renderStructuredText(node.text,w,this.textResolution)){node.sig='';return;}
+    if(renderStructuredText(node.text,w,this.textResolution,this.zoom)){node.sig='';return;}
     for (const child of node.text.children) if (child instanceof Text){const resolution=fitTextResolution(child,this.textResolution*Math.abs(child.scale.x));if(child.resolution!==resolution)child.resolution=resolution;}
     const content = w.type === "frame" ? w.title : mindTopicText(w);
+    node.decorations=!!w.style.textDecoration&&w.style.textDecoration!=='none'||content.includes('__')||content.includes('~~');
     let fit:BoxTextFit|undefined;
     if(isBoxText(w)){
       const cached=node.boxFit,kind=w.mind?'mind':w.type==='shape'?w.shape:w.type;
@@ -322,11 +354,12 @@ export class BoardScene {
       w.style.textAlignVertical,
       maxWidth,
       w.type,
+      node.decorations?screenStrokeKey(Math.max(.8,w.style.fontSize/18),this.zoom):0,
     ].join("|");
 
     if (node.sig !== sig) {
       node.sig = sig;
-      for (const child of node.text.removeChildren()) child.destroy({ children: true });
+      for (const child of node.text.removeChildren()) destroyDisplayTree(child);
 
       if (w.type === "frame") {
         const title = new Text({
@@ -387,7 +420,7 @@ export class BoardScene {
       let lineWidth = 0;
 
       const flush = (): void => {
-        for (const placed of placeLine(target, items, lineWidth, maxWidth, align, y)) {
+        for (const placed of placeLine(target, items, lineWidth, maxWidth, align, y,this.zoom)) {
           if (placed.link) collected.push({ x: placed.x, y: placed.y, w: placed.w, h: placed.h, url: placed.link });
         }
         items = [];
@@ -441,6 +474,7 @@ function placeLine(
   maxWidth: number,
   align: string,
   y: number,
+  zoom=1,
 ): Array<{ x: number; y: number; w: number; h: number; link?: string }> {
   const placed: Array<{ x: number; y: number; w: number; h: number; link?: string }> = [];
   if (items.length === 0) return placed;
@@ -463,10 +497,10 @@ function placeLine(
       strike
         .moveTo(x, y + item.node.height * 0.55)
         .lineTo(x + item.width, y + item.node.height * 0.55)
-        .stroke({ width: Math.max(.8,item.node.style.fontSize*Math.abs(item.node.scale.x)/18), color: item.node.style.fill as string, alpha: 0.9 });
+        .stroke({ ...screenStroke(Math.max(.8,item.node.style.fontSize*Math.abs(item.node.scale.x)/18),zoom,undefined,.9), color: item.node.style.fill as string });
       target.addChild(strike);
     }
-    if(item.underline){const underline=new Graphics();underline.moveTo(x,y+item.node.height*.91).lineTo(x+item.width,y+item.node.height*.91).stroke({width:Math.max(.8,item.node.style.fontSize*Math.abs(item.node.scale.x)/18),color:item.node.style.fill as string});target.addChild(underline);}
+    if(item.underline){const underline=new Graphics();underline.moveTo(x,y+item.node.height*.91).lineTo(x+item.width,y+item.node.height*.91).stroke({...screenStroke(Math.max(.8,item.node.style.fontSize*Math.abs(item.node.scale.x)/18),zoom),color:item.node.style.fill as string});target.addChild(underline);}
 
     placed.push({ x, y, w: item.width, h: item.node.height, link: item.link });
     x += item.width;
@@ -479,6 +513,7 @@ function drawBackground(g: Graphics, w: Widget, zoom: number): void {
   if(w.audio){paintAudioCard(g,w,zoom);return;}
   w={...w,style:resolvedWidgetStyle(w)};
   const { style } = w;
+  const coverage=screenStroke(style.borderWidth,zoom,undefined,style.borderOpacity??1);
 
   if (w.type === "image") return;
 
@@ -486,7 +521,7 @@ function drawBackground(g: Graphics, w: Widget, zoom: number): void {
     g.rect(0, 0, w.width, w.height).fill({ color: style.fillColor, alpha: style.fillOpacity });
     if (style.borderWidth > 0) {
       if (borderPattern(style.borderWidth, style.borderStyle)) drawPatternedBorder(g, w, "rectangle", zoom);
-      else g.stroke({ width: style.borderWidth, color: style.borderColor, alpha: style.borderOpacity ?? 1 });
+      else g.stroke({ ...coverage, color: style.borderColor });
     }
     return;
   }
@@ -504,7 +539,7 @@ function drawBackground(g: Graphics, w: Widget, zoom: number): void {
   const fill = { color: style.fillColor, alpha: style.fillOpacity };
   const stroke =
     style.borderWidth > 0
-      ? { width: style.borderWidth, color: style.borderColor, alpha: style.borderOpacity ?? 1, alignment: 0.5 }
+      ? { ...coverage, color: style.borderColor, alignment: 0.5 }
       : null;
 
   if(originalShape==='text_block')return;
@@ -556,17 +591,19 @@ function drawBackground(g: Graphics, w: Widget, zoom: number): void {
 function drawPatternedBorder(g: Graphics, w: Widget, shape: Parameters<typeof shapeContours>[0], zoom: number): void {
   const pattern = borderPattern(w.style.borderWidth, w.style.borderStyle);
   if (!pattern) return;
+  const coverage=screenStroke(w.style.borderWidth,zoom,undefined,w.style.borderOpacity??1);
   for (const contour of shapeContours(shape, w.width, w.height, zoom, w.style.cornerRadius)) {
     const pieces = patternedContour(contour, pattern.dash, pattern.gap);
     if (pattern.dash === 0) {
-      for (const p of pieces) g.circle(p[0]!, p[1]!, w.style.borderWidth / 2);
-      g.fill({ color: w.style.borderColor, alpha: w.style.borderOpacity ?? 1 });
+      const dot=screenDot(w.style.borderWidth/2,zoom,undefined,w.style.borderOpacity??1);
+      for (const p of pieces) g.circle(p[0]!, p[1]!, dot.radius);
+      g.fill({ color: w.style.borderColor, alpha: dot.alpha });
     } else {
       for (const p of pieces) {
         g.moveTo(p[0]!, p[1]!);
         for (let i = 2; i < p.length; i += 2) g.lineTo(p[i]!, p[i + 1]!);
       }
-      g.stroke({ color: w.style.borderColor, alpha: w.style.borderOpacity ?? 1, width: w.style.borderWidth, cap: "butt", join: "round" });
+      g.stroke({ color: w.style.borderColor, ...coverage, cap: "butt", join: "round" });
     }
   }
 }

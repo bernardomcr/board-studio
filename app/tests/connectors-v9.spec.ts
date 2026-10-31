@@ -27,13 +27,13 @@ test('connector ports advertise nearby targets and magnetize without a crosshair
   await page.mouse.move(800,595);await expect(page.locator('#app canvas')).toHaveCSS('cursor','grab');
 });
 
-test('line choices in Shapes keep quick-pull curved after an explicit straight choice',async({page})=>{
+test('line choices in Shapes remain remembered when pulling the next connection from a port',async({page})=>{
   await fixture(page);await expect(page.locator('#toolbar [data-tool="connector"]')).toHaveCount(0);const button=page.getByRole('button',{name:'Formas',exact:true});await button.click();await page.getByRole('button',{name:'Linha reta sem seta',exact:true}).click();await expect(button).toHaveClass(/active/);
   // A deliberate free straight line remains a straight line.
   await page.mouse.move(100,850);await page.mouse.down();await page.mouse.move(450,900,{steps:10});await page.mouse.up();
   expect(await page.evaluate(()=>[...window.__board.state.connectors.values()][0])).toMatchObject({shape:'straight',style:{endCap:'none'}});
   await page.mouse.move(390,395);await page.mouse.move(500,395);await page.mouse.down();await page.mouse.move(790,595,{steps:15});await page.mouse.up();
-  const curve=await page.evaluate(()=>[...window.__board.state.connectors.values()].find(c=>c.start.kind==='anchor'));expect(curve).toMatchObject({shape:'curved',style:{endCap:'arrow'},start:{widgetId:'source'},end:{widgetId:'target'}});
+  const line=await page.evaluate(()=>[...window.__board.state.connectors.values()].find(c=>c.start.kind==='anchor'));expect(line).toMatchObject({shape:'straight',style:{endCap:'none'},start:{widgetId:'source'},end:{widgetId:'target'}});
 });
 
 test('Control leaves an endpoint free near a port and Shift constrains the carried endpoint',async({page})=>{

@@ -1,10 +1,12 @@
 import { Assets, Container, Graphics, Sprite, Texture, type Application } from "pixi.js";
+import {destroyDisplayTree} from './render/destroy-tree';
 import type { BoardState, CommandBus } from "./core/commands";
 import type { Camera } from "./core/camera";
 import { SHAPE_STYLE, nextId, type Widget } from "./core/model";
 import type { Vec } from "./core/geometry";
 import { borderPattern, patternedContour, shapeContours } from "./core/shapes";
-import {resolvedWidgetStyle} from './core/style-scale';
+import {resolvedWidgetStyle,borderWidthFor} from './core/style-scale';
+import {screenStroke,screenDot,screenStrokeKey} from './render/screen-coverage';
 import {configureRasterSampling} from './render/raster-quality';
 import {installClipboardImages} from './clipboard-images';
 
@@ -53,7 +55,7 @@ export function installImages(api: ImageAPI) {
 
   function sync() {
     for (const [id, node] of nodes) {
-      if (!asImage(state.widgets.get(id)) || node.container.destroyed) { if (!node.container.destroyed) node.container.destroy({ children: true }); nodes.delete(id); }
+      if (!asImage(state.widgets.get(id)) || node.container.destroyed) { if (!node.container.destroyed) destroyDisplayTree(node.container); nodes.delete(id); }
     }
     for (const item of state.widgets.values()) {
       const w = asImage(item); if (!w) continue;
@@ -78,7 +80,7 @@ export function installImages(api: ImageAPI) {
       }
       const crop = w.crop ?? FULL;
       if(node.src!==w.src)node.sig='';
-      const sig=[w.width,w.height,crop.x,crop.y,crop.width,crop.height,w.maskShape,w.flipX,w.flipY,w.opacity,w.style.borderWidth,w.style.borderScale,w.style.borderColor,w.style.borderStyle,w.style.borderOpacity,w.style.cornerRadius,Math.round(Math.log2(Math.max(.02,camera.scale))*2)].join('|');
+      const sig=[w.width,w.height,crop.x,crop.y,crop.width,crop.height,w.maskShape,w.flipX,w.flipY,w.opacity,w.style.borderWidth,w.style.borderScale,w.style.borderColor,w.style.borderStyle,w.style.borderOpacity,w.style.cornerRadius,Math.round(Math.log2(Math.max(.02,camera.scale))*2),screenStrokeKey(borderWidthFor(w),camera.scale)].join('|');
       if(node.sig!==sig){
       node.sig=sig;
       // The picture and its outline have independent opacity controls.
@@ -92,6 +94,7 @@ export function installImages(api: ImageAPI) {
       node.mask.fill(0xffffff);
       node.border.clear();
       const { borderWidth, borderColor, borderStyle, borderOpacity = 1 } = resolvedWidgetStyle(w);
+      const coverage=screenStroke(borderWidth,camera.scale,undefined,borderOpacity);
       if (borderWidth > 0 && borderColor !== "transparent" && borderOpacity > 0) {
         const shape = w.maskShape === "ellipse" ? "circle" : w.maskShape ?? "rectangle";
         const radius = cornerRadius;
@@ -100,21 +103,22 @@ export function installImages(api: ImageAPI) {
           for (const contour of shapeContours(shape, w.width, w.height, camera.scale, radius)) {
             const pieces = patternedContour(contour, pattern.dash, pattern.gap);
             if (pattern.dash === 0) {
-              for (const p of pieces) node.border.circle(p[0]!, p[1]!, borderWidth / 2);
-              node.border.fill({ color: borderColor, alpha: borderOpacity });
+              const dot=screenDot(borderWidth/2,camera.scale,undefined,borderOpacity);
+              for (const p of pieces) node.border.circle(p[0]!, p[1]!, dot.radius);
+              node.border.fill({ color: borderColor, alpha: dot.alpha });
             } else {
               for (const p of pieces) {
                 node.border.moveTo(p[0]!, p[1]!);
                 for (let i = 2; i < p.length; i += 2) node.border.lineTo(p[i]!, p[i + 1]!);
               }
-              node.border.stroke({ color: borderColor, alpha: borderOpacity, width: borderWidth, cap: "butt", join: "round" });
+              node.border.stroke({ color: borderColor, ...coverage, cap: "butt", join: "round" });
             }
           }
         } else {
           if (w.maskShape === "ellipse") node.border.ellipse(w.width/2, w.height/2, w.width/2, w.height/2);
           else if (w.maskShape === "round_rectangle") node.border.roundRect(0, 0, w.width, w.height, radius);
           else node.border.rect(0, 0, w.width, w.height);
-          node.border.stroke({ color: borderColor, alpha: borderOpacity, width: borderWidth, join: "round" });
+          node.border.stroke({ color: borderColor, ...coverage, join: "round" });
         }
       }
       const imageWidth = w.width / Math.max(.001, crop.width), imageHeight = w.height / Math.max(.001, crop.height);
@@ -223,7 +227,7 @@ export function installImages(api: ImageAPI) {
     const dialog = document.createElement("div"); modal = dialog;
     dialog.setAttribute("role", "dialog"); dialog.setAttribute("aria-modal", "true"); dialog.setAttribute("aria-label", "Recortar imagem");
     dialog.style.cssText = "position:fixed;inset:0;z-index:90;background:#19181299;display:grid;place-items:center;font:14px Segoe UI,sans-serif";
-    dialog.innerHTML = `<section style="background:white;border-radius:12px;padding:22px;width:min(880px,94vw);max-height:96vh;overflow:auto;box-sizing:border-box;box-shadow:0 16px 60px #0004"><h2 style="margin:0 0 8px;font-size:18px">Recortar imagem</h2><p style="margin:0 0 16px;color:#73726c">Mova a área ou arraste as alças. O arquivo original é preservado.</p><div role="group" aria-label="Formato do recorte" style="display:flex;gap:6px;margin-bottom:16px;flex-wrap:wrap"><button data-mask="rectangle">Retângulo</button><button data-mask="ellipse">Círculo</button><button data-mask="round_rectangle">Cantos arredondados</button></div><div data-preview style="position:relative;margin:auto;max-width:100%;touch-action:none;cursor:crosshair;user-select:none;overflow:hidden"><img data-source draggable="false" style="display:block;width:100%;height:100%;pointer-events:none;filter:brightness(.42)"><div data-region style="position:absolute;box-sizing:border-box;cursor:move"><div data-crop-window style="position:absolute;inset:0;overflow:hidden;outline:2px solid #3859ff"><div data-crop-flip style="position:absolute;inset:0;pointer-events:none"><img data-crop-source draggable="false" style="position:absolute;max-width:none;pointer-events:none"></div></div></div></div><div style="display:flex;gap:6px;align-items:center;margin-top:18px;flex-wrap:wrap"><button data-full>Imagem inteira</button><button data-free>Proporção livre</button><button data-square>1:1</button><button data-wide>16:9</button><button data-ratio="1.3333333333333333">4:3</button><button data-ratio="1.5">3:2</button><button data-new>Nova área</button><span style="flex:1"></span><button data-cancel>Cancelar</button><button data-apply style="background:#3859ff;color:white">Aplicar recorte</button></div><p data-ratio-status style="margin:12px 0 0;font-size:12px;color:#73726c"></p></section>`;
+    dialog.innerHTML = `<section style="background:white;border-radius:12px;padding:22px;width:min(880px,94vw);max-height:96vh;overflow:auto;box-sizing:border-box;box-shadow:0 16px 60px #0004"><h2 style="margin:0 0 8px;font-size:18px">Recortar imagem</h2><p style="margin:0 0 16px;color:#73726c">Mova a área ou arraste as alças. O arquivo original é preservado.</p><div role="group" aria-label="Formato do recorte" style="display:flex;gap:6px;margin-bottom:16px;flex-wrap:wrap"><button data-mask="rectangle">Retângulo</button><button data-mask="ellipse">Círculo</button><button data-mask="round_rectangle">Cantos arredondados</button></div><div data-preview style="position:relative;margin:auto;max-width:100%;touch-action:none;cursor:crosshair;user-select:none;overflow:hidden"><img data-source draggable="false" style="display:block;width:100%;height:100%;pointer-events:none;filter:brightness(.42)"><div data-region style="position:absolute;box-sizing:border-box;cursor:move"><div data-crop-window style="position:absolute;inset:0;overflow:hidden;outline:2px solid #3859ff"><div data-crop-flip style="position:absolute;inset:0;pointer-events:none"><img data-crop-source draggable="false" style="position:absolute;max-width:none;pointer-events:none"></div></div></div></div><div style="display:flex;gap:6px;align-items:center;margin-top:18px;flex-wrap:wrap"><button data-full title="Restaurar todos os pixels do arquivo original">Original</button><button data-free>Proporção livre</button><button data-square>1:1</button><button data-ratio="0.75">3:4</button><button data-ratio="1.3333333333333333">4:3</button><button data-wide>16:9</button><button data-new>Nova área</button><span style="flex:1"></span><button data-cancel>Cancelar</button><button data-apply style="background:#3859ff;color:white">Aplicar recorte</button></div><p data-ratio-status style="margin:12px 0 0;font-size:12px;color:#73726c"></p></section>`;
     for (const button of dialog.querySelectorAll<HTMLButtonElement>("button")) {
       Object.assign(button.style, { border: "1px solid #d5d5d2", borderRadius: "6px", padding: "9px 12px", cursor: "pointer", font: "inherit" });
     }

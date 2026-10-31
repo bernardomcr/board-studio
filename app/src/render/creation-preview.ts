@@ -1,4 +1,5 @@
 import {Container} from 'pixi.js';
+import {destroyDisplayTree} from './destroy-tree';
 import type {Camera} from '../core/camera';
 import type {BoardState} from '../core/commands';
 import type {Widget} from '../core/model';
@@ -47,5 +48,5 @@ export function installCreationPreview(api:CreationPreviewOptions){
   api.canvas.addEventListener('pointermove',move);api.canvas.addEventListener('pointerenter',move);api.canvas.addEventListener('pointerleave',leave);
   // A creation preview exists only while the pointer gesture is in progress.
   window.addEventListener('keydown',keyboard);window.addEventListener('keyup',keyboard);
-  return {show,clear,refresh,layer,destroy(){api.canvas.removeEventListener('pointermove',move);api.canvas.removeEventListener('pointerenter',move);api.canvas.removeEventListener('pointerleave',leave);window.removeEventListener('keydown',keyboard);window.removeEventListener('keyup',keyboard);layer.destroy({children:true});}};
+  return {show,clear,refresh,layer,destroy(){api.canvas.removeEventListener('pointermove',move);api.canvas.removeEventListener('pointerenter',move);api.canvas.removeEventListener('pointerleave',leave);window.removeEventListener('keydown',keyboard);window.removeEventListener('keyup',keyboard);destroyDisplayTree(layer);}};
 }

@@ -29,7 +29,7 @@ import {
   resolveEndpoint,
   connectorBounds,
   connectorGeometry,
-  distanceToConnector,
+  connectorContainsPoint,
   facingAnchor,
   nearestAnchor,
   type Connector,
@@ -45,8 +45,11 @@ import { paintConnector } from "./render/connector-paint";
 import { installImages } from "./images";
 import { installEditorUI } from "./editor-ui";
 import { installConnectorCompletion } from "./connector-completion";
+import {canInsertConnectorObject,connectorInsertion} from './core/connector-insert';
+import {connectorDefaults,rememberConnectorDefaults} from './connector-defaults';
+import {appendConnectorCaption,connectorCaptionAt,connectorCaptionLayout,captionCutCubics,captionCutSegments} from './core/connector-captions';
 import {installBoardHome} from "./board-home";
-import {ensureFonts,loadBoardFont,embedSvgFonts} from "./fonts";
+import {ensureFonts,loadBoardFont,embedSvgFonts,boardFontFamilies} from "./fonts";
 import {installIcons} from "./icons";
 import {positionContextPanel} from "./context-position";
 import {readStoredBoard,writeStoredBoard} from "./core/board-storage";
@@ -85,11 +88,16 @@ await app.init({
   autoDensity: true,
 });
 host.appendChild(app.canvas);
+// Board input is handled by the canvas DOM listeners below. Traversing Pixi's
+// complete display tree again for native pointermove duplicates hit testing.
+app.stage.eventMode='none';
 
 const camera = new Camera();
 const momentum=new PanMomentum();
 window.addEventListener('pointerdown',()=>momentum.stop(),true);
-window.addEventListener('keydown',()=>momentum.stop(),true);
+// Holding Space produces repeated keydowns while the pointer is panning.
+// Those repeats must not erase the velocity samples collected by the gesture.
+window.addEventListener('keydown',event=>{if(!event.repeat)momentum.stop();},true);
 window.addEventListener('blur',()=>momentum.stop());
 document.addEventListener('visibilitychange',()=>{if(document.hidden)momentum.stop();});
 const world = new Container();
@@ -165,7 +173,7 @@ function loadBoard(stored?:SavedBoard): boolean {
 }
 
 let saveTimer:ReturnType<typeof setTimeout>|null=null;
-function savedBoard():SavedBoard{return structuredClone({layerOrderVersion:1 as const,userFonts:snapshotUserFonts([...state.widgets.values()].map(w=>w.style.fontFamily)),savedAt:Date.now(),title:document.getElementById("board-title")!.textContent??"Board",background:state.background??{...DEFAULT_BACKGROUND},widgets:[...state.widgets.values()],order:state.order,connectors:[...state.connectors.values()],connectorOrder:state.connectorOrder,strokes:[...state.strokes.values()],strokeOrder:state.strokeOrder,groups:[...state.groups.entries()],journal:bus.snapshot(),camera:{x:camera.x,y:camera.y,scale:camera.scale}});}
+function savedBoard():SavedBoard{return structuredClone({layerOrderVersion:1 as const,userFonts:snapshotUserFonts(boardFontFamilies(state.widgets.values(),state.connectors.values())),savedAt:Date.now(),title:document.getElementById("board-title")!.textContent??"Board",background:state.background??{...DEFAULT_BACKGROUND},widgets:[...state.widgets.values()],order:state.order,connectors:[...state.connectors.values()],connectorOrder:state.connectorOrder,strokes:[...state.strokes.values()],strokeOrder:state.strokeOrder,groups:[...state.groups.entries()],journal:bus.snapshot(),camera:{x:camera.x,y:camera.y,scale:camera.scale}});}
 async function persistBoard(){if(home&&(!home.currentId()||home.transitioning()))return;try{await writeStoredBoard(storageKey(),savedBoard());document.getElementById("save-warning")?.remove();}catch{let notice=document.getElementById("save-warning");if(!notice){notice=document.createElement("div");notice.id="save-warning";notice.style.cssText="position:fixed;bottom:60px;left:50%;transform:translateX(-50%);z-index:80;background:#fff9b1;padding:12px 18px;border-radius:8px;font:13px Segoe UI";document.body.append(notice);}notice.textContent="Não foi possível salvar automaticamente. Use Salvar arquivo para guardar seu trabalho.";}}
 function scheduleSave(){if(home&&(!home.currentId()||home.transitioning()))return;if(saveTimer)clearTimeout(saveTimer);saveTimer=setTimeout(()=>{saveTimer=null;if(gesture.kind!=='none'){scheduleSave();return;}void persistBoard();},400);}
 window.addEventListener("pagehide",()=>{void persistBoard();});
@@ -211,8 +219,10 @@ function syncScene(): void {
 }
 
 function syncSize(): void {
-  camera.width = app.renderer.width / app.renderer.resolution;
-  camera.height = app.renderer.height / app.renderer.resolution;
+  // Pixi 8 exposes the screen/frame in CSS units; backing pixels already include
+  // renderer.resolution. Dividing again shrinks the camera on high-DPI displays.
+  camera.width = app.screen.width;
+  camera.height = app.screen.height;
 }
 app.renderer.on("resize", () => {
   syncSize();
@@ -241,7 +251,7 @@ function connectorAt(p: Vec, tolerance: number): Connector | undefined {
   for (const connector of [...state.connectors.values()].sort((a,b)=>b.z-a.z)) {
     if (connector.hidden||mindConnectorHidden(state,connector)) continue;
     const geometry = connectorGeometry(connector, state.widgets);
-    if (geometry && distanceToConnector(p, geometry) <= tolerance) return connector;
+    if (geometry && (connectorContainsPoint(connector,geometry,p,tolerance)||connectorCaptionAt(connector,geometry,p,tolerance)>=0)) return connector;
   }
   return undefined;
 }
@@ -307,12 +317,13 @@ function drawConnectPreview(): void {
   const fromAnchor=source ? (active?.fixed ? active.fromAnchor : {kind:"anchor" as const,widgetId:source.id,...facingAnchor(source,target?widgetCenter(target):cursor)}) : {kind:"point" as const,...connectPreview.from};
   const from=resolveEndpoint(fromAnchor!,state.widgets)??connectPreview.from;
   const toAnchor=target&&picked ? {kind:"anchor" as const,widgetId:target.id,...picked.anchor} : {kind:"point" as const,...cursor};
-  const preview:Connector={id:"preview",type:"connector",start:fromAnchor!,end:toAnchor,shape:active?.shape??connectorDefault.shape,style:{strokeColor:"#3859ff",strokeWidth:2,endCap:(active?.arrow??connectorDefault.arrow)?"arrow":"none"},z:0};
+  const defaults=connectorDefaults();
+  const preview:Connector={id:"preview",type:"connector",start:fromAnchor!,end:toAnchor,shape:active?.shape??defaults.shape,style:{...defaults.style,...(active?.arrow===undefined?{}:{endCap:active.arrow?'arrow':'none'})},z:0};
   const geometry=connectorGeometry(preview,state.widgets);
   const path=(geometry?.points ?? [connectPreview.from,connectPreview.to]).map(p=>camera.worldToScreen(p));
   const a=path[0]!,b=path[path.length-1]!;
   const screenCurve=(c:NonNullable<typeof geometry>['cubic'])=>c?{p0:camera.worldToScreen(c.p0),p1:camera.worldToScreen(c.p1),p2:camera.worldToScreen(c.p2),p3:camera.worldToScreen(c.p3)}:undefined;
-  paintConnector(overlay,{...preview,style:{...preview.style,strokeWidth:Math.max(.7,2*camera.scale)}},{points:path,cubic:screenCurve(geometry?.cubic),cubics:geometry?.cubics?.map(c=>screenCurve(c)!)},false);
+  paintConnector(overlay,{...preview,style:{...preview.style,strokeWidth:preview.style.strokeWidth*camera.scale}},{points:path,cubic:screenCurve(geometry?.cubic),cubics:geometry?.cubics?.map(c=>screenCurve(c)!)},false);
   overlay.circle(a.x, a.y, 4).fill({ color: 0x3859ff });
   overlay.circle(b.x, b.y, 4).stroke({ width: 1.5, color: 0x3859ff });
   const hit = target;
@@ -483,6 +494,9 @@ function endEdit(commit: boolean): void {
   drawSelection();
 }
 
+function connectorControlVisible(c:Connector,geometry:NonNullable<ReturnType<typeof connectorGeometry>>,point:Vec,padding=8):boolean{
+  return connectorCaptionAt(c,geometry,point,padding/camera.scale)<0;
+}
 function drawSelection(): void {
   overlay.clear();
   if(['hand','brush','highlighter','eraser'].includes(tool))return;
@@ -503,15 +517,22 @@ function drawSelection(): void {
   if (selectedConnector && isSingleSelection()) {
     const geometry = connectorGeometry(selectedConnector, state.widgets);
     if (geometry) {
-      const pts = geometry.points.map((p) => camera.worldToScreen(p));
-      overlay.moveTo(pts[0]!.x, pts[0]!.y);
-      for (let i = 1; i < pts.length; i++) overlay.lineTo(pts[i]!.x, pts[i]!.y);
-      overlay.stroke({ width: selectedConnector.style.strokeWidth*camera.scale + 4, color: blue, alpha: 0.35 });
-      for (const p of [pts[0]!, pts[pts.length - 1]!]) {
-        overlay.circle(p.x, p.y, 5).fill({ color: 0xffffff }).stroke({ width: 1.5, color: blue });
+      const width=selectedConnector.style.strokeWidth+4/camera.scale;
+      // The selection halo is wider than the painted line. Cut it around every
+      // caption using that actual width, including text placed above or below.
+      const captions=connectorCaptionLayout(selectedConnector,geometry).map(caption=>({...caption,width:caption.width+2/camera.scale,height:caption.height+2/camera.scale,side:'center' as const,strokeRadius:width/2}));
+      const stroke={width:width*camera.scale,color:blue,alpha:.35,cap:'round' as const,join:'round' as const},curves=geometry.cubics??(geometry.cubic?[geometry.cubic]:[]);
+      if(curves.length)for(const curve of captionCutCubics(curves,captions)){
+        const a=camera.worldToScreen(curve.p0),b=camera.worldToScreen(curve.p1),c=camera.worldToScreen(curve.p2),d=camera.worldToScreen(curve.p3);
+        overlay.moveTo(a.x,a.y).bezierCurveTo(b.x,b.y,c.x,c.y,d.x,d.y).stroke(stroke);
+      }else for(const segment of captionCutSegments(geometry.points,captions)){
+        if(segment.length<2)continue;const a=camera.worldToScreen(segment[0]!);overlay.moveTo(a.x,a.y);for(const point of segment.slice(1)){const p=camera.worldToScreen(point);overlay.lineTo(p.x,p.y);}overlay.stroke(stroke);
+      }
+      for(const point of[geometry.points[0]!,geometry.points.at(-1)!])if(connectorControlVisible(selectedConnector,geometry,point,6)){
+        const p=camera.worldToScreen(point);overlay.circle(p.x, p.y, 5).fill({ color: 0xffffff }).stroke({ width: 1.5, color: blue });
       }
     }
-    if(geometry)for(const point of connectorEditPoints(selectedConnector,geometry)){const p=camera.worldToScreen(point);overlay.rect(p.x-4,p.y-4,8,8).fill(0xffffff).stroke({width:1.5,color:blue});}
+    if(geometry)for(const point of connectorEditPoints(selectedConnector,geometry))if(connectorControlVisible(selectedConnector,geometry,point)){const p=camera.worldToScreen(point);overlay.rect(p.x-4,p.y-4,8,8).fill(0xffffff).stroke({width:1.5,color:blue});}
     drawGuides();
     drawConnectPreview();
     return;
@@ -562,7 +583,6 @@ function drawSelection(): void {
 
 type Tool = "select" | "hand" | "connector" | "brush" | "highlighter" | "eraser" | WidgetType;
 let pendingConnection: Extract<Gesture,{kind:"connect"}> | null = null;
-let connectorDefault: {shape:ConnectorShape; arrow:boolean} = {shape:"curved",arrow:true};
 let tool: Tool = "select";
 let stickyStackMode=false;
 const creationStyles:Partial<Record<WidgetType,Partial<Style>>>={};
@@ -594,7 +614,7 @@ function setTool(next: Tool): void {
 }
 
 function updateCursor(): void {
-  if(gesture.kind==='pan'||gesture.kind==='drag'||gesture.kind==='bend'||gesture.kind==='reconnect'){app.canvas.style.cursor='grabbing';return;}
+  if(gesture.kind==='pan'||gesture.kind==='drag'||gesture.kind==='bend'||gesture.kind==='reconnect'||gesture.kind==='caption-drag'){app.canvas.style.cursor='grabbing';return;}
   if(gesture.kind==='resize'||gesture.kind==='multi-resize'){app.canvas.style.cursor=resizeCursor(gesture.handle,gesture.kind==='resize'?gesture.startWidget.rotation:gesture.box.rotation);return;}
   if(gesture.kind==='rotate'||gesture.kind==='multi-rotate'){app.canvas.style.cursor=ROTATE_CURSOR;return;}
   if(gesture.kind==='connect'||pendingConnection){app.canvas.style.cursor='default';return;}
@@ -663,7 +683,7 @@ function downloadBlob(blob: Blob, filename: string): void {
 }
 
 async function exportSvg(): Promise<void> {
-  const svg = await embedSvgFonts(boardToSvg(state),[...new Set([...state.widgets.values()].map(w=>w.style.fontFamily))]);
+  const svg = await embedSvgFonts(boardToSvg(state),boardFontFamilies(state.widgets.values(),state.connectors.values()));
   downloadBlob(new Blob([svg], { type: "image/svg+xml;charset=utf-8" }), "board.svg");
 }
 
@@ -768,6 +788,7 @@ type Gesture =
   | { kind: "rotate"; id: string; startWidget: Widget; grabAngle: number; moved: boolean }
   | { kind: "connect"; fromWidget: string; fromAnchor: Endpoint; current: Vec; fixed?: boolean; startedAt?:Vec;shape?:ConnectorShape;arrow?:boolean;snapDisabled?:boolean }
   | { kind: "bend"; id:string; index:number; points:Vec[] }
+  | {kind:'caption-drag';id:string;index:number;start:Vec;anchor:Vec;positions:number[];moved:boolean}
   | {kind:"multi-rotate";initial:EntitySnapshot;center:Vec;angle:number}
   | { kind: "reconnect"; id: string; which: "start" | "end"; current: Vec;snapDisabled?:boolean }
   | { kind: "draw"; points: StrokePoint[]; tool: "brush" | "highlighter"; color:string; width:number; opacity:number;precision:boolean;precisionStrength?:number;precisionSmoothing?:number }
@@ -956,6 +977,42 @@ function selectClickedEntity(id:string,event:PointerEvent):boolean{
 let liveGestureFrame=0,liveGestureUpdate:(()=>void)|null=null;
 function queueGestureUpdate(update:()=>void):void{liveGestureUpdate=update;if(!liveGestureFrame)liveGestureFrame=requestAnimationFrame(flushGestureUpdate);}
 function flushGestureUpdate():void{if(liveGestureFrame)cancelAnimationFrame(liveGestureFrame);liveGestureFrame=0;const update=liveGestureUpdate;liveGestureUpdate=null;update?.();}
+function beginCaptionDrag(c:Connector,p:Vec):boolean{
+  if(c.locked)return false;const geometry=connectorGeometry(c,state.widgets);if(!geometry)return false;
+  const index=connectorCaptionAt(c,geometry,p,4/camera.scale);if(index<0)return false;
+  const positions=(c.captions??[]).map((_,i)=>c.captionPositions?.[i]??(i+1)/((c.captions?.length??0)+1));
+  bus.beginTransaction('Mover rótulo');gesture={kind:'caption-drag',id:c.id,index,start:p,anchor:connectorPointAt(geometry,positions[index]!),positions,moved:false};updateCursor();return true;
+}
+
+let captionDraft:{input:HTMLInputElement;id:string;boardKey:string|null;fraction:number;style:NonNullable<Connector['captionStyles']>[number]}|null=null;
+function closeCaptionDraft(commit=false):void{
+  const draft=captionDraft;if(!draft)return;captionDraft=null;
+  const text=draft.input.value;draft.input.remove();
+  const c=state.connectors.get(draft.id);
+  if(commit&&text.trim()&&c&&!c.locked&&draft.boardKey===mediaBoardKey()&&!home?.transitioning()){
+    const patch=appendConnectorCaption(c,text),index=patch.captions!.length-1;
+    patch.captionPositions![index]=draft.fraction;patch.captionStyles![index]=draft.style;
+    bus.exec({op:'BATCH',payload:{label:'Adicionar texto à conexão',commands:[{op:'CONNECTOR_UPDATE',payload:{id:c.id,patch}}]}});
+  }
+}
+function positionCaptionDraft():void{
+  const draft=captionDraft;if(!draft)return;
+  const c=state.connectors.get(draft.id),geometry=c?connectorGeometry(c,state.widgets):null;
+  if(!geometry||draft.boardKey!==mediaBoardKey()){closeCaptionDraft();return;}
+  const p=camera.worldToScreen(connectorPointAt(geometry,draft.fraction)),width=Math.min(360,camera.width-32),font=Math.max(14,Math.min(64,(draft.style.fontSize??14)*camera.scale));
+  Object.assign(draft.input.style,{width:`${width}px`,fontSize:`${font}px`,left:`${Math.max(width/2+8,Math.min(camera.width-width/2-8,p.x))}px`,top:`${Math.max(36,Math.min(camera.height-36,p.y))}px`});
+}
+function openCaptionDraft(c:Connector,fraction?:number):void{
+  closeCaptionDraft(true);endEdit(true);setTool('select');if(c.locked||home?.transitioning())return;
+  const patch=appendConnectorCaption(c,''),index=patch.captions!.length-1,input=document.createElement('input');
+  input.id='connector-caption-editor';input.type='text';input.placeholder='Texto';input.setAttribute('aria-label','Texto do conector');input.autocomplete='off';
+  Object.assign(input.style,{position:'fixed',zIndex:'60',transform:'translate(-50%,-50%)',padding:'9px 12px',border:'2px solid #3859ff',borderRadius:'8px',background:'#fff',color:'#1a1a1a',boxShadow:'0 4px 18px #0002',fontFamily:patch.captionStyles![index]!.fontFamily??'Arial, sans-serif',textAlign:'center',boxSizing:'border-box'});
+  captionDraft={input,id:c.id,boardKey:mediaBoardKey(),fraction:Math.max(.02,Math.min(.98,fraction??patch.captionPositions![index]!)),style:{...patch.captionStyles![index]}};
+  document.body.append(input);positionCaptionDraft();input.focus();
+  input.addEventListener('pointerdown',event=>event.stopPropagation());
+  input.addEventListener('keydown',event=>{if(event.key==='Escape'||event.key==='Enter'){event.preventDefault();event.stopPropagation();closeCaptionDraft(event.key==='Enter');app.canvas.focus();}});
+  input.addEventListener('blur',()=>closeCaptionDraft(true));
+}
 
 app.canvas.addEventListener("contextmenu", (e) => e.preventDefault());
 
@@ -968,17 +1025,15 @@ app.canvas.addEventListener("dblclick", (e) => {
     if(c&&!c.locked){
       const geometry=connectorGeometry(c,state.widgets);
       const fraction=geometry?connectorClosestFraction(geometry,p):.5;
-      const captions=[...(c.captions??[])],positions=captions.map((_,i)=>c.captionPositions?.[i]??(i+1)/(captions.length+1));
-      let index=positions.findIndex(position=>Math.abs(position-fraction)<.08);
-      if(index<0){index=captions.length;captions.push("");positions.push(Math.max(.02,Math.min(.98,fraction)));}
-      bus.exec({op:"BATCH",payload:{label:"Editar texto da conexão",commands:[
-        {op:"CONNECTOR_UPDATE",payload:{id:c.id,patch:{captions,captionPositions:positions}}},
-        {op:"SELECTION_SET",payload:[c.id]},
-      ]}});
+      const captions=c.captions??[],positions=captions.map((_,i)=>c.captionPositions?.[i]??(i+1)/(captions.length+1));
+      const captionIndex=geometry?connectorCaptionAt(c,geometry,p,4/camera.scale):-1;
+      let index=captionIndex>=0?captionIndex:positions.findIndex(position=>Math.abs(position-fraction)<.08);
+      if(index<0){openCaptionDraft(c,fraction);return;}
+      bus.exec({op:'SELECTION_SET',payload:[c.id]});
       const panel=document.getElementById("selection-properties")!;
       panel.dataset.openMenu="captions";
       const menu=panel.querySelector<HTMLDetailsElement>('details[data-menu="captions"]');if(menu)menu.open=true;
-      panel.querySelector<HTMLInputElement>(`[data-caption-index="${index}"]`)?.focus();
+      const input=panel.querySelector<HTMLInputElement>(`[data-caption-index="${index}"]`);input?.focus();input?.select();
     }
     return;
   }
@@ -996,6 +1051,9 @@ app.canvas.addEventListener("dblclick", (e) => {
 
 app.canvas.addEventListener("pointerdown", (e) => {
   momentum.stop();
+  // Native focus blur occurs after pointerdown. Commit the draft before a new
+  // drag transaction begins, so Undo keeps text editing and movement separate.
+  closeCaptionDraft(true);
   if(e.button===2&&e.altKey&&(tool==='brush'||tool==='eraser')){
     e.preventDefault();app.canvas.setPointerCapture(e.pointerId);pointers.set(e.pointerId,{x:e.clientX,y:e.clientY});
     gesture=tool==='eraser'?{kind:'eraser-adjust',start:{x:e.clientX,y:e.clientY},radius:drawingUI?.eraserRadius()??12}:{kind:'brush-adjust',start:{x:e.clientX,y:e.clientY},tool:'brush',initial:drawingUI!.settings('brush')};brushCursor?.move(e.clientX,e.clientY);brushCursor?.adjusting(true);return;
@@ -1061,7 +1119,7 @@ app.canvas.addEventListener("pointerdown", (e) => {
   if(tool === "select" || tool === "connector") {
     const candidates=[...new Set([...(state.selection.size===1?state.selection:[]),hoveredConnectionWidget,hoverConnectionTarget(p)?.id])].flatMap(id=>{const w=id?state.widgets.get(id):undefined;return w&&!widgetHidden(w)&&!w.locked?[w]:[];});
     for(const w of candidates)for(const h of connectionHandles(w)) if(Math.hypot(h.point.x-screen.x,h.point.y-screen.y)<10){
-      connectionMagnet=null;gesture={kind:"connect",fromWidget:w.id,fromAnchor:h.anchor,current:p,fixed:true,startedAt:p,shape:'curved',arrow:true,snapDisabled:e.ctrlKey||e.metaKey};app.canvas.style.cursor='default';
+      connectionMagnet=null;gesture={kind:"connect",fromWidget:w.id,fromAnchor:h.anchor,current:p,fixed:true,startedAt:p,snapDisabled:e.ctrlKey||e.metaKey};app.canvas.style.cursor='default';
       connectPreview={from:resolveEndpoint(h.anchor,state.widgets)!,to:p};drawSelection();return;
     }
   }
@@ -1091,14 +1149,16 @@ app.canvas.addEventListener("pointerdown", (e) => {
     // 1a) pontas de conector selecionado (reconectar / soltar)
   const selectedId = [...state.selection][0];
   const selectedConn = selectedId ? state.connectors.get(selectedId) : undefined;
-  if (selectedConn && !selectedConn.locked) {
+  if (selectedConn && state.selection.size===1&&!selectedConn.locked) {
     const geometry = connectorGeometry(selectedConn, state.widgets);
     if (geometry) {
+      if(!e.shiftKey&&!e.altKey&&frontmostEntityAt(p)?.id===selectedConn.id&&beginCaptionDrag(selectedConn,p))return;
       const ends: Array<{ which: "start" | "end"; p: Vec }> = [
         { which: "start", p: geometry.points[0]! },
         { which: "end", p: geometry.points[geometry.points.length - 1]! },
       ];
       for (const { which, p: endpoint } of ends) {
+        if(!connectorControlVisible(selectedConn,geometry,endpoint,6))continue;
         const es = camera.worldToScreen(endpoint);
         if (Math.hypot(es.x - screen.x, es.y - screen.y) <= 9) {
           bus.beginTransaction("Reconectar");
@@ -1108,7 +1168,7 @@ app.canvas.addEventListener("pointerdown", (e) => {
         }
       }
       const points=connectorEditPoints(selectedConn,geometry);
-      for(let index=0;index<points.length;index++){const mid=camera.worldToScreen(points[index]!);if(Math.hypot(mid.x-screen.x,mid.y-screen.y)<9){
+      for(let index=0;index<points.length;index++){if(!connectorControlVisible(selectedConn,geometry,points[index]!))continue;const mid=camera.worldToScreen(points[index]!);if(Math.hypot(mid.x-screen.x,mid.y-screen.y)<9){
         if(e.altKey){bus.exec({op:"CONNECTOR_UPDATE",payload:{id:selectedConn.id,patch:{waypoints:points.filter((_,i)=>i!==index),controlPoint:null}}});return;}
         bus.beginTransaction("Ajustar trajetória");gesture={kind:"bend",id:selectedConn.id,index,points};return;
       }}
@@ -1153,6 +1213,7 @@ if (state.selection.size > 1) {
     const connector = front?.type==='connector'?state.connectors.get(front.id):undefined;
     if (connector) {
       if(selectClickedEntity(connector.id,e)){gesture={kind:'none'};return;}const ids=[...state.selection];
+      if(ids.length===1&&!e.shiftKey&&!e.altKey&&beginCaptionDrag(connector,p))return;
       if(!ids.some(id=>itemLocked(state,id))){bus.beginTransaction("Mover seleção");gesture={kind:"drag",ids,start:p,delta:{x:0,y:0},initial:captureSelection(state,ids),bounds:selectedBounds(state,ids)};return;}
       gesture = { kind: "none" };
       return;
@@ -1214,7 +1275,7 @@ app.canvas.addEventListener("pointermove", (e) => {
     if(nextHover!==hoveredConnectionWidget){hoveredConnectionWidget=nextHover;drawSelection();}
     const atDot=hover&&connectionHandles(hover).some(h=>Math.hypot(h.point.x-screen.x,h.point.y-screen.y)<=10);
     const selected=state.selection.size===1?state.connectors.get([...state.selection][0]!):undefined,geometry=selected&&!selected.locked?connectorGeometry(selected,state.widgets):null;
-    const grab=geometry&&[geometry.points[0]!,geometry.points.at(-1)!,...connectorEditPoints(selected!,geometry)].some(point=>{const s=camera.worldToScreen(point);return Math.hypot(s.x-screen.x,s.y-screen.y)<=10;});
+    const grab=geometry&&(connectorCaptionAt(selected!,geometry,p,4/camera.scale)>=0||[geometry.points[0]!,geometry.points.at(-1)!,...connectorEditPoints(selected!,geometry)].some(point=>{if(!connectorControlVisible(selected!,geometry,point))return false;const s=camera.worldToScreen(point);return Math.hypot(s.x-screen.x,s.y-screen.y)<=10;}));
     const locked=[...state.selection].some(id=>itemLocked(state,id)),handle=!locked?handleAtScreen(screen):null,rotating=!locked&&rotateHandleAtScreen(screen),box=state.selection.size===1?state.widgets.get([...state.selection][0]!):selectionBox();
     app.canvas.style.cursor=handle?resizeCursor(handle,box?.rotation??0):rotating?ROTATE_CURSOR:atDot?'pointer':grab?'grab':hoveredLink?'pointer':hoveredWidget?.locked?'not-allowed':hoveredWidget?(isFreeText(hoveredWidget)&&state.selection.has(hoveredWidget.id)?'text':'move'):tool==='shape'?'crosshair':'default';
   }
@@ -1229,6 +1290,12 @@ app.canvas.addEventListener("pointermove", (e) => {
     }
     case 'eraser-adjust':drawingUI?.adjustEraserRadius(gesture.radius+(e.clientX-gesture.start.x)*.5,false);brushCursor?.update();return;
     case "bend": {const id=gesture.id,index=gesture.index,c=state.connectors.get(id),points=gesture.points.map((v,i)=>i===index?p:v);const singleCurve=(c?.shape==='curved'||c?.shape==='elbowed')&&!c.waypoints?.length&&points.length===1;const patch=singleCurve?{controlPoint:points[0],waypoints:null}:{waypoints:points,controlPoint:null,...(c?.shape==="straight"?{shape:"curved" as const}:{})};queueGestureUpdate(()=>bus.exec({op:'CONNECTOR_UPDATE',payload:{id,patch}}));return;}
+    case 'caption-drag':{
+      const moving=gesture,c=state.connectors.get(moving.id),geometry=c&&!c.locked?connectorGeometry(c,state.widgets):null;if(!geometry)return;
+      const dx=p.x-moving.start.x,dy=p.y-moving.start.y;if(!moving.moved&&Math.hypot(dx,dy)*camera.scale<2)return;moving.moved=true;
+      const fraction=Math.max(.02,Math.min(.98,connectorClosestFraction(geometry,{x:moving.anchor.x+dx,y:moving.anchor.y+dy}))),captionPositions=moving.positions.map((value,i)=>i===moving.index?fraction:value);
+      queueGestureUpdate(()=>{const current=state.connectors.get(moving.id);if(current&&!current.locked)bus.exec({op:'CONNECTOR_UPDATE',payload:{id:moving.id,patch:{captionPositions}}});});return;
+    }
     case "multi-rotate":{let angle=Math.atan2(p.y-gesture.center.y,p.x-gesture.center.x)-gesture.angle;if(e.shiftKey)angle=Math.round(angle/(Math.PI/12))*Math.PI/12;bus.exec({op:"BATCH",payload:{label:"Girar seleção",commands:transformSnapshot(state,gesture.initial,0,0,1,1,gesture.center,angle)}});return;}
     case "create": {
       let dx = p.x - gesture.start.x, dy = p.y - gesture.start.y;
@@ -1454,10 +1521,11 @@ function endGesture(e: PointerEvent): void {
         if (Math.hypot(finish.x-startPoint.x,finish.y-startPoint.y)*camera.scale > 4) {
           const startAnchor = source ? (gesture.fixed ? gesture.fromAnchor : facingAnchor(source,target ? widgetCenter(target) : finish)) : null;
           const endAnchor = target ? picked!.anchor : null;
+          const defaults=connectorDefaults();
           const connector: Connector = {id:crypto.randomUUID(),type:"connector",
             start:source && startAnchor ? {kind:"anchor",widgetId:source.id,...startAnchor} : origin,
             end:target && endAnchor ? {kind:"anchor",widgetId:target.id,...endAnchor} : {kind:"point",...finish},
-            shape:gesture.shape??connectorDefault.shape,style:{strokeColor:"#1a1a1a",strokeWidth:2,endCap:(gesture.arrow??connectorDefault.arrow)?"arrow":"none"},z:0};
+            shape:gesture.shape??defaults.shape,style:{...defaults.style,...(gesture.arrow===undefined?{}:{endCap:gesture.arrow?'arrow':'none'})},z:0};
           bus.exec({op:"BATCH",payload:{label:"Criar conexão",commands:[
             {op:"CONNECTOR_CREATE",payload:connector},
             {op:"SELECTION_SET",payload:[connector.id]},
@@ -1716,7 +1784,7 @@ async function copySelectionImage(){
     return [id,{...c,start:endpoint(c.start),end:endpoint(c.end)}] as const;
   });
   const subset={...state,widgets:new Map([...state.widgets].filter(([id])=>state.selection.has(id))),order:state.order.filter(id=>state.selection.has(id)),connectors:new Map(selectedConnectors),connectorOrder:state.connectorOrder.filter(id=>state.selection.has(id)),strokes:new Map([...state.strokes].filter(([id])=>state.selection.has(id))),strokeOrder:state.strokeOrder.filter(id=>state.selection.has(id))};
-  const svg=boundedSvgBitmap(await embedSvgFonts(boardToSvg(subset,{background:"none"}),[...subset.widgets.values()].map(w=>w.style.fontFamily))),url=URL.createObjectURL(new Blob([svg],{type:"image/svg+xml"}));
+  const svg=boundedSvgBitmap(await embedSvgFonts(boardToSvg(subset,{background:"none"}),boardFontFamilies(subset.widgets.values(),subset.connectors.values()))),url=URL.createObjectURL(new Blob([svg],{type:"image/svg+xml"}));
   try{const img=new Image();img.src=url;await img.decode();const canvas=document.createElement("canvas"),scale=Math.min(2,4096/Math.max(img.width,img.height));canvas.width=Math.max(1,Math.ceil(img.width*scale));canvas.height=Math.max(1,Math.ceil(img.height*scale));canvas.getContext("2d")!.drawImage(img,0,0,canvas.width,canvas.height);const blob=await new Promise<Blob|null>(resolve=>canvas.toBlob(resolve));if(blob){try{await navigator.clipboard.write([new ClipboardItem({"image/png":blob})]);}catch{downloadBlob(blob,"selecao.png");}}}finally{URL.revokeObjectURL(url);}
 }
 // Local editor controls
@@ -1729,7 +1797,7 @@ mindImagePicker.addEventListener('change',()=>{const files=Array.from(mindImageP
 mindmapUI=installMindmapUI({state,bus,camera,setTool:t=>setTool(t),getTool:()=>tool,onEdit:id=>{const w=state.widgets.get(id);if(w&&!w.locked)beginEdit(w);},onLink:()=>linkUI?.open(),onImage:parentId=>{mindImageTarget={parentId,boardKey:mediaBoardKey()};mindImagePicker.click();},onChange:()=>{syncScene();drawSelection();refreshChrome();}});
 linkUI=installLinkUI({state,bus,camera,getBoardKey:mediaBoardKey,getEditor:()=>editor,commitEditor:()=>endEdit(true),onChange:()=>{syncScene();drawSelection();refreshChrome();}});
 audioUI=installAudio({state,bus,camera,getTool:()=>tool,setTool:t=>setTool(t),getBoardKey:mediaBoardKey,onChange:()=>{syncScene();drawSelection();refreshChrome();}});
-structuredUI=installStructuredTextUI({state,bus,camera,getTool:()=>tool,setTool:t=>setTool(t as Tool),onChange:()=>{syncScene();drawSelection();refreshChrome();}});
+structuredUI=installStructuredTextUI({state,bus,camera,getTool:()=>tool,isInteracting:()=>gesture.kind!=='none'||momentum.active,setTool:t=>setTool(t as Tool),onChange:()=>{syncScene();drawSelection();refreshChrome();}});
 connectorCompletion=installConnectorCompletion({state,bus,camera});
 const imagePicker = document.createElement("input");
 let imagePickerBoardKey:string|null=null;
@@ -1737,9 +1805,18 @@ imagePicker.type="file"; imagePicker.accept="image/*"; imagePicker.multiple=true
 imagePicker.addEventListener("change",()=>{const boardKey=imagePickerBoardKey;if(imagePicker.files) void images?.importFiles(imagePicker.files,{canInsert:()=>boardKey===mediaBoardKey()}); imagePicker.value="";});
 editorUI = installEditorUI({state,bus,camera,setTool:t=>setTool(t as Tool),getTool:()=>tool,
   entityAt:p=>frontmostEntityAt(p)?.id,
-  isTransforming:()=>['drag','resize','multi-resize','rotate','multi-rotate','bend','reconnect'].includes(gesture.kind),
+  isTransforming:()=>['drag','resize','multi-resize','rotate','multi-rotate','bend','reconnect','caption-drag'].includes(gesture.kind),
+  onNewConnectorCaption:()=>{const c=state.selection.size===1?state.connectors.get([...state.selection][0]!):undefined;if(c)openCaptionDraft(c);},
+  canInsertConnectorObject:choice=>{const c=state.selection.size===1?state.connectors.get([...state.selection][0]!):undefined;return !!c&&canInsertConnectorObject(state,c,choice,camera.scale);},
+  onInsertConnectorObject:choice=>{
+    const c=state.selection.size===1?state.connectors.get([...state.selection][0]!):undefined;
+    const plan=c?connectorInsertion(state,c,choice,camera.scale):null;if(!plan)return false;
+    endEdit(true);setTool('select');
+    bus.exec({op:'BATCH',payload:{label:'Inserir objeto na conexão',commands:plan.commands}});
+    const widget=state.widgets.get(plan.widgetId);if(widget)beginEdit(widget);return !!widget;
+  },
   onLink:()=>linkUI?.open(),
-  setConnectorDefault:options=>{connectorDefault=options;},
+  setConnectorDefault:options=>{rememberConnectorDefaults({shape:options.shape,style:{endCap:options.arrow?'arrow':'none'}});},
   onStyleDefaults:(type,patch)=>{creationStyles[type]={...creationStyles[type],...patch};},
   setStickyStackMode:enabled=>{stickyStackMode=enabled;},
   setShape:s=>{selectedShape=s;},getShape:()=>selectedShape,onImage:()=>{imagePickerBoardKey=mediaBoardKey();imagePicker.click();},
@@ -1791,8 +1868,9 @@ app.ticker.add(() => {
         positionEditor(w);
       }
     }
+    positionCaptionDraft();
     syncScene();
-    brushPreview.request();brushCursor?.update();creationPreview.refresh();mindmapUI?.refresh();audioUI?.refresh();structuredUI?.refresh();
+    brushPreview.request();brushCursor?.update();creationPreview.refresh();mindmapUI?.refresh();
     if (state.selection.size > 0) {drawSelection();positionContextPanel(document.getElementById("selection-properties")!,state,camera);}
   }
 
@@ -1824,10 +1902,10 @@ app.ticker.add(() => {
 home=installBoardHome({capture:savedBoard,afterTransition:()=>refreshChrome(),beforeTransition:()=>{momentum.stop();audioUI?.pauseAll();flushGestureUpdate();endEdit(true);editorUI?.finalizePropertyGestures();bus.endTransaction();gesture={kind:'none'};pointers.clear();brushPreview.clear();creationPreview.clear();connectorCompletion?.close();},open:async data=>{
   if(saveTimer){clearTimeout(saveTimer);saveTimer=null;}endEdit(true);bus.endTransaction();gesture={kind:"none"};isolatedGroup=null;
   await restoreUserFonts((data as SavedBoard).userFonts);
-  await Promise.all([...new Set((data as SavedBoard).widgets.map(w=>(w as Widget).style.fontFamily))].map(loadBoardFont));
+  await Promise.all(boardFontFamilies((data as SavedBoard).widgets as Widget[],(data as SavedBoard).connectors as Connector[]).map(loadBoardFont));
   if(!loadBoard(data as SavedBoard))throw new Error("Não foi possível abrir este board.");
   setTool("select");gridDirty=true;syncScene();drawGrid();drawSelection();refreshChrome();
-},thumbnail:async()=>{const svg=boundedSvgBitmap(await embedSvgFonts(boardToSvg(state,{padding:30}),[...state.widgets.values()].map(w=>w.style.fontFamily)),1024,1024*1024);return 'data:image/svg+xml;base64,'+btoa(unescape(encodeURIComponent(svg)));},importFile:()=>projectFiles.open(),exportCurrent:()=>projectFiles.save()});
+},thumbnail:async()=>{const svg=boundedSvgBitmap(await embedSvgFonts(boardToSvg(state,{padding:30}),boardFontFamilies(state.widgets.values(),state.connectors.values())),1024,1024*1024);return 'data:image/svg+xml;base64,'+btoa(unescape(encodeURIComponent(svg)));},importFile:()=>projectFiles.open(),exportCurrent:()=>projectFiles.save()});
 const bootPromise=home.start();
 
 (window as unknown as { __board: unknown }).__board = {

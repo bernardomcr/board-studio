@@ -68,8 +68,7 @@ test('connector paths, patterns, terminations and positioned labels persist',asy
   await menu(page,'end-cap');await page.getByRole('button',{name:'Fim da linha: losango',exact:true}).click();
   await menu(page,'stroke');await page.getByRole('button',{name:'Estilo da linha: pontilhada',exact:true}).click();
   await menu(page,'route');await page.getByRole('button',{name:'Adicionar ponto',exact:true}).click();
-  await menu(page,'captions');await page.getByRole('button',{name:'Adicionar rótulo',exact:true}).click();
-  await page.getByRole('textbox',{name:'Rótulo 1',exact:true}).fill('Uma ligação');await page.getByRole('textbox',{name:'Rótulo 1',exact:true}).press('Tab');
+  await page.getByRole('button',{name:'Adicionar texto ao conector',exact:true}).click();await page.locator('#connector-caption-editor').fill('Uma ligação');await page.locator('#connector-caption-editor').press('Enter');await menu(page,'captions');
   await page.getByRole('spinbutton',{name:'Posição do rótulo 1',exact:true}).fill('30');await page.getByRole('spinbutton',{name:'Posição do rótulo 1',exact:true}).press('Tab');
   await page.evaluate(()=>window.__board.saveNow());await page.reload();await page.waitForFunction(()=>window.__board?.booted);
   const c=await page.evaluate(()=>window.__board.state.connectors.get('link'));expect(c.style.endCap).toBe('diamond');expect(c.style.strokeStyle).toBe('dotted');expect(c.waypoints.length).toBeGreaterThan(0);expect(c.captions).toEqual(['Uma ligação']);expect(c.captionPositions).toEqual([.3]);
@@ -100,22 +99,19 @@ test('all font choices load real local faces and rich formatting round-trips',as
   expect(result.count).toBe(25);expect(result.loaded).toBe(true);expect(result.run).toMatchObject({text:'Ação',bold:true,italic:true,underline:true});
 });
 
-test('image originals, masks, flips, crop and replacement survive reload and export',async({page})=>{
+test('image originals, masks, legacy flips and crop survive reload and export',async({page})=>{
   await blank(page);const original=await importImage(page);
   await page.getByRole('button',{name:'Recortar',exact:true}).click();await page.getByRole('button',{name:'4:3',exact:true}).click();await page.getByRole('button',{name:'Aplicar recorte',exact:true}).click();
-  await menu(page,'image');await page.getByRole('button',{name:'Máscara da imagem: elipse / círculo',exact:true}).click();await page.getByRole('button',{name:'Espelhar ↔',exact:true}).click();
-  await menu(page,'image');await number(page,'Opacidade da imagem','65');
+  await menu(page,'image');await page.getByRole('button',{name:'Máscara da imagem: elipse / círculo',exact:true}).click();await page.evaluate(()=>{const b=window.__board,id=[...b.state.selection][0];b.bus.exec({op:'WIDGET_UPDATE',payload:{id,patch:{flipX:true}}});});
+  await menu(page,'image-opacity');await number(page,'Opacidade da imagem','65');
   await page.evaluate(()=>window.__board.saveNow());await page.reload();await page.waitForFunction(()=>window.__board?.booted);
   const result=await page.evaluate(async()=>{const s=window.__board.state,w=[...s.widgets.values()].find(w=>w.type==='image'),{boardToSvg}=await import('/src/core/exportSvg.ts');return {w,svg:boardToSvg(s)};});
   expect(result.w).toMatchObject({naturalWidth:3200,maskShape:'ellipse',flipX:true,opacity:.65});expect(result.w.src).toBe(original.src);expect(result.w.crop.width).toBeLessThan(1);expect(result.svg).toContain('<ellipse');expect(result.svg).toContain('scale(-1,1)');
-  await select(page,[original.id]);await menu(page,'image');const chooser=page.waitForEvent('filechooser');await page.getByRole('button',{name:'Substituir imagem',exact:true}).click();await(await chooser).setFiles({name:'replacement.svg',mimeType:'image/svg+xml',buffer:Buffer.from('<svg xmlns="http://www.w3.org/2000/svg" width="600" height="400"><rect width="600" height="400" fill="#68c79b"/></svg>')});
-  await expect.poll(()=>page.evaluate(id=>window.__board.state.widgets.get(id).naturalWidth,original.id)).toBe(600);
-  expect(await page.evaluate(id=>window.__board.state.widgets.get(id).crop,original.id)).toEqual({x:0,y:0,width:1,height:1});
 });
 
 test('circular image crop and custom borders use the actual menus, undo and SVG',async({page})=>{
   await blank(page);const original=await importImage(page,1600,900);
-  await menu(page,'image');await page.getByRole('button',{name:'Recortar em círculo',exact:true}).click();
+  await page.getByRole('button',{name:'Recortar',exact:true}).click();await page.getByRole('dialog',{name:'Recortar imagem'}).getByRole('button',{name:'Círculo',exact:true}).click();
   const crop=page.getByRole('dialog',{name:'Recortar imagem'});await expect(crop.getByRole('button',{name:'Círculo',exact:true})).toHaveAttribute('aria-pressed','true');await expect(crop.getByRole('button',{name:'4:3',exact:true})).toBeDisabled();
   const region=crop.locator('[data-region]'),box=await region.boundingBox();expect(box.width).toBeCloseTo(box.height,1);
   await page.mouse.move(box.x+box.width/2,box.y+box.height/2);await page.mouse.down();await page.mouse.move(box.x+box.width/2+35,box.y+box.height/2,{steps:8});await page.mouse.up();
@@ -127,7 +123,7 @@ test('circular image crop and custom borders use the actual menus, undo and SVG'
   await menu(page,'border');await page.getByRole('button',{name:'Cor da borda: rosa',exact:true}).click();
   await page.locator('input[type="color"][aria-label="Cor da borda"]').evaluate(input=>{input.value='#d0296b';input.dispatchEvent(new Event('change',{bubbles:true}));});
   await page.getByRole('button',{name:'Borda média',exact:true}).click();await page.getByRole('button',{name:'Estilo da borda: tracejada',exact:true}).click();await number(page,'Opacidade da borda','0.8');
-  await menu(page,'image');await number(page,'Opacidade da imagem','45');await page.getByRole('button',{name:'Espelhar ↔',exact:true}).click();
+  await menu(page,'image-opacity');await number(page,'Opacidade da imagem','45');await page.evaluate(()=>{const b=window.__board,id=[...b.state.selection][0];b.bus.exec({op:'WIDGET_UPDATE',payload:{id,patch:{flipX:true}}});});
   await menu(page,'border');await page.screenshot({path:'../work/v5-ui-image-border.png'});
   const result=await page.evaluate(async()=>({w:[...window.__board.state.widgets.values()].find(w=>w.type==='image'),svg:(await import('/src/core/exportSvg.ts')).boardToSvg(window.__board.state)}));
   expect(result.w.style).toMatchObject({borderScale:.02,borderColor:'#d0296b',borderStyle:'dashed',borderOpacity:.8});expect(result.w.style.borderWidth).toBeCloseTo(Math.min(result.w.width,result.w.height)*.02,6);expect(result.w.opacity).toBe(.45);expect(result.svg).toContain('stroke-dasharray=');expect(result.svg).toContain('stroke-opacity="0.8"');expect(result.svg).toContain('opacity="0.45"');
@@ -189,7 +185,7 @@ test('connector drag and click handles offer destinations, preserve free ends an
   await select(page,['source']);await page.mouse.click(750,555);await expect(completion).toBeVisible();expect(await page.evaluate(()=>window.__board.state.connectors.size)).toBe(1);
   await page.mouse.click(1300,800);await expect(completion).toBeHidden();expect(await page.evaluate(()=>[...window.__board.state.connectors.values()][0].end.kind)).toBe('point');expect(await page.evaluate(()=>window.__board.state.widgets.size)).toBe(1);
   const point=await page.evaluate(async()=>{const b=window.__board,c=[...b.state.connectors.values()][0],m=await import('/src/core/connectors.ts');return b.camera.worldToScreen(m.connectorPointAt(m.connectorGeometry(c,b.state.widgets),.4));});
-  await page.mouse.dblclick(point.x,point.y);const label=page.getByRole('textbox',{name:'Rótulo 1',exact:true});await expect(label).toBeFocused();await label.fill('Relação');await label.press('Tab');
+  await page.mouse.dblclick(point.x,point.y);const label=page.locator('#connector-caption-editor');await expect(label).toBeFocused();await label.fill('Relação');await label.press('Enter');
   result=await page.evaluate(()=>({widgets:[...window.__board.state.widgets.values()],c:[...window.__board.state.connectors.values()][0]}));expect(result.c.captions).toEqual(['Relação']);expect(result.c.captionPositions[0]).toBeCloseTo(.4,1);await page.screenshot({path:'../work/v5-ui-connector-label.png'});
 });
 

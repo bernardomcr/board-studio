@@ -46,10 +46,6 @@ async function imported(page){
   await expect.poll(()=>page.evaluate(()=>window.__board.state.widgets.size)).toBe(1);
   return await page.evaluate(()=>[...window.__board.state.widgets.values()][0]);
 }
-async function imageMenu(page){
-  const menu=page.locator('#selection-properties details[data-menu="image"]');
-  if(!await menu.evaluate(element=>element.open))await menu.locator('summary').click();
-}
 async function snapshot(page){return await page.evaluate(()=>{
   const b=window.__board,s=b.state;
   return JSON.stringify({widgets:[...s.widgets],order:s.order,connectors:[...s.connectors],connectorOrder:s.connectorOrder,strokes:[...s.strokes],strokeOrder:s.strokeOrder,groups:[...s.groups],selection:[...s.selection],background:s.background,camera:{x:b.camera.x,y:b.camera.y,scale:b.camera.scale},title:document.getElementById('board-title').textContent,undo:b.bus.undoStack.length,redo:b.bus.redoStack.length});
@@ -125,37 +121,6 @@ test('background import cannot replace another board background after a pending 
   await page.getByRole('button',{name:'Fundo do board',exact:true}).click();
   await expect(page.getByRole('alert').filter({hasText:'O board mudou'})).toBeVisible();
   await reopenOrigin(page);expect(await page.evaluate(()=>window.__board.state.background.image)).toBeUndefined();
-});
-
-for(const change of ['lock','remove','board'])test(`pending image replacement revalidates its original target after ${change}`,async({page})=>{
-  await blank(page);const original=await imported(page),replacement=await image(page,180,100);
-  await delayDecode(page,replacement.src);await imageMenu(page);
-  await choose(page,page.getByRole('button',{name:'Substituir imagem',exact:true}),replacement.file);
-  await decoding(page);
-  if(change==='board'){
-    await another(page);
-    // Deliberately reuse the ID: looking up the selected ID alone is unsafe.
-    await page.evaluate(original=>window.__board.bus.exec({op:'WIDGET_CREATE',payload:original}),original);
-  }else await page.evaluate(({id,change})=>{
-    const b=window.__board;
-    b.bus.exec(change==='lock'?{op:'WIDGET_UPDATE',payload:{id,patch:{locked:true}}}:{op:'WIDGET_REMOVE',payload:id});
-  },{id:original.id,change});
-  const before=await snapshot(page);await releaseDecode(page);expect(await snapshot(page)).toBe(before);
-  if(change==='board'){
-    await reopenOrigin(page);
-    expect(await page.evaluate(id=>window.__board.state.widgets.get(id).src,original.id)).toBe(original.src);
-  }
-});
-
-test('an older pending replacement cannot overwrite a newer replacement that has already finished',async({page})=>{
-  await blank(page);const original=await imported(page),older=await image(page,180,100),newer=await image(page,300,200);
-  await delayDecode(page,older.src);await imageMenu(page);
-  await choose(page,page.getByRole('button',{name:'Substituir imagem',exact:true}),older.file);
-  await decoding(page);await imageMenu(page);
-  await choose(page,page.getByRole('button',{name:'Substituir imagem',exact:true}),newer.file);
-  await expect.poll(()=>page.evaluate(id=>window.__board.state.widgets.get(id).src,original.id)).toBe(newer.src);
-  const before=await snapshot(page);await releaseDecode(page);
-  expect(await snapshot(page)).toBe(before);
 });
 
 test('crop apply cannot change an image locked while the crop dialog was open',async({page})=>{

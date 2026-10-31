@@ -12,7 +12,7 @@ import {
   type Connector,
   type Endpoint,
 } from "./connectors";
-import type { Stroke } from "./strokes";
+import {inheritStrokeFittingCache,type Stroke} from "./strokes";
 import { DEFAULT_BACKGROUND, validateBoardBackground, type BoardBackground, type BackgroundPatch } from "./background";
 import { isFreeText,naturalText } from './text-layout';
 import { relativeBorderScale } from './style-scale';
@@ -67,6 +67,38 @@ export interface ExecutedCommand {
   undo: () => void;
 }
 
+/** Absolute updates in one pointer gesture supersede the preceding frame.
+ * Preserve normalized patches for journal replay, the first inverse, and the
+ * last complete redo. Creates, selections and additive moves are barriers. */
+function mergeAbsoluteUpdates(before:Command,after:Command):Command|null {
+  if(before.op!==after.op)return null;
+  if(after.op==='BATCH'){
+    const a=before.payload as {label?:string;commands:Command[]},b=after.payload as {label?:string;commands:Command[]};
+    if(a.commands.length!==b.commands.length||!b.commands.length)return null;
+    const commands:Command[]=[];
+    for(let i=0;i<b.commands.length;i++){const merged=mergeAbsoluteUpdates(a.commands[i]!,b.commands[i]!);if(!merged)return null;commands.push(merged);}
+    return {op:'BATCH',payload:{label:b.label??a.label,commands}};
+  }
+  if(!['WIDGET_UPDATE','CONNECTOR_UPDATE','STROKE_UPDATE'].includes(after.op))return null;
+  const a=before.payload as {id:string;patch:Record<string,unknown>},b=after.payload as {id:string;patch:Record<string,unknown>};
+  if(a.id!==b.id)return null;
+  return {op:after.op,payload:{id:b.id,patch:{...a.patch,...b.patch}}};
+}
+
+function retainGestureEntry(entries:ExecutedCommand[],entry:ExecutedCommand):void {
+  const previous=entries.at(-1),merged=previous&&mergeAbsoluteUpdates(previous.command,entry.command);
+  if(previous&&merged)entries[entries.length-1]={label:entry.label,command:merged,undo:previous.undo,redo:entry.redo};
+  else entries.push(entry);
+}
+
+function inheritDrawingCaches(source:Command,target:Command):void {
+  if(source.op==='STROKE_CREATE'&&target.op==='STROKE_CREATE')inheritStrokeFittingCache(source.payload as Stroke,target.payload as Stroke);
+  else if(source.op==='BATCH'&&target.op==='BATCH'){
+    const a=(source.payload as {commands:Command[]}).commands,b=(target.payload as {commands:Command[]}).commands;
+    for(let i=0;i<a.length;i++)inheritDrawingCaches(a[i]!,b[i]!);
+  }
+}
+
 function removeGroupMember(state:BoardState,id:string):void {
   let gone=[id];while(gone.length){const next:string[]=[];for(const [gid,members] of state.groups){const remaining=members.filter(m=>!gone.includes(m));if(!remaining.length){state.groups.delete(gid);next.push(gid);}else if(remaining.length!==members.length)state.groups.set(gid,remaining);}gone=next;}
 }
@@ -95,14 +127,16 @@ export class CommandBus {
 
   exec(command: Command): void {
     if(!this.canMutate())return;
-    command=structuredClone(command);
+    const source=command;command=structuredClone(command);inheritDrawingCaches(source,command);
     const executed = this.execute(command);
     if (!executed) return;
     executed.redo();
     // Choosing an object must neither consume Undo nor discard content Redo.
     // Selection inside a content BATCH is still restored with that operation.
     if(command.op==='SELECTION_SET'&&!this.transaction){this.onChange();return;}
-    if (this.transaction) this.transaction.entries.push({ ...executed, command });
+    if (this.transaction) {
+      retainGestureEntry(this.transaction.entries,{ ...executed, command });
+    }
     else this.pushUndo({ ...executed, command });
     if(command.op!=='SELECTION_SET')this.redoStack.length = 0;
     this.onChange();
@@ -145,7 +179,8 @@ export class CommandBus {
         return { command, label: "Alterar fundo", redo: () => { s.background = structuredClone(after); }, undo: () => { if (before) s.background = structuredClone(before); else delete s.background; } };
       }
       case "BATCH": {
-        const { label, commands } = command.payload as { label?: string; commands: Command[] };
+        const { label } = command.payload as { label?: string; commands: Command[] };
+        let commands=(command.payload as {commands:Command[]}).commands;
         let entries: ExecutedCommand[] | null = null;
         return {
           command,
@@ -157,8 +192,14 @@ export class CommandBus {
               entries = [];
               for (const child of commands) {
                 const entry = this.execute(child);
-                if (entry) { entry.redo(); entries.push(entry); }
+                if (entry) { entry.redo(); retainGestureEntry(entries,entry); }
               }
+              // Legacy journals contain one complete update per pointer frame.
+              // Normalize by executing them first (font/size patches can have
+              // implicit effects), then retain only the equivalent compact form.
+              // External Undo boundaries and non-update barriers stay intact.
+              command.payload={label,commands:entries.map(entry=>entry.command)};
+              commands=[];
             }
           },
           undo: () => { for (const entry of [...(entries ?? [])].reverse()) entry.undo(); },
@@ -388,7 +429,8 @@ export class CommandBus {
           if(style.borderScale!==undefined)style.borderWidth=style.borderScale*Math.min(patch.width??widget.width,patch.height??widget.height);
           patch.style=style;
         }
-        if(isFreeText({...widget,...patch} as Widget)){
+        const textLayoutChanged=sized||incoming.style!==undefined||incoming.type!==undefined||'content' in incoming||incoming.textSizing!==undefined;
+        if(textLayoutChanged&&isFreeText({...widget,...patch} as Widget)){
           const style={...(patch.style??widget.style)};
           if(sized&&incoming.style?.fontSize===undefined){const ratio=incoming.width!==undefined?incoming.width/widget.width:(incoming.height??widget.height)/widget.height;const fontSize=widget.style.fontSize*ratio;if(Number.isFinite(fontSize))style.fontSize=Math.max(.1,fontSize);}
           const text=naturalText({...widget,...patch,style} as TextWidget);

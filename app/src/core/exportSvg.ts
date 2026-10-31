@@ -5,9 +5,10 @@
  */
 
 import { connectorSvgContent } from "../render/connector-paint";
+import {connectorCaptionBounds,connectorCaptionLayout} from './connector-captions';
 import type { BoardState } from "./commands";
 import {
-  connectorBounds,
+  connectorVisualBounds,
   connectorGeometry,
   type Connector,
 } from "./connectors";
@@ -48,7 +49,7 @@ export function boardToSvg(state: BoardState, options: Options = {}): string {
   for (const c of state.connectors.values()) {
     if(c.hidden||mindConnectorHidden(state,c))continue;
     const geometry = connectorGeometry(c, state.widgets);
-    if (geometry) rects.push(connectorBounds(geometry));
+    if (geometry){rects.push(connectorVisualBounds(c,geometry));const captions=connectorCaptionBounds(connectorCaptionLayout(c,geometry));if(captions)rects.push(captions);}
   }
   for (const s of state.strokes.values()) if(!s.hidden)rects.push(strokeBounds(s));
 

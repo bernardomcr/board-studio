@@ -1,8 +1,10 @@
 import {Container,Graphics,Text} from 'pixi.js';
+import {destroyDisplayTree} from './destroy-tree';
 import type {Widget} from '../core/model';
 import {checklistLayout,tableLayout,type LocalRect} from '../core/structured-text';
 import {resolvedWidgetStyle} from '../core/style-scale';
 import {TEXT_SAMPLING,fitTextResolution} from './text-quality';
+import {screenStroke} from './screen-coverage';
 
 const cache=new WeakMap<Container,string>();
 function headerText(color:string){const value=parseInt(color.slice(1),16),luma=.2126*(value>>16)+.7152*(value>>8&255)+.0722*(value&255);return luma>155?'#242832':'#ffffff';}
@@ -11,12 +13,12 @@ function textInCell(target:Container,w:Widget,value:string,rect:LocalRect,resolu
  const cell=new Container(),mask=new Graphics().rect(rect.x,rect.y,rect.width,rect.height).fill('#ffffff');cell.addChild(node);target.addChild(cell,mask);cell.mask=mask;return node;
 }
 /** Return true when ordinary rich text must be replaced by this structured view. */
-export function renderStructuredText(target:Container,w:Widget,resolution:number):boolean{
+export function renderStructuredText(target:Container,w:Widget,resolution:number,zoom=1):boolean{
  if(!w.checklist&&!w.table){cache.delete(target);return false;}
- const key=JSON.stringify([w.checklist,w.table,w.width,w.height,w.style,resolution]);target.position.set(0,0);if(cache.get(target)===key)return true;cache.set(target,key);for(const child of target.removeChildren())child.destroy({children:true});
+ const key=JSON.stringify([w.checklist,w.table,w.width,w.height,w.style,resolution,zoom,globalThis.devicePixelRatio||1]);target.position.set(0,0);if(cache.get(target)===key)return true;cache.set(target,key);for(const child of target.removeChildren())destroyDisplayTree(child);
  const style=resolvedWidgetStyle(w),graphics=new Graphics();target.addChild(graphics);
- if(w.checklist){for(const row of checklistLayout(w)){const {box,item}=row;graphics.roundRect(box.x,box.y,box.width,box.height,Math.min(4,box.width*.2));if(item.checked){graphics.fill('#4262ff');graphics.moveTo(box.x+box.width*.22,box.y+box.height*.52).lineTo(box.x+box.width*.44,box.y+box.height*.72).lineTo(box.x+box.width*.8,box.y+box.height*.28).stroke({width:Math.max(.001,box.width*.1),color:'#ffffff',cap:'round',join:'round'});}else graphics.stroke({width:Math.max(.001,box.width*.07),color:'#9aa3b2'});const node=textInCell(target,w,item.text,row.text,resolution,style.color);if(item.checked&&node){node.alpha=.55;graphics.moveTo(row.text.x+Math.min(12,row.text.width*.08),row.text.y+row.text.height/2).lineTo(row.text.x+Math.min(row.text.width,node.width+12),row.text.y+row.text.height/2).stroke({width:Math.max(.5,w.style.fontSize/18),color:style.color,alpha:.5});}}return true;}
- const table=w.table!,layout=tableLayout(w),stroke={width:style.borderWidth,color:style.borderColor,alpha:style.borderOpacity??1};if(layout.title)textInCell(target,w,table.title,layout.title,resolution,style.color,true);
+ if(w.checklist){for(const row of checklistLayout(w)){const {box,item}=row;graphics.roundRect(box.x,box.y,box.width,box.height,Math.min(4,box.width*.2));if(item.checked){graphics.fill('#4262ff');graphics.moveTo(box.x+box.width*.22,box.y+box.height*.52).lineTo(box.x+box.width*.44,box.y+box.height*.72).lineTo(box.x+box.width*.8,box.y+box.height*.28).stroke({...screenStroke(Math.max(.001,box.width*.1),zoom),color:'#ffffff',cap:'round',join:'round'});}else graphics.stroke({...screenStroke(Math.max(.001,box.width*.07),zoom),color:'#9aa3b2'});const node=textInCell(target,w,item.text,row.text,resolution,style.color);if(item.checked&&node){node.alpha=.55;graphics.moveTo(row.text.x+Math.min(12,row.text.width*.08),row.text.y+row.text.height/2).lineTo(row.text.x+Math.min(row.text.width,node.width+12),row.text.y+row.text.height/2).stroke({...screenStroke(Math.max(.5,w.style.fontSize/18),zoom,undefined,.5),color:style.color});}}return true;}
+ const table=w.table!,layout=tableLayout(w),stroke={...screenStroke(style.borderWidth,zoom,undefined,style.borderOpacity??1),color:style.borderColor};if(layout.title)textInCell(target,w,table.title,layout.title,resolution,style.color,true);
  const top=layout.title?.height??0,rows=table.cells.length,columns=table.cells[0]!.length,rowHeight=(w.height-top)/rows,cellWidth=w.width/columns;graphics.rect(0,top,w.width,rowHeight).fill({color:table.headerColor,alpha:style.fillOpacity});
  if(style.borderWidth>0){for(let row=layout.title?0:1;row<rows;row++)graphics.moveTo(0,top+row*rowHeight).lineTo(w.width,top+row*rowHeight).stroke(stroke);for(let column=1;column<columns;column++)graphics.moveTo(column*cellWidth,top).lineTo(column*cellWidth,w.height).stroke(stroke);}
  for(const cell of layout.cells)textInCell(target,w,cell.text,cell.rect,resolution,cell.row===0?headerText(table.headerColor):style.color,cell.row===0);return true;
