@@ -138,7 +138,7 @@ export function validateBoardFile(value: unknown): BoardFile {
     camera: { x: number(camera.x), y: number(camera.y), scale: number(camera.scale, MIN_SCALE, MAX_SCALE) } };
 }
 
-export function installProjectFiles(api: { state: BoardState; bus: CommandBus; camera: Camera; sync(): void }) {
+export function installProjectFiles(api: { state: BoardState; bus: CommandBus; camera: Camera; sync(): void;getBoardKey?():string|null }) {
   const { state, bus, camera } = api;
   const container = document.createElement("div"); container.className = "chip";
   const status = document.createElement("span"); status.setAttribute("role", "status"); status.style.cssText = "font-size:12px;color:#73726c;max-width:200px";
@@ -158,13 +158,15 @@ export function installProjectFiles(api: { state: BoardState; bus: CommandBus; c
     const link = document.createElement("a"); link.href = url; link.download = `${data.title.replace(/[^\p{L}\p{N} _-]/gu, "").trim() || "Board"}.board.json`; link.click();
     setTimeout(() => URL.revokeObjectURL(url), 1000); status.textContent = "Arquivo gerado";
   };
-  openButton.onclick = () => input.click();
+  let destinationKey:string|null|undefined;
+  openButton.onclick = () => {destinationKey=api.getBoardKey?.();input.click();};
   input.onchange = async () => {
-    const file = input.files?.[0]; input.value = ""; if (!file) return;
+    const file = input.files?.[0],boardKey=destinationKey; input.value = ""; if (!file) return;
     try {
       if (file.size > 100 * 1024 * 1024) fail("Escolha um projeto de até 100 MB.");
       const data = validateBoardFile(JSON.parse(await file.text()));
       await Promise.all([...new Set(data.widgets.map(w=>w.style.fontFamily))].map(loadBoardFont));
+      if(api.getBoardKey&&boardKey!==api.getBoardKey()){status.textContent='O board mudou. Abra o arquivo novamente no destino desejado.';return;}
       // Nothing changes until every field and reference has passed validation.
       const widgetById = new Map(data.widgets.map(w => [w.id, w]));
       const connectorById = new Map(data.connectors.map(c => [c.id, c]));

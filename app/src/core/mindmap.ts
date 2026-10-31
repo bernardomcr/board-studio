@@ -99,6 +99,8 @@ export function mindLayoutCommands(state:BoardState,id:string):Command[]{
   }
   const commands:Command[]=[],resolved=new Map<string,Widget>();
   for(const node of nodes){
+    // Automatic layout must not transform a locked topic as a side effect.
+    if(node.locked){resolved.set(node.id,node);continue;}
     const size=sizes.get(node.id)!,position=positions.get(node.id),mind={...node.mind!,...(position?{side:position.side}:{})};
     const next={...node,...size,...(position?{x:position.x,y:position.y}:{}),rotation:0,mind};resolved.set(node.id,next);
     if(node.x!==next.x||node.y!==next.y||node.width!==next.width||node.height!==next.height||node.rotation!==0||JSON.stringify(node.mind)!==JSON.stringify(mind))commands.push({op:'WIDGET_UPDATE',payload:{id:node.id,patch:{x:next.x,y:next.y,width:next.width,height:next.height,rotation:0,mind}}});
@@ -130,9 +132,9 @@ export function createMindMap(state:BoardState,bus:CommandBus,point:Vec,content=
   const id=nextId('mind'),node=topic(content,{rootId:id,parentId:null,side:'right',order:0,layout:'balanced',color:MIND_COLORS[0]},point);node.id=id;
   run(bus,'Criar mapa mental',[{op:'WIDGET_CREATE',payload:node},{op:'SELECTION_SET',payload:[id]}]);return id;
 }
-function addTopic(state:BoardState,bus:CommandBus,parentId:string,content:string,side?:MindSide,afterId?:string):string|null{
+function addTopic(state:BoardState,bus:CommandBus,parentId:string,content:string,side?:MindSide,afterId?:string,before=false):string|null{
   const parent=state.widgets.get(parentId),root=mindRoot(state,parentId);if(!parent?.mind||!root||parent.locked)return null;
-  const copy=staged(state),siblings=mindChildren(copy,parentId),order=afterId?Math.max(0,siblings.findIndex(w=>w.id===afterId)+1):siblings.length;
+  const copy=staged(state),siblings=mindChildren(copy,parentId),order=afterId?Math.max(0,siblings.findIndex(w=>w.id===afterId)+(before?0:1)):siblings.length;
   if(!side){if(parent.mind.parentId===null){const right=siblings.filter(w=>w.mind!.side==='right').length;side=right<5?'right':'left';}else side=parent.mind.side;}
   if(root.mind!.layout==='left'||root.mind!.layout==='right')side=root.mind!.layout;
   const color=parent.id===root.id?MIND_COLORS[siblings.length%MIND_COLORS.length]:parent.mind.color??MIND_COLORS[0];
@@ -156,8 +158,8 @@ export function attachMindWidget(state:BoardState,bus:CommandBus,parentId:string
   if(parent.mind.collapsed){const expanded=changedMind(copy,parentId,{collapsed:false});if(expanded)commands.push(expanded);}
   commands.push(...mindLayoutCommands(copy,root.id),{op:'SELECTION_SET',payload:[widgetId]});return run(bus,'Adicionar objeto ao tópico',commands);
 }
-export function addMindSibling(state:BoardState,bus:CommandBus,id:string,content='Novo tópico'):string|null{
-  const node=state.widgets.get(id);return node?.mind?addTopic(state,bus,node.mind.parentId??node.id,content,node.mind.parentId?node.mind.side:undefined,node.mind.parentId?id:undefined):null;
+export function addMindSibling(state:BoardState,bus:CommandBus,id:string,content='Novo tópico',before=false):string|null{
+  const node=state.widgets.get(id);return node?.mind&&!node.locked?addTopic(state,bus,node.mind.parentId??node.id,content,node.mind.parentId?node.mind.side:undefined,node.mind.parentId?id:undefined,before):null;
 }
 export function toggleMindBranch(state:BoardState,bus:CommandBus,id:string):boolean{
   const node=state.widgets.get(id);if(!node?.mind||node.locked||!mindChildren(state,id).length)return false;
@@ -166,7 +168,7 @@ export function toggleMindBranch(state:BoardState,bus:CommandBus,id:string):bool
 export function setMindLayout(state:BoardState,bus:CommandBus,id:string,layout:MindLayout):boolean{
   const root=mindRoot(state,id);if(!root?.mind||root.locked||!['balanced','right','left','org','list'].includes(layout))return false;
   const copy=staged(state),commands:Command[]=[changedMind(copy,root.id,{layout})!];
-  if(layout==='balanced'){const children=mindChildren(copy,root.id);for(let i=0;i<children.length;i++)commands.push(changedMind(copy,children[i]!.id,{side:i<children.length-5?'left':'right'})!);}
+  if(layout==='balanced'){const children=mindChildren(copy,root.id);for(let i=0;i<children.length;i++)if(!children[i]!.locked)commands.push(changedMind(copy,children[i]!.id,{side:i<children.length-5?'left':'right'})!);}
   commands.push(...mindLayoutCommands(copy,root.id));return run(bus,'Mudar organização do mapa',commands);
 }
 export function setMindColor(state:BoardState,bus:CommandBus,id:string,color:string):boolean{

@@ -12,6 +12,7 @@ interface BackgroundAPI {
   app: Application;
   world: Container;
   onChange?: () => void;
+  getBoardKey?(): string | null;
 }
 
 /** Scenery uses board coordinates and cannot intercept selection, drawing or erasing. */
@@ -118,12 +119,13 @@ body.home-visible #board-background-controls{display:none!important}
     return { ...image, width, height, x: camera.x - width / 2, y: camera.y - height / 2 };
   }
 
-  async function importFile(file: File): Promise<void> {
+  async function importFile(file: File, boardKey = api.getBoardKey?.()): Promise<void> {
     if (!['image/png','image/jpeg','image/webp'].includes(file.type)) throw new Error('Use uma imagem PNG, JPEG ou WebP.');
     if (file.size > BACKGROUND_MAX_BYTES) throw new Error('Escolha uma imagem de até 25 MB.');
     const src = await new Promise<string>((resolve,reject) => { const reader = new FileReader(); reader.onerror = () => reject(new Error('Não foi possível ler a imagem.')); reader.onload = () => resolve(String(reader.result)); reader.readAsDataURL(file); });
     const decoded = new Image(); decoded.src = src;
     try { await decoded.decode(); } catch { throw new Error('Esta imagem está danificada ou não é compatível.'); }
+    if (api.getBoardKey && api.getBoardKey() !== boardKey) throw new Error('O board mudou. Importe a imagem de fundo novamente no board desejado.');
     if (!decoded.naturalWidth || !decoded.naturalHeight || decoded.naturalWidth > 16384 || decoded.naturalHeight > 16384 || decoded.naturalWidth * decoded.naturalHeight > 64_000_000) throw new Error('A imagem excede 64 megapixels ou 16384 pixels por lado.');
     const scale = Math.max(1,camera.width / Math.max(.0001,camera.scale) / decoded.naturalWidth,camera.height / Math.max(.0001,camera.scale) / decoded.naturalHeight);
     const width = decoded.naturalWidth * scale, height = decoded.naturalHeight * scale;
@@ -139,8 +141,9 @@ body.home-visible #board-background-controls{display:none!important}
     if (image && target.hasAttribute('data-background-fit')) patch({ image: centered(image,true) });
     if (image && target.hasAttribute('data-background-center')) patch({ image: centered(image,false) });
     if (target.hasAttribute('data-background-import')) {
+      const boardKey = api.getBoardKey?.();
       const input = document.createElement('input'); input.type = 'file'; input.accept = 'image/png,image/jpeg,image/webp';
-      input.onchange = async () => { const file = input.files?.[0]; if (!file) return; importing = true; importError = ''; renderedBackground = undefined; render(); try { await importFile(file); } catch (error) { importError = error instanceof Error ? error.message : 'Não foi possível importar a imagem.'; } finally { importing = false; renderedBackground = undefined; render(); } }; input.click();
+      input.onchange = async () => { const file = input.files?.[0]; if (!file) return; importing = true; importError = ''; renderedBackground = undefined; render(); try { await importFile(file, boardKey); } catch (error) { importError = error instanceof Error ? error.message : 'Não foi possível importar a imagem.'; } finally { importing = false; renderedBackground = undefined; render(); } }; input.click();
     }
   });
   panel.addEventListener('change',event => {

@@ -82,7 +82,7 @@ export function pointInWidget(w: Widget, p: Vec): boolean {
   const local = worldToLocal(w, p);
   if (local.x < 0 || local.x > w.width || local.y < 0 || local.y > w.height) return false;
   if(w.type==='image'&&w.maskShape==='ellipse')return ((local.x-w.width/2)/(w.width/2))**2+((local.y-w.height/2)/(w.height/2))**2<=1;
-  if(w.type==='image'&&w.maskShape==='round_rectangle'){const r=Math.min(w.width,w.height)*.12,cx=Math.max(r,Math.min(w.width-r,local.x)),cy=Math.max(r,Math.min(w.height-r,local.y));return (local.x-cx)**2+(local.y-cy)**2<=r*r;}
+  if(w.type==='image'&&w.maskShape==='round_rectangle'){const r=Math.max(0,Math.min(w.style.cornerRadius??Math.min(w.width,w.height)*.12,Math.min(w.width,w.height)/2)),cx=Math.max(r,Math.min(w.width-r,local.x)),cy=Math.max(r,Math.min(w.height-r,local.y));return (local.x-cx)**2+(local.y-cy)**2<=r*r;}
   if (w.type !== "shape") return true;
   const polygon = shapePolygon(w.shape, w.width, w.height);
   if (polygon) return polygonContains(polygon, local.x, local.y);

@@ -33,17 +33,19 @@ function clipboardSources(data:DataTransfer):string[]{
 }
 
 export function installClipboardImages(api:{
-  importFiles(files:File[]):Promise<unknown>;
+  importFiles(files:File[],canInsert?:()=>boolean):Promise<unknown>;
   notice(message:string):void;
   blocked():boolean;
+  getBoardKey?():string|null;
 }){
-  const insert=async(files:File[])=>{try{await api.importFiles(files);}catch{api.notice('Não foi possível inserir a imagem no board. Tente novamente ou importe o arquivo pelo botão Imagem.');}};
+  const insert=async(files:File[],canInsert:()=>boolean)=>{try{await api.importFiles(files,canInsert);}catch{api.notice('Não foi possível inserir a imagem no board. Tente novamente ou importe o arquivo pelo botão Imagem.');}};
   const paste=(event:ClipboardEvent)=>{
     if(event.defaultPrevented||api.blocked()||isClipboardEditor(event.target)||!event.clipboardData)return;
+    const boardKey=api.getBoardKey?.(),canInsert=()=>!api.getBoardKey||api.getBoardKey()===boardKey;
     // Read all native clipboard representations synchronously: some browsers clear
     // the event's DataTransfer as soon as the paste listener returns.
     const files=clipboardFiles(event.clipboardData);
-    if(files.length){event.preventDefault();void insert(files);return;}
+    if(files.length){event.preventDefault();void insert(files,canInsert);return;}
     const sources=clipboardSources(event.clipboardData);if(!sources.length)return;
     event.preventDefault();
     void (async()=>{
@@ -61,7 +63,7 @@ export function installClipboardImages(api:{
           api.notice('Não foi possível colar a imagem: o site de origem pode ter bloqueado o acesso. Use “Copiar imagem” no navegador ou baixe e arraste o arquivo para o board.');
         }
       }
-      if(images.length)await insert(images);
+      if(images.length)await insert(images,canInsert);
     })();
   };
   document.addEventListener('paste',paste);

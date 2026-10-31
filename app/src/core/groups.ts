@@ -32,14 +32,16 @@ export function ungroupSelection(s:BoardState,bus:CommandBus){bus.beginTransacti
 export function itemLocked(s:BoardState,id:string):boolean {return !!(s.widgets.get(id)??s.connectors.get(id)??s.strokes.get(id))?.locked;}
 export function entityRect(s:BoardState,id:string){const item=s.widgets.get(id)??s.connectors.get(id)??s.strokes.get(id);if(item?.hidden)return null;const w=s.widgets.get(id);if(w)return mindNodeHidden(s,id)?null:widgetAABB(w);const c=s.connectors.get(id);if(c){if(mindConnectorHidden(s,c))return null;const g=connectorGeometry(c,s.widgets);if(g)return connectorBounds(g);}const st=s.strokes.get(id);return st?strokeBounds(st):null;}
 export function selectedBounds(s:BoardState,ids=[...s.selection]){return unionRect(ids.map(id=>entityRect(s,id)).filter((r):r is NonNullable<typeof r>=>!!r));}
-export type EntitySnapshot={widgets:Widget[];connectors:Connector[];strokes:Stroke[];groups:Array<[string,string[]]>};
+export type EntitySnapshot={widgets:Widget[];connectors:Connector[];strokes:Stroke[];groups:Array<[string,string[]]>;endpointPositions?:Record<string,{start:Vec|null;end:Vec|null}>};
 export function captureSelection(s:BoardState,ids=[...s.selection],includeInternal=true):EntitySnapshot {
   ids=[...new Set(ids.flatMap(id=>s.widgets.get(id)?.mind?mindSubtree(s,id):[id]))];
   const set=new Set(ids),widgets=ids.map(id=>s.widgets.get(id)).filter((w):w is Widget=>!!w);
   const connectors=[...s.connectors.values()].filter(c=>set.has(c.id)||includeInternal&&c.start.kind==='anchor'&&c.end.kind==='anchor'&&set.has(c.start.widgetId)&&set.has(c.end.widgetId));
   const strokes=ids.map(id=>s.strokes.get(id)).filter((v):v is Stroke=>!!v);
   const groups=[...s.groups].filter(([id])=>groupLeaves(s,id).every(m=>set.has(m))&&groupLeaves(s,id).length>0);
-  return structuredClone({widgets,connectors,strokes,groups});
+  // Keep anchor references for transforms and their copy-time positions for paste.
+  const endpointPositions=Object.fromEntries(connectors.map(c=>[c.id,{start:resolveEndpoint(c.start,s.widgets),end:resolveEndpoint(c.end,s.widgets)}]));
+  return structuredClone({widgets,connectors,strokes,groups,endpointPositions});
 }
 export function transformSnapshot(s:BoardState,snapshot:EntitySnapshot,dx:number,dy:number,sx=1,sy=1,origin:Vec={x:0,y:0},angle=0):Command[] {
   const point=(p:Vec)=>{const v=rotate({x:(p.x-origin.x)*sx,y:(p.y-origin.y)*sy},angle);return {x:origin.x+v.x+dx,y:origin.y+v.y+dy};};
@@ -108,11 +110,26 @@ export function duplicateSnapshot(s:BoardState,bus:CommandBus,snapshot:EntitySna
     const parentId=w.mind.parentId&&map.has(w.mind.parentId)?map.get(w.mind.parentId)!:null;
     return {...w.mind,rootId:map.get(root.id)!,parentId,...(parentId?{}:{order:0,layout:w.mind.layout??w.mind.side})};
   };
-  const point=(p:Vec)=>({x:p.x+dx,y:p.y+dy});const ids:string[]=[];bus.beginTransaction('Duplicar seleção');
-  for(const w of snapshot.widgets){const id=map.get(w.id)!;bus.exec({op:'WIDGET_CREATE',payload:{...w,id,mind:copiedMind(w),x:w.x+dx,y:w.y+dy,locked:false}});ids.push(id);}
-  for(const c of snapshot.connectors){const endpoint=(e:Connector['start'])=>e.kind==='point'?{kind:'point',...point(e)}:map.has(e.widgetId)?{...e,widgetId:map.get(e.widgetId)!}:{kind:'point',...point(resolveEndpoint(e,s.widgets)!)};const id=map.get(c.id)!,mindBranch=c.mindBranch&&map.has(c.mindBranch)&&c.start.kind==='anchor'&&c.end.kind==='anchor'&&map.has(c.start.widgetId)&&map.has(c.end.widgetId)?map.get(c.mindBranch):undefined;bus.exec({op:'CONNECTOR_CREATE',payload:{...c,id,mindBranch,start:endpoint(c.start),end:endpoint(c.end),controlPoint:c.controlPoint?point(c.controlPoint):null,waypoints:c.waypoints?.map(point)??null,locked:false}});ids.push(id);}
-  for(const st of snapshot.strokes){const id=map.get(st.id)!;bus.exec({op:'STROKE_CREATE',payload:{...st,id,locked:false,points:st.points.map(p=>({...p,...point(p)}))}});ids.push(id);}
-  for(const [id,members] of snapshot.groups)bus.exec({op:'GROUP_CREATE',payload:{id:map.get(id)!,items:members.map(m=>map.get(m)).filter(Boolean)}});
-  bus.exec({op:'SELECTION_SET',payload:ids});bus.endTransaction();
+  const point=(p:Vec)=>({x:p.x+dx,y:p.y+dy});
+  // Resolve before publishing so an invalid legacy snapshot cannot leave a
+  // partially duplicated selection or an unfinished history entry.
+  const copiedConnectors=snapshot.connectors.map(c=>{
+    const endpoint=(field:'start'|'end'):Connector['start']=>{
+      const e=c[field];if(e.kind==='point')return {kind:'point',...point(e)};
+      if(map.has(e.widgetId))return {...e,widgetId:map.get(e.widgetId)!};
+      const resolved=snapshot.endpointPositions?.[c.id]?.[field]??resolveEndpoint(e,s.widgets);
+      if(!resolved)throw new Error('A conexão copiada não possui uma posição válida para a ponta.');
+      return {kind:'point',...point(resolved)};
+    };
+    const mindBranch=c.mindBranch&&map.has(c.mindBranch)&&c.start.kind==='anchor'&&c.end.kind==='anchor'&&map.has(c.start.widgetId)&&map.has(c.end.widgetId)?map.get(c.mindBranch):undefined;
+    return {...c,id:map.get(c.id)!,mindBranch,start:endpoint('start'),end:endpoint('end'),controlPoint:c.controlPoint?point(c.controlPoint):null,waypoints:c.waypoints?.map(point)??null,locked:false};
+  });
+  const ids:string[]=[],commands:Command[]=[];
+  for(const w of snapshot.widgets){const id=map.get(w.id)!;commands.push({op:'WIDGET_CREATE',payload:{...w,id,mind:copiedMind(w),x:w.x+dx,y:w.y+dy,locked:false}});ids.push(id);}
+  for(const c of copiedConnectors){commands.push({op:'CONNECTOR_CREATE',payload:c});ids.push(c.id);}
+  for(const st of snapshot.strokes){const id=map.get(st.id)!;commands.push({op:'STROKE_CREATE',payload:{...st,id,locked:false,points:st.points.map(p=>({...p,...point(p)}))}});ids.push(id);}
+  for(const [id,members] of snapshot.groups)commands.push({op:'GROUP_CREATE',payload:{id:map.get(id)!,items:members.map(m=>map.get(m)).filter(Boolean)}});
+  commands.push({op:'SELECTION_SET',payload:ids});
+  bus.exec({op:'BATCH',payload:{label:'Duplicar seleção',commands}});
 }
 export function frameSelection(s:BoardState,bus:CommandBus){const r=selectedBounds(s);if(!r)return;bus.exec({op:'WIDGET_CREATE',payload:createWidget('frame',{x:r.minX-40,y:r.minY-50,width:r.maxX-r.minX+80,height:r.maxY-r.minY+90,content:'Quadro'})});}

@@ -74,8 +74,8 @@ export function installMindmapUI(api:MindmapUIAPI){
     if(edit)api.onEdit(id);refresh();api.onChange?.();
   }
   function create(){const id=createMindMap(state,bus,{x:camera.x,y:camera.y});focusNode(id,true);return id;}
-  function add(id:string,kind:'child'|'sibling'){
-    const result=kind==='child'?addMindChild(state,bus,id):addMindSibling(state,bus,id);
+  function add(id:string,kind:'child'|'sibling',before=false){
+    const result=kind==='child'?addMindChild(state,bus,id):addMindSibling(state,bus,id,'Novo tópico',before);
     if(result)focusNode(result,true);return result;
   }
   function perform(action:string){const node=selected();if(!node)return;
@@ -148,7 +148,7 @@ export function installMindmapUI(api:MindmapUIAPI){
     if(event.key===' '){event.preventDefault();if(!node.locked)toggleMindBranch(state,bus,node.id);return true;}
     if(event.key==='Escape'&&panel.querySelector('details[open]')){event.preventDefault();closeMenus();return true;}
     if(event.key==='Tab'){event.preventDefault();if(event.shiftKey&&node.mind!.parentId)focusNode(node.mind!.parentId);else if(!node.locked)add(node.id,'child');return true;}
-    if(event.key==='Enter'&&!event.shiftKey){event.preventDefault();if(!node.locked)add(node.id,'sibling');return true;}
+    if(event.key==='Enter'){event.preventDefault();if(!node.locked)add(node.id,'sibling',event.shiftKey);return true;}
     if(event.key==='Delete'||event.key==='Backspace'){event.preventDefault();if(!node.locked)perform('delete');return true;}
     if(event.key.startsWith('Arrow')&&!event.shiftKey){event.preventDefault();if(node.mind!.collapsed&&event.key===(node.mind!.side==='left'?'ArrowLeft':'ArrowRight'))toggleMindBranch(state,bus,node.id);const target=navigateMindNode(state,node.id,event.key);if(target)focusNode(target);return true;}
     return false;

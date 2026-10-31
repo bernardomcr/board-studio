@@ -14,6 +14,7 @@ type ImageItem = Omit<Widget, "type"> & { type: "image"; src: string; naturalWid
 interface ImageAPI {
   state: BoardState; bus: CommandBus; camera: Camera; app: Application;
   world: Container; nodeAt?: (id: string) => Container | undefined; onChange?: () => void;
+  getBoardKey?(): string | null;
 }
 export interface ImageImportOptions{point?:Vec;label?:string;afterCreate?(ids:string[]):void;canInsert?():boolean}
 const FULL: Crop = { x: 0, y: 0, width: 1, height: 1 };
@@ -40,6 +41,7 @@ export function installImages(api: ImageAPI) {
   let modal: HTMLElement | null = null;
   const selected = () => state.selection.size === 1 ? asImage(state.widgets.get([...state.selection][0]!)) : undefined;
   const changed = () => { sync(); api.onChange?.(); };
+  const sameBoard = (key: string | null | undefined) => !api.getBoardKey || api.getBoardKey() === key;
 
   function notice(message: string) {
     const toast = document.createElement("div");
@@ -159,6 +161,7 @@ export function installImages(api: ImageAPI) {
   }
 
   async function importFiles(files: FileList | File[], pointOrOptions?:Vec|ImageImportOptions) {
+    const boardKey = api.getBoardKey?.();
     const options:ImageImportOptions=pointOrOptions&&'x'in pointOrOptions?{point:pointOrOptions}:pointOrOptions??{};
     const decoded:Array<{src:string;naturalWidth:number;naturalHeight:number}>=[],center=options.point??{x:camera.x,y:camera.y};
     for (const file of Array.from(files)) {
@@ -169,7 +172,7 @@ export function installImages(api: ImageAPI) {
       } catch(error) { notice(`${file.name}: ${error instanceof Error?error.message:"Não foi possível importar a imagem."}`); }
     }
     const ids:string[]=[];
-    if(options.canInsert&&!options.canInsert()){notice('O tópico ou o board mudou. Escolha a imagem novamente no destino desejado.');return ids;}
+    if(!sameBoard(boardKey)||options.canInsert&&!options.canInsert()){notice('O tópico ou o board mudou. Escolha a imagem novamente no destino desejado.');return ids;}
     if(decoded.length){bus.beginTransaction(options.label??'Inserir imagens');try{
       for(const source of decoded){
         const scale = Math.min(1, 520 / source.naturalWidth, 420 / source.naturalHeight);
@@ -190,19 +193,20 @@ export function installImages(api: ImageAPI) {
   }
 
   function replaceSelected() {
-    const original=selected();if(!original)return;
+    const original=selected();if(!original||original.locked)return;
+    const boardKey=api.getBoardKey?.();
     const input=document.createElement("input");input.type="file";input.accept="image/*";
     input.onchange=async()=>{const file=input.files?.[0];if(!file)return;try{
-      const source=await readImage(file),current=asImage(state.widgets.get(original.id));if(!current)return;
+      const source=await readImage(file),current=asImage(state.widgets.get(original.id));if(!sameBoard(boardKey)||!current||current.locked||current.src!==original.src)return;
       bus.exec({op:"WIDGET_UPDATE",payload:{id:current.id,patch:{...source,crop:{...FULL}}}});changed();
     }catch(error){notice(error instanceof Error?error.message:"Não foi possível substituir a imagem.");}};input.click();
   }
   function flipSelected(axis:"x"|"y") {
-    const image=selected();if(!image)return;
+    const image=selected();if(!image||image.locked)return;
     bus.exec({op:"WIDGET_UPDATE",payload:{id:image.id,patch:axis==="x"?{flipX:!image.flipX}:{flipY:!image.flipY}}});changed();
   }
   function setMask(maskShape:MaskShape) {
-    const image=selected();if(!image)return;
+    const image=selected();if(!image||image.locked)return;
     bus.exec({op:"WIDGET_UPDATE",payload:{id:image.id,patch:{maskShape}}});changed();
   }
   function downloadSelected() {
@@ -213,7 +217,9 @@ export function installImages(api: ImageAPI) {
 
   function cropSelected(initialMask?: MaskShape) {
     const image = asImage(state.widgets.get([...state.selection][0] ?? ""));
-    if (!image || state.selection.size !== 1 || modal) return;
+    if (!image || image.locked || state.selection.size !== 1 || modal) return;
+    const boardKey=api.getBoardKey?.();
+    const previousFocus=document.activeElement as HTMLElement|null;
     const dialog = document.createElement("div"); modal = dialog;
     dialog.setAttribute("role", "dialog"); dialog.setAttribute("aria-modal", "true"); dialog.setAttribute("aria-label", "Recortar imagem");
     dialog.style.cssText = "position:fixed;inset:0;z-index:90;background:#19181299;display:grid;place-items:center;font:14px Segoe UI,sans-serif";
@@ -291,8 +297,15 @@ export function installImages(api: ImageAPI) {
       crop={x:clamp(left,0,1-width),y:clamp(top,0,1-height),width,height};paint();
     };
     preview.onpointerup = preview.onpointercancel = () => { drag = null; };
-    const close = () => { dialog.remove(); modal = null; document.removeEventListener("keydown", keyboard, true); };
-    const keyboard = (e: KeyboardEvent) => { e.stopPropagation(); if (e.key === "Escape") { e.preventDefault(); close(); } };
+    const close = () => { dialog.remove(); modal = null; document.removeEventListener("keydown", keyboard, true);queueMicrotask(()=>{if(previousFocus?.isConnected)previousFocus.focus({preventScroll:true});else document.querySelector<HTMLElement>('#selection-properties [data-action="crop"]')?.focus({preventScroll:true});}); };
+    const keyboard = (e: KeyboardEvent) => {
+      e.stopPropagation();if(e.key==='Escape'){e.preventDefault();close();return;}
+      if(e.key==='Tab'){
+        const controls=[...dialog.querySelectorAll<HTMLElement>('button:not(:disabled),input:not(:disabled),select:not(:disabled),textarea:not(:disabled),[tabindex]:not([tabindex="-1"])')],index=controls.indexOf(document.activeElement as HTMLElement);
+        if(e.shiftKey&&index<=0){e.preventDefault();controls.at(-1)?.focus();}
+        else if(!e.shiftKey&&(index<0||index===controls.length-1)){e.preventDefault();controls[0]?.focus();}
+      }
+    };
     document.addEventListener("keydown", keyboard, true);
     dialog.querySelector<HTMLElement>("[data-cancel]")!.onclick = close;
     dialog.onclick = e => { if (e.target === dialog) close(); };
@@ -313,8 +326,8 @@ export function installImages(api: ImageAPI) {
       paint();
     };
     dialog.querySelector<HTMLElement>("[data-apply]")!.onclick = () => {
-      if(!state.widgets.has(image.id)){close();return;}
-      const current = asImage(state.widgets.get(image.id)); if (!current) { close(); return; }
+      const current = asImage(state.widgets.get(image.id));
+      if (!sameBoard(boardKey) || !current || current.locked || current.src !== image.src) { close(); return; }
       const geometry = cropGeometry(current, crop);
       if (maskShape === "ellipse") {
         // A circle remains circular even if the previous picture was stretched.
@@ -331,7 +344,7 @@ export function installImages(api: ImageAPI) {
   function circleCropSelected() { cropSelected("ellipse"); }
 
   function resetCrop() {
-    const image = asImage(state.widgets.get([...state.selection][0] ?? "")); if (!image) return;
+    const image = asImage(state.widgets.get([...state.selection][0] ?? "")); if (!image || image.locked) return;
     bus.exec({ op: "WIDGET_UPDATE", payload: { id: image.id, patch: cropGeometry(image,{...FULL}) } });
     sync(); api.onChange?.();
   }
@@ -342,6 +355,6 @@ export function installImages(api: ImageAPI) {
     const rect = api.app.canvas.getBoundingClientRect();
     void importFiles(e.dataTransfer.files, camera.screenToWorld({ x: e.clientX - rect.left, y: e.clientY - rect.top }));
   });
-  installClipboardImages({importFiles:files=>importFiles(files),notice,blocked:()=>!!modal||document.body.classList.contains('home-visible')||!!document.querySelector('[role="dialog"][aria-modal="true"]')});
+  installClipboardImages({importFiles:(files,canInsert)=>importFiles(files,{canInsert}),getBoardKey:api.getBoardKey,notice,blocked:()=>!!modal||document.body.classList.contains('home-visible')||[...document.querySelectorAll<HTMLElement>('[role="dialog"][aria-modal="true"]')].some(dialog=>!dialog.hidden&&dialog.getClientRects().length>0)});
   return { sync, importFiles, cropSelected, circleCropSelected, resetCrop, replaceSelected, flipSelected, setMask, downloadSelected };
 }

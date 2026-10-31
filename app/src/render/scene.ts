@@ -8,8 +8,9 @@
 
 import { Container, Graphics, Text } from "pixi.js";
 import type { BoardState } from "../core/commands";
-import { widgetAABB, rectsIntersect, pointInWidget, widgetCorners, type Rect } from "../core/geometry";
-import { connectorGeometry, connectorBounds, connectorCaptionPoints } from "../core/connectors";
+import { widgetAABB, rectsIntersect, widgetCorners, type Rect } from "../core/geometry";
+import {visibleFrames,frameForWidget} from '../core/frame-visibility';
+import { connectorGeometry, connectorBounds, connectorCaptionPoints,type ConnectorGeometry } from "../core/connectors";
 import { strokeBounds, type StrokePoint } from "../core/strokes";
 import {paintStroke,strokeRenderKey} from './stroke-paint';
 import { parseRich, type Run } from "../core/richtext";
@@ -17,7 +18,7 @@ import { paintConnector } from "./connector-paint";
 import type { Widget } from "../core/model";
 import { borderPattern, canonicalShape, patternedContour, shapeContours, shapePolygon, shapeDetails } from "../core/shapes";
 import {resolvedWidgetStyle} from '../core/style-scale';
-import {fitTextResolution,textRasterDensity,TEXT_SAMPLING} from './text-quality';
+import {fitTextResolution,textRasterDensity,TEXT_SAMPLING,sharedTextStyle} from './text-quality';
 import {mindNodeHidden,mindConnectorHidden,mindTopicText} from '../core/mindmap';
 import {audioSignature,paintAudioCard,paintAudioLabels} from './audio-paint';
 import {renderStructuredText} from './structured-text';
@@ -42,6 +43,7 @@ export class BoardScene {
   private nodes = new Map<string, Node>();
   private connectorNodes = new Map<string, Graphics>();
   private connectorLabels = new Map<string, Text[]>();
+  private connectorPaintKeys=new Map<string,{geometry:ConnectorGeometry;style:string}>();
   private strokeNodes = new Map<string, Graphics>();
   private strokePaintKeys=new Map<string,{points:StrokePoint[];length:number;lastX:number;lastY:number;lastR:number;color:string;tool:string;opacity?:number;precision?:boolean;precisionSmoothing?:number;displayKey:string}>();
   private clipContainers = new Map<string, { container: Container; mask: Graphics; sig:string }>();
@@ -96,6 +98,7 @@ export class BoardScene {
       if (!state.connectors.has(id)) {
         node.destroy();
         this.connectorNodes.delete(id);
+        this.connectorPaintKeys.delete(id);
         for (const label of this.connectorLabels.get(id) ?? []) label.destroy();
         this.connectorLabels.delete(id);
       }
@@ -113,7 +116,8 @@ export class BoardScene {
         this.connectorNodes.set(id, node);
         node.label=id;this.layer.addChild(node);
       }
-      paintConnector(node, connector, geometry);
+      const style=JSON.stringify(connector.style),retained=this.connectorPaintKeys.get(id);
+      if(!retained||retained.geometry!==geometry||retained.style!==style){paintConnector(node,connector,geometry);this.connectorPaintKeys.set(id,{geometry,style});}
 
       node.visible=!connector.hidden&&!mindConnectorHidden(state,connector)&&(!visible||rectsIntersect(visible,connectorBounds(geometry)));
       node.zIndex = connector.z;
@@ -129,7 +133,7 @@ export class BoardScene {
             ...TEXT_SAMPLING,
             text: "",
             resolution: this.textResolution,
-            style: { fontFamily: "Arial, sans-serif", fontSize: 12, fill: "#42413a" },
+            style: sharedTextStyle({ fontFamily: "Arial, sans-serif", fontSize: 12, fill: "#42413a" }),
           });
           label.anchor.set(0.5);
           labels.push(label);
@@ -169,24 +173,6 @@ export class BoardScene {
 
   // -------------------------------------------------------------- clip
 
-  private frameOf(state: BoardState, w: Widget): Widget | undefined {
-    let best: Widget | undefined;
-    let bestArea = Infinity;
-    for (const frame of state.widgets.values()) {
-      if (frame.type !== "frame" || frame.id === w.id || frame.hidden) continue;
-      const cx = w.x + w.width / 2;
-      const cy = w.y + w.height / 2;
-      if (pointInWidget(frame,{x:cx,y:cy})) {
-        const area = frame.width * frame.height;
-        if (area < bestArea) {
-          bestArea = area;
-          best = frame;
-        }
-      }
-    }
-    return best;
-  }
-
   private clipFor(frame: Widget): { container: Container; mask: Graphics; sig:string } {
     let entry = this.clipContainers.get(frame.id);
     if (!entry) {
@@ -213,6 +199,7 @@ export class BoardScene {
     this.textResolution = textRasterDensity(zoom);
     this.syncStrokes(state, visible);
     this.syncConnectors(state, visible);
+    const frames=visibleFrames(state);
 
     for (const [id, entry] of this.clipContainers) {
       if (!state.widgets.has(id)) {
@@ -248,7 +235,7 @@ export class BoardScene {
 
       node.container.zIndex = widget.z;
 
-      const frame = widget.type === "frame" ? undefined : this.frameOf(state, widget);
+      const frame = frameForWidget(widget,frames);
       const target = this.layer;
       if (node.container.parent !== target) target.addChild(node.container);
       node.container.mask=frame?this.clipFor(frame).mask:null;
@@ -321,12 +308,12 @@ export class BoardScene {
           ...TEXT_SAMPLING,
           text: content || "Quadro",
           resolution: this.textResolution,
-          style: {
+          style: sharedTextStyle({
             fontFamily: w.style.fontFamily,
             fontSize: 13,
             fontWeight: "600",
             fill: "#55544e",
-          },
+          }),
         });
         title.resolution=fitTextResolution(title,this.textResolution);
         title.position.set(2, -24);
@@ -409,14 +396,14 @@ function makeRunText(token: string, run: Run, w: Widget, resolution: number): Te
     ...TEXT_SAMPLING,
     text: token,
     resolution,
-    style: {
+    style: sharedTextStyle({
       fontFamily: w.style.fontFamily,
       fontSize: w.style.fontSize,
       fill: isLink ? "#3859ff" : w.style.color,
       fontWeight: run.bold || w.style.fontWeight==='bold' ? "700" : "400",
       fontStyle: run.italic || w.style.fontStyle==='italic' ? "italic" : "normal",
       lineHeight: w.style.fontSize * 1.35,
-    },
+    }),
   });
   node.resolution=fitTextResolution(node,resolution);
   return node;

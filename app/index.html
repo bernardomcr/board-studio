@@ -4,6 +4,7 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no" />
     <title>Board Studio</title>
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
     <style>
       /* ---- design tokens extraídos do Miro (library-design-tokens) ---- */
       :root {
@@ -262,9 +263,9 @@
     </div>
 
     <div id="hud"></div>
-    <div id="help-panel" hidden>
+    <div id="help-panel" role="dialog" aria-modal="true" aria-labelledby="help-heading" hidden>
       <div class="card">
-        <h2>Atalhos</h2>
+        <h2 id="help-heading">Atalhos</h2>
         <p class="sub">Este board é 100% local — nada sai do seu computador.</p>
         <dl>
           <dt><kbd>V</kbd></dt><dd>selecionar</dd>
@@ -275,6 +276,8 @@
           <dt><kbd>C</kbd></dt><dd>conector</dd>
           <dt><kbd>B</kbd> <kbd>H</kbd> <kbd>E</kbd></dt><dd>pincel · marca-texto · borracha</dd>
           <dt><kbd>Enter</kbd></dt><dd>editar texto (duplo clique também)</dd>
+          <dt>Mapa mental</dt><dd>Tab cria filho · Enter cria irmão · Shift+Enter cria irmão acima</dd>
+          <dt>Editando tópico</dt><dd>Enter confirma · Shift+Enter quebra linha · Esc cancela</dd>
           <dt><kbd>Ctrl</kbd>+<kbd>B</kbd>/<kbd>I</kbd>/<kbd>U</kbd></dt><dd>negrito · itálico · sublinhado no editor</dd>
           <dt><kbd>Del</kbd></dt><dd>apagar seleção</dd>
           <dt><kbd>Ctrl</kbd>+<kbd>Z</kbd></dt><dd>desfazer (sobrevive ao reload)</dd>
@@ -289,6 +292,7 @@
           <dt><kbd>I</kbd></dt><dd>painel de depuração</dd>
           <dt><kbd>?</kbd></dt><dd>este painel</dd>
         </dl>
+        <button type="button" data-help-close>Fechar atalhos</button>
         <div class="close">Esc fecha · clique fora também</div>
       </div>
     </div>

@@ -24,6 +24,7 @@ export interface Connector {
 }
 export interface ConnectorCubic { p0: Vec; p1: Vec; p2: Vec; p3: Vec }
 export interface ConnectorGeometry { points: Vec[]; cubic?: ConnectorCubic; cubics?: ConnectorCubic[] }
+const geometryCache=new WeakMap<Connector,{start?:Widget;end?:Widget;shape:ConnectorShape;startEndpoint:Endpoint;endEndpoint:Endpoint;control?:Vec|null;waypoints?:Vec[]|null;geometry:ConnectorGeometry|null}>();
 const EPS = 1e-8;
 const mid = (a: Vec, b: Vec): Vec => ({ x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 });
 const length = (a: Vec, b: Vec) => Math.hypot(a.x - b.x, a.y - b.y);
@@ -118,6 +119,11 @@ function sampleCubic(p0: Vec, p1: Vec, p2: Vec, p3: Vec): Vec[] {
   }; walk(p0, p1, p2, p3, 0); return points;
 }
 export function connectorGeometry(connector: Connector, widgets: Map<string, Widget>): ConnectorGeometry | null {
+  const start=connector.start.kind==='anchor'?widgets.get(connector.start.widgetId):undefined,end=connector.end.kind==='anchor'?widgets.get(connector.end.widgetId):undefined,cached=geometryCache.get(connector);
+  if(cached&&cached.start===start&&cached.end===end&&cached.shape===connector.shape&&cached.startEndpoint===connector.start&&cached.endEndpoint===connector.end&&cached.control===connector.controlPoint&&cached.waypoints===connector.waypoints)return cached.geometry;
+  const geometry=buildConnectorGeometry(connector,widgets);geometryCache.set(connector,{start,end,shape:connector.shape,startEndpoint:connector.start,endEndpoint:connector.end,control:connector.controlPoint,waypoints:connector.waypoints,geometry});return geometry;
+}
+function buildConnectorGeometry(connector:Connector,widgets:Map<string,Widget>):ConnectorGeometry|null{
   const a = resolveEndpoint(connector.start, widgets), b = resolveEndpoint(connector.end, widgets); if (!a || !b) return null;
   const waypoints = connector.waypoints?.filter(p => Number.isFinite(p.x) && Number.isFinite(p.y));
   if (waypoints?.length) {

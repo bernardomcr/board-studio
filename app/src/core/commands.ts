@@ -16,6 +16,7 @@ import type { Stroke } from "./strokes";
 import { DEFAULT_BACKGROUND, validateBoardBackground, type BoardBackground, type BackgroundPatch } from "./background";
 import { naturalText } from './text-layout';
 import { relativeBorderScale } from './style-scale';
+import { mindLayoutCommands, mindSubtree } from './mindmap';
 
 export type CommandOp =
   | "BATCH"
@@ -182,40 +183,52 @@ export class CommandBus {
 
       case "WIDGET_REMOVE": {
         const id = command.payload as string;
-        const groupsBefore=[...s.groups].map(([gid,members])=>[gid,[...members]] as [string,string[]]);
         const widget = s.widgets.get(id);
         if (!widget) return null;
+        if(widget.mind){
+          const ids=mindSubtree(s,id),removed=new Set(ids);
+          if(ids.some(nodeId=>s.widgets.get(nodeId)?.locked))return null;
+          const branches=[...s.connectors.values()].filter(connector=>connector.mindBranch&&removed.has(connector.mindBranch));
+          if(ids.length>1||branches.length){
+            const copy={...s,widgets:new Map(s.widgets),order:s.order.filter(nodeId=>!removed.has(nodeId)),connectors:new Map(s.connectors)};
+            for(const nodeId of ids)copy.widgets.delete(nodeId);
+            for(const branch of branches)copy.connectors.delete(branch.id);
+            const commands:Command[]=[
+              ...branches.map(branch=>({op:'CONNECTOR_REMOVE' as const,payload:branch.id})),
+              // BATCH constructs each inverse after the preceding child runs.
+              // The final retry has no descendants or branch connectors left.
+              ...[...ids].reverse().map(nodeId=>({op:'WIDGET_REMOVE' as const,payload:nodeId})),
+              ...mindLayoutCommands(copy,widget.mind.rootId),
+            ];
+            const selectionBefore=[...s.selection],entry=this.execute({op:'BATCH',payload:{label:'Excluir ramo',commands}})!;
+            return {...entry,command,undo:()=>{entry.undo();s.selection=new Set(selectionBefore);}};
+          }
+        }
+        const groupsBefore=[...s.groups].map(([gid,members])=>[gid,[...members]] as [string,string[]]);
         const index = s.order.indexOf(id);
 
         // conectores presos a este objeto viram pontas soltas (não somem)
-        const detached: Array<{ connector: Connector; endpoint: Endpoint }> = [];
+        const detached: Array<{id:string;before:{start:Endpoint;end:Endpoint};after:{start:Endpoint;end:Endpoint}}> = [];
         for (const connector of s.connectors.values()) {
-          for (const endpoint of [connector.start, connector.end]) {
+          const detach=(endpoint:Endpoint):Endpoint=>{
             if (endpoint.kind === "anchor" && endpoint.widgetId === id) {
               const resolved = resolveEndpoint(endpoint, s.widgets);
-              if (resolved) {
-                detached.push({
-                  connector,
-                  endpoint: { kind: "point", x: resolved.x, y: resolved.y },
-                });
-              }
+              if (resolved)return {kind:'point',x:resolved.x,y:resolved.y};
             }
-          }
+            return endpoint;
+          };
+          const start=detach(connector.start),end=detach(connector.end);
+          if(start!==connector.start||end!==connector.end)detached.push({id:connector.id,before:{start:connector.start,end:connector.end},after:{start,end}});
         }
-        const before = detached.map(({ connector }) => ({ id: connector.id, start: connector.start, end: connector.end }));
 
         return {
           command,
           label: `remove ${widget.type}`,
           redo: () => {
-            for (const { connector, endpoint } of detached) {
-              const current = s.connectors.get(connector.id);
+            for (const snapshot of detached) {
+              const current = s.connectors.get(snapshot.id);
               if (!current) continue;
-              const patch =
-                connector.start.kind === "anchor" && connector.start.widgetId === id
-                  ? { start: endpoint }
-                  : { end: endpoint };
-              s.connectors.set(connector.id, { ...current, ...patch });
+              s.connectors.set(snapshot.id, { ...current, ...snapshot.after });
             }
             s.widgets.delete(id);
             s.order = s.order.filter((x) => x !== id);
@@ -225,10 +238,10 @@ export class CommandBus {
             s.groups=new Map(groupsBefore.map(([gid,members])=>[gid,[...members]]));
             s.widgets.set(id, widget);
             s.order.splice(Math.max(0, index), 0, id);
-            for (const snapshot of before) {
+            for (const snapshot of detached) {
               const current = s.connectors.get(snapshot.id);
               if (!current) continue;
-              s.connectors.set(snapshot.id, { ...current, start: snapshot.start, end: snapshot.end });
+              s.connectors.set(snapshot.id, { ...current, ...snapshot.before });
             }
           },
         };
@@ -524,6 +537,7 @@ export class CommandBus {
       case "SELECTION_SET": {
         const next = command.payload as string[];
         const before = [...s.selection];
+        if(next.length===before.length&&next.every((id,index)=>id===before[index]))return null;
         return {
           command,
           label: "selection",

@@ -2,7 +2,8 @@ import type {BoardState,CommandBus} from './core/commands';
 import type {Camera} from './core/camera';
 import type {Widget} from './core/model';
 import {mindNodeHidden} from './core/mindmap';
-import {pointInWidget,widgetAABB,widgetCorners,worldToLocal,type Vec} from './core/geometry';
+import {widgetAABB,widgetCorners,worldToLocal,type Vec} from './core/geometry';
+import {visibleFrames,frameForWidget} from './core/frame-visibility';
 import {MAX_AUDIO_BYTES,createAudioWidget,audioWaveform,formatAudioTime,type AudioMetadata} from './core/audio';
 import {audioCardLayout} from './render/audio-paint';
 import {icon} from './icons';
@@ -12,7 +13,7 @@ interface AudioAPI{
   getTool?():string;setTool?(tool:'select'):void;getBoardKey?():string|null;
   onChange?():void;
 }
-interface Player{element:HTMLDivElement;play:HTMLButtonElement;download:HTMLButtonElement;seek:HTMLInputElement;line:HTMLDivElement;time:HTMLSpanElement;audio:HTMLAudioElement;src:string}
+interface Player{element:HTMLDivElement;play:HTMLButtonElement;download:HTMLButtonElement;seek:HTMLInputElement;line:HTMLDivElement;time:HTMLSpanElement;audio:HTMLAudioElement;src:string;boardKey?:string|null}
 const message=(error:unknown,fallback:string)=>error instanceof Error?error.message:fallback;
 const sourceData=(blob:Blob)=>new Promise<string>((resolve,reject)=>{const reader=new FileReader();reader.onload=()=>resolve(String(reader.result));reader.onerror=()=>reject(new Error('Não foi possível ler o áudio.'));reader.readAsDataURL(blob);});
 async function audioDuration(blob:Blob,fallback=0):Promise<number>{
@@ -101,8 +102,9 @@ export function installAudio(api:AudioAPI){
   function download(id:string){const node=state.widgets.get(id);if(!node?.audio)return;const link=document.createElement('a');link.href=node.audio.src;const extension=node.audio.mime.split(';')[0]!.split('/')[1]?.replace('mpeg','mp3').replace('x-wav','wav')||'webm',title=(node.type==='frame'?node.title:node.content||node.audio.name).replace(/[<>:"/\\|?*]/g,'-');link.download=/\.[a-z0-9]{2,5}$/i.test(title)?title:`${title}.${extension}`;link.click();}
   function pauseOthers(id:string){for(const [other,player]of players)if(other!==id)player.audio.pause();}
   function playback(){
-    playFrame=0;let playing=false;
+    playFrame=0;let playing=false;const homeVisible=document.body.classList.contains('home-visible');
     for(const [id,player]of players){const node=state.widgets.get(id);if(!node?.audio)continue;const duration=Number.isFinite(player.audio.duration)?player.audio.duration:node.audio.duration,position=duration>0?Math.max(0,Math.min(1,player.audio.currentTime/duration)):0;
+      if(homeVisible||node.hidden||mindNodeHidden(state,id)||api.getBoardKey&&player.boardKey!==api.getBoardKey())player.audio.pause();
       player.seek.value=String(Math.round(position*1000));player.line.style.left=`${(76+260*position)/360*100}%`;player.line.hidden=player.audio.currentTime===0;player.time.hidden=player.audio.paused&&player.audio.currentTime===0;player.time.textContent=formatAudioTime(player.audio.currentTime);
       if(!player.audio.paused&&!player.audio.ended)playing=true;
     }
@@ -115,7 +117,7 @@ export function installAudio(api:AudioAPI){
     play.type='button';play.dataset.audioPlay='';play.innerHTML=icon('play',20);save.type='button';save.dataset.audioDownload='';save.setAttribute('aria-label','Baixar áudio original');save.title='Baixar áudio original';save.innerHTML=icon('download',16);
     seek.type='range';seek.min='0';seek.max='1000';seek.value='0';seek.step='1';seek.setAttribute('aria-label','Posição do áudio');line.className='audio-playhead';line.hidden=true;time.className='audio-current-time';time.hidden=true;
     audio.preload='none';audio.src=src;
-    const player:Player={element,play,download:save,seek,line,time,audio,src};
+    const player:Player={element,play,download:save,seek,line,time,audio,src,boardKey:api.getBoardKey?.()};
     const update=()=>{const active=!audio.paused&&!audio.ended;play.innerHTML=icon(active?'pause':'play',20);play.setAttribute('aria-label',active?'Pausar áudio':'Reproduzir áudio');play.setAttribute('aria-pressed',String(active));play.title=active?'Pausar áudio':'Reproduzir áudio';requestPlayback();};
     play.onclick=async event=>{event.stopPropagation();if(!audio.paused){audio.pause();return;}pauseOthers(id);try{await audio.play();}catch{notice('Não foi possível reproduzir este áudio. Baixe o original para abrir em outro aplicativo.');}update();};
     save.onclick=event=>{event.stopPropagation();download(id);};
@@ -125,13 +127,14 @@ export function installAudio(api:AudioAPI){
     element.append(play,save,seek,line,time);overlays.append(element);update();return player;
   }
   function refresh(){
-    for(const [id,player]of players)if(!state.widgets.get(id)?.audio){player.audio.pause();player.audio.removeAttribute('src');player.audio.load();player.element.remove();players.delete(id);}
-    const visible=camera.visibleWorldRect(),selectionTool=!api.getTool||api.getTool()==='select',frames=[...state.widgets.values()].filter(w=>w.type==='frame'&&!w.hidden).sort((a,b)=>a.width*a.height-b.width*b.height);
+    const homeVisible=document.body.classList.contains('home-visible');
+    for(const [id,player]of players)if(!state.widgets.get(id)?.audio||!homeVisible&&api.getBoardKey&&player.boardKey!==api.getBoardKey()){player.audio.pause();player.audio.removeAttribute('src');player.audio.load();player.element.remove();players.delete(id);}
+    const visible=camera.visibleWorldRect(),selectionTool=!api.getTool||api.getTool()==='select',frames=visibleFrames(state);
     for(const node of state.widgets.values()){
       if(!node.audio)continue;let player=players.get(node.id);if(!player){player=newPlayer(node.id,node.audio.src);players.set(node.id,player);}else if(player.src!==node.audio.src){player.audio.pause();player.audio.src=node.audio.src;player.src=node.audio.src;}
       const box=widgetAABB(node),outside=box.maxX<visible.minX||box.minX>visible.maxX||box.maxY<visible.minY||box.minY>visible.maxY;
-      player.element.hidden=!!node.hidden||mindNodeHidden(state,node.id)||outside||!selectionTool||node.width*camera.scale<60||node.height*camera.scale<24;
-      if(player.element.hidden&&(node.hidden||mindNodeHidden(state,node.id)||document.body.classList.contains('home-visible')))player.audio.pause();
+      player.element.hidden=homeVisible||!!node.hidden||mindNodeHidden(state,node.id)||outside||!selectionTool||node.width*camera.scale<60||node.height*camera.scale<24;
+      if(homeVisible||node.hidden||mindNodeHidden(state,node.id))player.audio.pause();
       const center=camera.worldToScreen({x:node.x+node.width/2,y:node.y+node.height/2}),layout=audioCardLayout(node),scale=camera.scale;
       Object.assign(player.element.style,{left:`${center.x}px`,top:`${center.y}px`,width:`${node.width*scale}px`,height:`${node.height*scale}px`,transform:`translate(-50%,-50%) rotate(${node.rotation}rad)`});
       player.element.style.setProperty('--audio-fill',node.style.fillColor==='transparent'?'#ffffff':node.style.fillColor);player.element.style.setProperty('--audio-ink',node.style.color==='transparent'?'#4262ff':node.style.color);player.element.dataset.selected=String(state.selection.has(node.id));
@@ -140,10 +143,12 @@ export function installAudio(api:AudioAPI){
       Object.assign(player.seek.style,{left:`${layout.waveX/node.width*100}%`,top:`${(layout.waveY-layout.waveHeight)/node.height*100}%`,width:`${layout.waveWidth/node.width*100}%`,height:`${layout.waveHeight*2*scale}px`});
       Object.assign(player.line.style,{top:`${(layout.waveY-layout.waveHeight)/node.height*100}%`,height:`${layout.waveHeight*2*scale}px`});
       // Controls follow frame clipping just like the card's canvas content.
-      const frame=frames.find(frame=>pointInWidget(frame,{x:node.x+node.width/2,y:node.y+node.height/2}));
+      const frame=frameForWidget(node,frames);
       player.element.style.clipPath=frame?`polygon(${widgetCorners(frame).map(point=>{const local=worldToLocal(node,point);return `${local.x*scale}px ${local.y*scale}px`;}).join(',')})`:'';
     }
   }
+  let lastHomeVisible=document.body.classList.contains('home-visible');
+  new MutationObserver(()=>{const visible=document.body.classList.contains('home-visible');if(visible!==lastHomeVisible){lastHomeVisible=visible;refresh();}}).observe(document.body,{attributes:true,attributeFilter:['class']});
 
   function openRecorder(){
     closeMenu();if(recording)return;api.setTool?.('select');const dialog=document.createElement('div');recording=dialog;dialog.id='audio-record-dialog';dialog.setAttribute('role','dialog');dialog.setAttribute('aria-modal','true');dialog.setAttribute('aria-label','Gravar áudio');

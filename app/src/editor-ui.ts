@@ -1,12 +1,11 @@
 import { FONT_OPTIONS, loadBoardFont } from './fonts';
 import { compactContextPanel, positionContextPanel, installContextStyles } from './context-position';
-import type { BoardState, CommandBus } from './core/commands';
+import type { BoardState, CommandBus, Command } from './core/commands';
 import type { Camera } from './core/camera';
 import type { Connector, ConnectorShape } from './core/connectors';
 import { SHAPE_OPTIONS, type ShapeWidget, type Style, type Widget } from './core/model';
 import { groupSelection, ungroupSelection, selectionRoots, captureSelection, duplicateSnapshot, frameSelection, itemLocked, memberSelection, arrangementRoots, arrangeSelection, type ArrangeMode } from './core/groups';
 import { shapeIconSvg } from './core/shapes';
-import { widgetAABB } from './core/geometry';
 import { icon } from './icons';
 import { relativeBorderScale } from './core/style-scale';
 import {sizeRangeMaximum,multipliedSize,formatSize} from './size-controls';
@@ -23,6 +22,8 @@ interface EditorUIApi {
   onCopyImage?(): void; onAddWaypoint?(): void; onRemoveWaypoint?(): void;
   onLink?():void;
   getGroupScope?(): string | null; onExitGroup?(): void;
+  entityAt?(point:{x:number;y:number}):string|undefined;
+  isTransforming?():boolean;
 }
 
 const MAIN_SHAPES = ['rectangle', 'round_rectangle', 'circle', 'triangle', 'rhombus'] as const;
@@ -49,6 +50,7 @@ export function installEditorUI(api: EditorUIApi) {
 #editor-context{width:242px;padding:5px}#editor-context button{display:flex;align-items:center;gap:9px;width:100%;text-align:left;padding:9px;font-size:12px}#editor-context kbd{margin-left:auto;color:#92928c;font:10px 'Segoe UI',sans-serif}#editor-context hr{border:0;border-top:1px solid #e7e7e5;margin:5px}
 #tool-hint{position:fixed;bottom:18px;left:50%;transform:translateX(-50%);padding:8px 14px;background:#fffdf5ee;border:1px solid #e7e7e5;border-radius:8px;color:#73726c;font:12px 'Segoe UI',sans-serif;pointer-events:none;z-index:14;max-width:60vw;text-align:center}#tool-hint[hidden]{display:none}
 #selection-properties .size-range-actions{display:flex;align-items:center;gap:8px}#selection-properties .size-range-actions button{border:1px solid #e1e5ed;min-width:30px;height:30px;padding:5px;display:grid;place-items:center}#selection-properties .size-range-actions span{flex:1;font-size:11px;color:#7b8290;text-align:center}
+#shape-picker,#connector-picker{max-width:calc(100vw - 94px);max-height:calc(100dvh - 100px);overflow:auto}
 `;
   document.head.append(css);
   const panel = (id: string, label: string) => {
@@ -64,6 +66,8 @@ export function installEditorUI(api: EditorUIApi) {
   const connectors = () => [...state.selection].map(id => state.connectors.get(id)).filter((c): c is Connector => !!c);
   const groupIds = () => selectionRoots(state).filter(id => state.groups.has(id));
   let renderKey = '', displayedSelection = '', copiedStyle: Style | null = null;
+  const strokeWidths=new WeakMap<object,number>();
+  const strokeWidth=(points:Array<{r:number}>)=>{let width=strokeWidths.get(points);if(width===undefined){width=points.reduce((sum,p)=>sum+p.r*2,0)/Math.max(1,points.length);strokeWidths.set(points,width);}return width;};
   let pointerInteraction=false,refreshAfterPointer=false,pointerRelease:ReturnType<typeof setTimeout>|undefined;
   const releasePointer=()=>{pointerInteraction=false;if(refreshAfterPointer){refreshAfterPointer=false;refresh();}};
   properties.addEventListener('pointerdown',()=>{if(pointerRelease)clearTimeout(pointerRelease);pointerInteraction=true;},true);
@@ -73,6 +77,8 @@ export function installEditorUI(api: EditorUIApi) {
   window.addEventListener('pointercancel',releasePointer,true);
   let expandedShapes = false, shapeTargetSelection = false;
   let preserveAspect=true,borderGesture=false,connectorWidthGesture=false;
+  const finishThicknessGesture=()=>{if(!borderGesture&&!connectorWidthGesture)return;borderGesture=false;connectorWidthGesture=false;bus.endTransaction();};
+  window.addEventListener('pointercancel',finishThicknessGesture,true);
   let connectorDefault = { shape: 'curved' as ConnectorShape, arrow: true };
   const connectorChoices: Array<{label:string;shape:ConnectorShape;arrow:boolean;path:string}> = [
     {label:'Linha reta sem seta',shape:'straight',arrow:false,path:'M3 22L34 3'},
@@ -97,6 +103,7 @@ export function installEditorUI(api: EditorUIApi) {
     picker.querySelector('.shape-grid')!.innerHTML=shapeButtons(options)||'<p class="empty-message">Nenhuma forma encontrada.</p>';
   }
   function closeMenus() {
+    finishThicknessGesture();
     const focused=document.activeElement as HTMLElement|null;
     if(focused&&properties.contains(focused)&&focused.matches('input,select,textarea'))focused.closest('details')?.querySelector<HTMLElement>('summary')?.focus({preventScroll:true});
     delete properties.dataset.openMenu;for(const menu of properties.querySelectorAll<HTMLDetailsElement>('details'))menu.open=false;
@@ -183,7 +190,10 @@ export function installEditorUI(api: EditorUIApi) {
     if(name==='lock'){const locked=!ids.every(id=>itemLocked(state,id));bus.beginTransaction(locked?'Bloquear':'Desbloquear');for(const id of ids)bus.exec({op:state.connectors.has(id)?'CONNECTOR_UPDATE':state.strokes.has(id)?'STROKE_UPDATE':'WIDGET_UPDATE',payload:{id,patch:{locked}}});bus.endTransaction();}
     if(name==='copy-style')copiedStyle=selected()[0]?structuredClone(selected()[0]!.style):null;
     if(name==='paste-style'&&copiedStyle)applyStyle(copiedStyle);
-    if(name==='clear'){bus.beginTransaction('Limpar conteúdo');for(const w of selected().filter(w=>!w.locked&&w.type!=='image'))bus.exec({op:'WIDGET_UPDATE',payload:{id:w.id,patch:w.type==='frame'?{title:''}:{content:''}}});bus.endTransaction();}
+    if(name==='clear'){bus.beginTransaction('Limpar conteúdo');for(const w of selected().filter(w=>!w.locked&&w.type!=='image')){
+      const patch=w.type==='frame'?{title:''}:{content:'',...(w.checklist?{checklist:{items:w.checklist.items.map(item=>({...item,text:'',checked:false}))}}:{}),...(w.table?{table:{...w.table,title:'',cells:w.table.cells.map(row=>row.map(()=>''))}}:{})};
+      bus.exec({op:'WIDGET_UPDATE',payload:{id:w.id,patch}});
+    }bus.endTransaction();}
     if(name==='frame')frameSelection(state,bus);if(name==='copy-image')api.onCopyImage?.();if(name==='exit-group')api.onExitGroup?.();
     if(name==='crop')api.onCrop();if(name==='circle-crop')(api.onCircleCrop??api.onCrop)();if(name==='reset-crop')api.onResetCrop();if(name==='replace-image')api.onReplaceImage?.();
     if(name==='flip-x')api.onFlipImage?.('x');if(name==='flip-y')api.onFlipImage?.('y');if(name==='download-image')api.onDownloadImage?.();
@@ -191,12 +201,19 @@ export function installEditorUI(api: EditorUIApi) {
     if(name==='edit-text')api.onEditText?.();
     if(name==='image')api.onImage();if(name==='undo')bus.undo();if(name==='redo')bus.redo();
     if(name==='add-waypoint')api.onAddWaypoint?.();if(name==='remove-waypoint')api.onRemoveWaypoint?.();
-    if(name==='reset-route')for(const c of connectors().filter(c=>!c.locked))bus.exec({op:'CONNECTOR_UPDATE',payload:{id:c.id,patch:{controlPoint:null,waypoints:null}}});
+    if(name==='reset-route'){
+      const commands:Command[]=connectors().filter(c=>!c.locked).map(c=>({op:'CONNECTOR_UPDATE',payload:{id:c.id,patch:{controlPoint:null,waypoints:null}}}));
+      if(commands.length)bus.exec({op:'BATCH',payload:{label:'Restaurar caminho',commands}});
+    }
     if(name==='reverse-connector'){bus.beginTransaction('Inverter direção');for(const c of connectors().filter(c=>!c.locked))bus.exec({op:'CONNECTOR_UPDATE',payload:{id:c.id,patch:{start:c.end,end:c.start,style:{...c.style,startCap:c.style.endCap??'none',endCap:c.style.startCap??'none'},waypoints:c.waypoints?[...c.waypoints].reverse():c.waypoints,captionPositions:(c.captions??[]).map((_,i)=>1-(c.captionPositions?.[i]??(i+1)/((c.captions?.length??0)+1)))}}});bus.endTransaction();}
-    if(name==='add-caption'){properties.dataset.openMenu='captions';for(const c of connectors().filter(c=>!c.locked)){
-      const captions=[...(c.captions??[]),'Rótulo'];const captionPositions=captions.map((_,i)=>c.captionPositions?.[i]??(i+1)/(captions.length+1));
-      bus.exec({op:'CONNECTOR_UPDATE',payload:{id:c.id,patch:{captions,captionPositions}}});
-    }}
+    if(name==='add-caption'){
+      properties.dataset.openMenu='captions';
+      const commands:Command[]=connectors().filter(c=>!c.locked).map(c=>{
+        const captions=[...(c.captions??[]),'Rótulo'];const captionPositions=captions.map((_,i)=>c.captionPositions?.[i]??(i+1)/(captions.length+1));
+        return {op:'CONNECTOR_UPDATE',payload:{id:c.id,patch:{captions,captionPositions}}};
+      });
+      if(commands.length)bus.exec({op:'BATCH',payload:{label:'Adicionar rótulo',commands}});
+    }
     if(name==='more-shapes'){closeMenus();expandedShapes=true;shapeTargetSelection=true;renderShapes();picker.hidden=false;picker.querySelector<HTMLInputElement>('input')?.focus();}
     context.hidden=true;renderKey='';refresh();
   }
@@ -271,8 +288,8 @@ export function installEditorUI(api: EditorUIApi) {
   properties.addEventListener('change',async event=>{
     const input=event.target as HTMLInputElement;
     if(input.disabled)return;
-    if(input.hasAttribute('data-border-scale')){if(!borderGesture)setBorderScale(Number(input.value)/100);else{bus.endTransaction();borderGesture=false;}renderKey='';refresh();return;}
-    if(input.hasAttribute('data-connector-width')){if(!connectorWidthGesture)setConnectorWidth(Number(input.value));else{bus.endTransaction();connectorWidthGesture=false;}renderKey='';refresh();return;}
+    if(input.hasAttribute('data-border-scale')){const ratio=Number(input.value)/100;if(borderGesture)finishThicknessGesture();else if(selected().some(w=>Math.abs(relativeBorderScale(w)-ratio)>1e-12))setBorderScale(ratio);renderKey='';refresh();return;}
+    if(input.hasAttribute('data-connector-width')){const width=Number(input.value);if(connectorWidthGesture)finishThicknessGesture();else if(connectors().some(c=>c.style.strokeWidth!==width))setConnectorWidth(width);renderKey='';refresh();return;}
     if(input.hasAttribute('data-aspect-lock')){preserveAspect=input.checked;renderKey='';return;}
     if(input.dataset.image){bus.beginTransaction('Formatar imagem');for(const w of selected())if(w.type==='image'&&!w.locked)bus.exec({op:'WIDGET_UPDATE',payload:{id:w.id,patch:{[input.dataset.image]:input.dataset.image==='opacity'?Math.max(0,Math.min(100,Number(input.value)))/100:input.value}}});bus.endTransaction();}
     else if(input.dataset.captionIndex!==undefined||input.dataset.captionPosition!==undefined){const c=connectors()[0];if(!c||c.locked)return;const i=Number(input.dataset.captionIndex??input.dataset.captionPosition),captions=[...(c.captions??[])],captionPositions=captions.map((_,n)=>c.captionPositions?.[n]??(n+1)/(captions.length+1));if(input.dataset.captionIndex!==undefined)captions[i]=input.value;else captionPositions[i]=Math.max(.02,Math.min(.98,Number(input.value)/100));bus.exec({op:'CONNECTOR_UPDATE',payload:{id:c.id,patch:{captions,captionPositions}}});}
@@ -306,9 +323,9 @@ export function installEditorUI(api: EditorUIApi) {
   });
   window.addEventListener('keydown',event=>{if(event.key==='Escape')closePanels();});
   document.querySelector('#app canvas')?.addEventListener('contextmenu',event=>{
-    event.preventDefault();const e=event as MouseEvent,p=api.camera.screenToWorld({x:e.clientX,y:e.clientY});
-    const hit=[...state.order].reverse().map(id=>state.widgets.get(id)).find(w=>{if(!w)return false;const r=widgetAABB(w);return p.x>=r.minX&&p.x<=r.maxX&&p.y>=r.minY&&p.y<=r.maxY;});
-    if(hit&&!state.selection.has(hit.id))bus.exec({op:'SELECTION_SET',payload:memberSelection(state,hit.id,api.getGroupScope?.())});
+    event.preventDefault();const e=event as MouseEvent,rect=(event.currentTarget as HTMLElement).getBoundingClientRect(),p=api.camera.screenToWorld({x:e.clientX-rect.left,y:e.clientY-rect.top});
+    const hit=api.entityAt?.(p);
+    if(hit&&!state.selection.has(hit))bus.exec({op:'SELECTION_SET',payload:memberSelection(state,hit,api.getGroupScope?.())});
     const locked=[...state.selection].some(id=>itemLocked(state,id));
     const w=selected()[0];
     context.innerHTML=state.selection.size?
@@ -325,14 +342,19 @@ export function installEditorUI(api: EditorUIApi) {
     properties.hidden=!ids.length||['hand','brush','highlighter','eraser'].includes(currentTool);
     if(selectionKey!==displayedSelection){closeMenus();displayedSelection=selectionKey;renderKey='';}
     if(properties.hidden)return;
+    if(api.isTransforming?.())return;
     if(properties.contains(document.activeElement)&&document.activeElement?.matches('input,select,textarea'))return;
-    const key=JSON.stringify([widgets.map(w=>({...w,...(w.type==='image'?{src:undefined}:{})})),cs,strokes,[...state.groups],scope,ids,!!copiedStyle]);if(key===renderKey)return;renderKey=key;
+    // Toolbar controls never display media payloads, text bodies or stroke samples.
+    const widgetKeys=widgets.map(w=>[w.id,w.type,w.x,w.y,w.width,w.height,w.rotation,w.locked,w.link,w.style,w.type==='shape'?w.shape:undefined,w.type==='image'?w.maskShape:undefined,w.type==='image'?w.opacity:undefined,!!w.checklist,!!w.table]);
+    const connectorKeys=cs.map(c=>[c.id,c.locked,c.shape,c.style,c.captions,c.captionPositions,c.waypoints?.length??0]);
+    const strokeKeys=strokes.map(s=>[s.id,s.locked,s.color,s.opacity,s.tool,strokes.length===ids.length?strokeWidth(s.points):undefined]);
+    const key=JSON.stringify([widgetKeys,connectorKeys,strokeKeys,selectionRoots(state),groupIds(),arrangementRoots(state,scope).length,scope,ids,!!copiedStyle]);if(key===renderKey)return;renderKey=key;
     const w=widgets[0],single=ids.length===1,locked=ids.some(id=>itemLocked(state,id)),allWidgets=widgets.length===ids.length,allText=allWidgets&&widgets.every(w=>w.type!=='image');
     let html=scope?button('exit-group','Sair do grupo','arrow-left')+separator:'';
     if(!single)html+=`<span class="selection-count">${groupIds().length===1&&selectionRoots(state).length===1?'Grupo':`${ids.length} objetos`}</span>`;
     if(cs.length===ids.length&&cs[0])html+=connectorToolbar(cs[0]);
     else if(strokes.length===ids.length&&strokes[0]){
-      const s=strokes[0],width=s.points.reduce((sum,p)=>sum+p.r*2,0)/Math.max(1,s.points.length);
+      const s=strokes[0],width=strokeWidth(s.points);
       html+=menu('stroke','Traço do pincel',icon('brush'),palette('stroke','color','Cor do traço',s.color)+number('stroke','width','Espessura do traço',width,.5,Infinity,.5)+number('stroke','opacity','Opacidade do traço',(s.opacity??(s.tool==='highlighter'?.35:1))*100,0,100));
     }else if(w){
       if(single&&w.type==='shape')html+=shapeMenu(w)+separator;

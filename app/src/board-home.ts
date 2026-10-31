@@ -50,6 +50,7 @@ export function installBoardHome(api: HomeAPI) {
     }
   } catch { /* The board bodies remain in IndexedDB even if an index is unavailable. */ }
   let activeId: string | null = null, section = "home", search = "", modal: HTMLElement | null = null, busy = false;
+  let modalReturnFocus:HTMLElement|null=null,menuReturnFocus:HTMLElement|null=null;
   const style = document.createElement("style");
   style.textContent = `
     body.home-visible #app{visibility:hidden;pointer-events:none}
@@ -153,14 +154,22 @@ export function installBoardHome(api: HomeAPI) {
     index.boards.unshift({id,title:name,createdAt:Date.now(),editedAt:Date.now(),starred:false,project:index.projects.some(p=>p.id===project)?project:null,trashedAt:null,thumbnail:await smallThumbnail()});
     saveIndex();await openBoard(id);
   }
-  function closeMenu() { menu.hidden = true; }
-  function closeModal() { modal?.remove(); modal = null; }
+  function restoreFocus(target:HTMLElement|null){
+    let next=target?.isConnected&&!target.closest('[hidden]')?target:null;
+    if(!next&&target){
+      for(const attribute of ['data-more','data-project-more','aria-label','data-action']){const value=target.getAttribute(attribute);if(value){next=root.querySelector<HTMLElement>(`[${attribute}="${CSS.escape(value)}"]`);if(next)break;}}
+    }
+    next?.focus({preventScroll:true});
+  }
+  function closeMenu(restore=false) { menu.hidden = true;if(restore)restoreFocus(menuReturnFocus); }
+  function closeModal(restore=true) { const target=modalReturnFocus;modal?.remove();modal=null;modalReturnFocus=null;if(restore)queueMicrotask(()=>restoreFocus(target)); }
   function openModal(title: string, content: string, submitLabel: string, submit: (form: HTMLFormElement) => Promise<void> | void) {
-    closeModal(); closeMenu(); const backdrop = document.createElement("div"); modal = backdrop; backdrop.className = "bh-modal"; backdrop.setAttribute("role", "dialog"); backdrop.setAttribute("aria-modal", "true"); backdrop.setAttribute("aria-label", title);
+    const focused=document.activeElement as HTMLElement|null,target=focused&&menu.contains(focused)?menuReturnFocus:focused;
+    closeModal(false);closeMenu();modalReturnFocus=target;const backdrop = document.createElement("div"); modal = backdrop; backdrop.className = "bh-modal"; backdrop.setAttribute("role", "dialog"); backdrop.setAttribute("aria-modal", "true"); backdrop.setAttribute("aria-label", title);
     backdrop.innerHTML = `<form class="bh-modal-card"><h2>${escapeHTML(title)}</h2>${content}<div class="bh-modal-actions"><button type="button" class="bh-secondary" data-cancel>Cancelar</button><button type="submit" class="bh-primary">${escapeHTML(submitLabel)}</button></div></form>`;
     const form = backdrop.querySelector("form")!; form.onsubmit = async event => { event.preventDefault(); const button = form.querySelector<HTMLButtonElement>('[type="submit"]')!; button.disabled = true; try { await submit(form); closeModal(); } catch (error) { button.disabled = false; report(error); } };
-    backdrop.querySelector<HTMLElement>("[data-cancel]")!.onclick = closeModal; backdrop.onclick = event => { if (event.target === backdrop) closeModal(); }; document.body.append(backdrop);
-    const input = form.querySelector<HTMLInputElement>("input"); input?.focus(); input?.select();
+    backdrop.querySelector<HTMLElement>("[data-cancel]")!.onclick = () => closeModal(); backdrop.onclick = event => { if (event.target === backdrop) closeModal(); }; document.body.append(backdrop);
+    const input = form.querySelector<HTMLInputElement>("input");(input??form.querySelector<HTMLElement>('select,button,textarea'))?.focus();input?.select();
   }
   function projectOptions(selected: string | null = null) { return `<option value="">Sem projeto</option>${index.projects.map(project => `<option value="${escapeHTML(project.id)}" ${selected === project.id ? "selected" : ""}>${escapeHTML(project.title)}</option>`).join("")}`; }
   function buildBoard(title: string) {
@@ -196,6 +205,7 @@ export function installBoardHome(api: HomeAPI) {
   function trashBoard(board: BoardMeta) { board.trashedAt = Date.now(); saveIndex(); render(); toast("Board movido para a lixeira. Você pode restaurá-lo."); }
   function restoreBoard(board: BoardMeta) { board.trashedAt = null; saveIndex(); render(); toast("Board restaurado"); }
   function openMenu(board: BoardMeta, x: number, y: number) {
+    menuReturnFocus=root.querySelector<HTMLElement>(`[data-more="${CSS.escape(board.id)}"]`);
     const items = board.trashedAt !== null ? [["restore", "restore", "Restaurar board"]] : [["open", "board", "Abrir board"], ["rename", "edit", "Renomear"], ["duplicate", "copy", "Duplicar"], ["star", "star", board.starred ? "Remover dos favoritos" : "Adicionar aos favoritos"], ["move", "folder", "Mover para projeto"], ["trash", "trash", "Mover para a lixeira"]];
     menu.innerHTML = items.map(([action, glyph, label]) => `<button role="menuitem" data-board-action="${action}" ${action === "trash" ? 'class="danger"' : ""}>${icon(glyph!, 17)}<span>${label}</span></button>`).join("");
     menu.hidden = false; menu.style.left = `${Math.max(8, Math.min(innerWidth - 240, x))}px`; menu.style.top = `${Math.max(8, Math.min(innerHeight - menu.offsetHeight - 8, y))}px`;
@@ -248,7 +258,15 @@ export function installBoardHome(api: HomeAPI) {
   root.addEventListener("change", event => { const input = event.target as HTMLSelectElement; if (input.id === "bh-sort") { index.sort = input.value as HomeIndex["sort"]; try { saveIndex(); render(); } catch (error) { report(error); } } });
   root.addEventListener("contextmenu", event => { const card = (event.target as HTMLElement).closest<HTMLElement>("[data-card]"); if (!card) return; event.preventDefault(); const board = meta(card.dataset.card); if (board) openMenu(board, event.clientX, event.clientY); });
   document.addEventListener("pointerdown", event => { if (!menu.contains(event.target as Node)) closeMenu(); });
-  document.addEventListener("keydown", event => { if (root.hidden && !modal) return; if (event.key === "Escape") { if (modal) closeModal(); else closeMenu(); } if (!root.hidden || modal) event.stopPropagation(); }, true);
+  document.addEventListener("keydown", event => {
+    if(root.hidden&&!modal)return;
+    if(event.key==='Escape'){event.preventDefault();if(modal)closeModal();else closeMenu(true);event.stopPropagation();return;}
+    if(modal&&event.key==='Tab'){
+      const controls=[...modal.querySelectorAll<HTMLElement>('input:not(:disabled),select:not(:disabled),textarea:not(:disabled),button:not(:disabled),a[href],[tabindex]:not([tabindex="-1"])')].filter(control=>control.getClientRects().length>0),index=controls.indexOf(document.activeElement as HTMLElement);
+      if(event.shiftKey&&index<=0){event.preventDefault();controls.at(-1)?.focus();}else if(!event.shiftKey&&(index<0||index===controls.length-1)){event.preventDefault();controls[0]?.focus();}
+    }
+    if(!root.hidden||modal)event.stopPropagation();
+  }, true);
   window.addEventListener("hashchange", () => { const match = location.hash.match(/^#board\/(.+)$/); if (match) { let id: string; try { id = decodeURIComponent(match[1]!); } catch { return; } if (id !== activeId) void openBoard(id, false).catch(report); } else if (activeId) void show().catch(report); });
 
   async function start() {

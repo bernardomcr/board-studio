@@ -10,7 +10,7 @@ async function select(page,id){await page.evaluate(id=>window.__board.bus.exec({
 
 test('the mind-map toolbar creates an editable root and Tab/Enter build its hierarchy',async({page})=>{
   await blank(page);await page.getByRole('button',{name:'Mapa mental',exact:true}).click();await expect(page.locator('#inline-editor')).toBeVisible();
-  await page.keyboard.insertText('Minha ideia');await page.keyboard.press('Tab');await expect(page.locator('#inline-editor')).toBeVisible();await page.keyboard.insertText('Primeiro ramo');await page.keyboard.press('Enter');await page.keyboard.insertText('Segundo ramo');await page.keyboard.press('Control+Enter');
+  await page.keyboard.insertText('Minha ideia');await page.keyboard.press('Tab');await expect(page.locator('#inline-editor')).toBeVisible();await page.keyboard.insertText('Primeiro ramo');await page.keyboard.press('Enter');await expect(page.locator('#inline-editor')).toBeHidden();await page.keyboard.press('Enter');await page.keyboard.insertText('Segundo ramo');await page.keyboard.press('Control+Enter');
   const nodes=await page.evaluate(()=>[...window.__board.state.widgets.values()].filter(w=>w.mind).map(w=>({id:w.id,parent:w.mind.parentId,text:w.content})));
   expect(nodes).toHaveLength(3);const root=nodes.find(w=>!w.parent);expect(root.text).toBe('Minha ideia');expect(nodes.filter(w=>w.parent===root.id).map(w=>w.text)).toEqual(['Primeiro ramo','Segundo ramo']);
   await expect(page.locator('#mindmap-properties')).toBeVisible();await expect(page.locator('#selection-properties')).toBeHidden();

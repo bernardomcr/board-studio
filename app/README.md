@@ -23,7 +23,8 @@ No Windows, `../TESTAR.cmd` compila e abre `http://localhost:4173`. Os boards fi
 | Laço | L |
 | Forma / texto / nota / quadro | R / T / S / F |
 | Conector | C ou puxar uma porta de um objeto |
-| Mapa mental | Botão Mapa mental; Tab adiciona filho, Enter adiciona irmão |
+| Mapa mental selecionado | Tab adiciona filho; Enter adiciona irmão; Shift+Enter adiciona irmão acima |
+| Editar tópico | Enter confirma; Shift+Enter quebra linha; Escape cancela |
 | Recolher um ramo | Espaço com um tópico selecionado ou botão de recolher |
 | Lista / tabela / áudio | Botões na barra lateral |
 | Link em texto ou objeto | Ctrl+K ou botão de link da seleção |
@@ -32,6 +33,7 @@ No Windows, `../TESTAR.cmd` compila e abre `http://localhost:4173`. Os boards fi
 | Redimensionar | Arrastar alças; texto muda o tamanho das letras |
 | Agrupar / desagrupar | Ctrl+G / Ctrl+Shift+G |
 | Entrar em grupo | Duplo clique; Alt+clique seleciona um membro |
+| Ampliar/reduzir seleção | Shift+clique; grupos mistos entram e saem como uma unidade |
 | Duplicar | Ctrl+D |
 | Copiar / colar | Ctrl+C / Ctrl+V |
 | Ajustar à tela | Shift+1 |

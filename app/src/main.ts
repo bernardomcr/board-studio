@@ -19,6 +19,7 @@ import {
   type Vec,
 } from "./core/geometry";
 import { snapMove, type Guide } from "./core/snapping";
+import {visibleFrames,framePointVisible,pointInVisibleWidget} from './core/frame-visibility';
 import {
   connectorEditPoints,connectorInsertWaypoint,connectorPointAt,connectorClosestFraction,
   connectorMidpoint,
@@ -91,6 +92,8 @@ const brushPreview=installBrushPreview(app.stage,camera);
 
 const STORAGE_KEY = "board-app:v1";
 let home:ReturnType<typeof installBoardHome>|undefined;
+let boardEpoch=0;
+const mediaBoardKey=()=>{const id=home?.currentId();return id?`${id}:${boardEpoch}`:null;};
 const storageKey=()=>home?.currentKey()??STORAGE_KEY;
 
 interface SavedBoard {
@@ -114,6 +117,7 @@ function loadBoard(stored?:SavedBoard): boolean {
     const raw = stored ? null : localStorage.getItem(STORAGE_KEY);
     if (!stored&&!raw) return false;
     const data = stored ?? JSON.parse(raw!) as SavedBoard;
+    boardEpoch++;
     state.widgets.clear();state.order=[];state.connectors.clear();state.connectorOrder=[];state.strokes.clear();state.strokeOrder=[];state.groups.clear();state.selection.clear();
     state.background={...DEFAULT_BACKGROUND};
     if(data.title)document.getElementById("board-title")!.textContent=data.title;
@@ -427,12 +431,12 @@ function beginEdit(w: Widget): void {
   scene.setTextVisible(w.id, false);
 
   el.addEventListener("keydown", (event) => {
-    if(w.mind&&(event.key==='Tab'||event.key==='Enter'&&!event.shiftKey&&!event.ctrlKey&&!event.metaKey)){
-      event.preventDefault();event.stopPropagation();const key=event.key as 'Tab'|'Enter';endEdit(true);mindmapUI?.afterEdit(w.id,key);return;
+    if(w.mind&&!event.ctrlKey&&!event.metaKey&&(event.key==='Tab'||event.key==='Enter'&&!event.shiftKey)){
+      event.preventDefault();event.stopPropagation();endEdit(true);if(event.key==='Tab')mindmapUI?.afterEdit(w.id,'Tab');return;
     }
     if (event.key === "Escape") {
       event.preventDefault();
-      endEdit(!!w.mind);
+      event.stopPropagation();endEdit(false);
     } else if (event.key === "Enter" && (event.ctrlKey || event.metaKey)) {
       event.preventDefault();
       endEdit(true);
@@ -603,7 +607,7 @@ function updateCursor(): void {
 toolbar.addEventListener("click", (e) => {
   const btn = (e.target as HTMLElement).closest<HTMLButtonElement>("button[data-tool]");
   if (!btn || btn.disabled || !btn.dataset.tool) return;
-  if (btn.dataset.tool === "image") { imagePicker.click(); return; }
+  if (btn.dataset.tool === "image") { imagePickerBoardKey=mediaBoardKey();imagePicker.click(); return; }
   if (btn.dataset.tool === "shape") { editorUI?.openShapes(); return; }
   if (btn.dataset.tool === "connector") { if(tool==='connector')editorUI?.openConnectors();else setTool('connector');return; }
   if (btn.dataset.tool === "select") {setTool(tool==="select"?"hand":"select");return;}
@@ -665,16 +669,30 @@ document.getElementById("export")?.addEventListener("click", () => void exportPn
 document.getElementById("export-svg")?.addEventListener("click", () => exportSvg());
 
 const helpPanel = document.getElementById("help-panel")!;
+let helpPreviousFocus:HTMLElement|null=null;
 
 function toggleHelp(force?: boolean): void {
   const next = force ?? helpPanel.hasAttribute("hidden");
+  if(next===!helpPanel.hidden)return;
+  if(next)helpPreviousFocus=document.activeElement instanceof HTMLElement?document.activeElement:null;
   helpPanel.toggleAttribute("hidden", !next);
+  if(next)helpPanel.querySelector<HTMLButtonElement>('[data-help-close]')?.focus();
+  else if(helpPreviousFocus?.isConnected)helpPreviousFocus.focus();
 }
 
 document.getElementById("help")?.addEventListener("click", () => toggleHelp());
 helpPanel.addEventListener("click", (event) => {
-  if (event.target === helpPanel) toggleHelp(false);
+  if (event.target === helpPanel||(event.target as Element).closest('[data-help-close]')) toggleHelp(false);
 });
+window.addEventListener('keydown',event=>{
+  if(helpPanel.hidden)return;
+  if(event.key==='Escape'){event.preventDefault();toggleHelp(false);}
+  else if(event.key==='Tab'){
+    event.preventDefault();const controls=[...helpPanel.querySelectorAll<HTMLElement>('button,a[href],[tabindex="0"]')];
+    const index=controls.indexOf(document.activeElement as HTMLElement);controls[(index+(event.shiftKey?-1:1)+controls.length)%controls.length]?.focus();
+  }
+  event.stopImmediatePropagation();
+},true);
 
 document.getElementById("undo")!.addEventListener("click", () => bus.undo());
 document.getElementById("redo")!.addEventListener("click", () => bus.redo());
@@ -759,8 +777,9 @@ let cursorWorld: Vec = { x: 0, y: 0 };
 let clipboard: EntitySnapshot = {widgets:[],connectors:[],strokes:[],groups:[]};
 let clipboardToken='';
 const BOARD_CLIPBOARD_TYPE='application/x-board-studio';
+const canvasClipboardBlocked=()=>document.body.classList.contains('home-visible')||[...document.querySelectorAll<HTMLElement>('dialog[open],[role="dialog"][aria-modal="true"]')].some(dialog=>!dialog.hidden&&dialog.getClientRects().length>0);
 document.addEventListener('copy',event=>{
-  if(event.defaultPrevented||isClipboardEditor(event.target)||document.body.classList.contains('home-visible')||!event.clipboardData)return;
+  if(event.defaultPrevented||isClipboardEditor(event.target)||canvasClipboardBlocked()||!event.clipboardData)return;
   const snapshot=captureSelection(state);if(!snapshot.widgets.length&&!snapshot.connectors.length&&!snapshot.strokes.length)return;
   clipboard=snapshot;clipboardToken=crypto.randomUUID();
   event.clipboardData.setData(BOARD_CLIPBOARD_TYPE,clipboardToken);
@@ -770,7 +789,7 @@ document.addEventListener('copy',event=>{
 // Images consume their native paste first. A stale in-app copy must never
 // suppress a screenshot or a photo copied later in another application.
 window.addEventListener('paste',event=>{
-  if(event.defaultPrevented||isClipboardEditor(event.target)||document.body.classList.contains('home-visible')||!event.clipboardData)return;
+  if(event.defaultPrevented||isClipboardEditor(event.target)||canvasClipboardBlocked()||!event.clipboardData)return;
   if(clipboardToken&&event.clipboardData.getData(BOARD_CLIPBOARD_TYPE)===clipboardToken){event.preventDefault();duplicateSnapshot(state,bus,clipboard);}
 });
 
@@ -821,7 +840,8 @@ function entityHidden(id:string):boolean{const w=state.widgets.get(id);if(w)retu
 
 function connectionTarget(p:Vec):Widget|undefined {
   const direct = topmostAt(p); if(direct && direct.type!=="frame"&&!widgetHidden(direct)&&!direct.locked) return direct;
-  return [...state.widgets.values()].sort((a,b)=>b.z-a.z).find(w=>{if(w.type==="frame"||widgetHidden(w)||w.locked)return false;const anchor=anchorWorldOf(w,nearestAnchor(w,p));return !!anchor && Math.hypot(anchor.x-p.x,anchor.y-p.y)*camera.scale<14;});
+  const frames=visibleFrames(state);
+  return [...state.widgets.values()].sort((a,b)=>b.z-a.z).find(w=>{if(w.type==="frame"||widgetHidden(w)||w.locked)return false;const anchor=anchorWorldOf(w,nearestAnchor(w,p));return !!anchor&&framePointVisible(w,anchor,frames)&&Math.hypot(anchor.x-p.x,anchor.y-p.y)*camera.scale<14;});
 }
 function nearbyConnectionTargets(p:Vec,excludeId?:string):Widget[]{
   const view=camera.visibleWorldRect(),distance=(w:Widget)=>{const b=widgetAABB(w);return Math.hypot(Math.max(b.minX-p.x,0,p.x-b.maxX),Math.max(b.minY-p.y,0,p.y-b.maxY))*camera.scale;};
@@ -829,8 +849,7 @@ function nearbyConnectionTargets(p:Vec,excludeId?:string):Widget[]{
 }
 function visibleConnectionPort(w:Widget,anchor:Endpoint):boolean {
   const point=resolveEndpoint(anchor,state.widgets);if(!point)return false;
-  const frame=[...state.widgets.values()].filter(f=>f.type==='frame'&&!f.hidden&&pointInWidget(f,widgetCenter(w))).sort((a,b)=>a.width*a.height-b.width*b.height)[0];
-  if(frame&&!pointInWidget(frame,point))return false;
+  if(!framePointVisible(w,point,visibleFrames(state)))return false;
   const cover=topmostAt(point);return !cover||cover.id===w.id;
 }
 /** Enter/hold radii make magnetic ports stable instead of flickering at one threshold. */
@@ -880,12 +899,13 @@ function connectionHandles(w:Widget):Array<{point:Vec;anchor:Endpoint}> {
   });
 }
 function topmostAt(p: Vec): Widget | undefined {
-  // respeita o z EFETIVO: quadros desenham atrás de tudo (z = -10000 + z)
+  // The frame mask and the global layer order also govern canvas input.
+  const frames=visibleFrames(state);
   let best: Widget | undefined;
   let bestZ = Number.NEGATIVE_INFINITY;
   for (const id of state.order) {
     const w = state.widgets.get(id);
-    if (!w || widgetHidden(w) || !pointInWidget(w, p)) continue;
+    if (!w || widgetHidden(w) || !pointInVisibleWidget(w,p,frames)) continue;
     const z = w.z;
     if (z > bestZ) {
       bestZ = z;
@@ -918,6 +938,17 @@ function rotateHandleAtScreen(s: Vec): boolean {
   return Boolean(p && Math.hypot(p.x - s.x, p.y - s.y) <= HANDLE_HIT + 2);
 }
 function selectionHandlesVisible():boolean{const box=selectionBox();return !!box&&box.width*camera.scale>=32&&box.height*camera.scale>=24;}
+/** Group membership is one selection unit across shapes, strokes and connectors. */
+function selectClickedEntity(id:string,event:PointerEvent):boolean{
+  const base=event.altKey?[id]:groupMembersOf(id);
+  if(event.shiftKey){
+    const remove=base.every(member=>state.selection.has(member)),next=new Set(state.selection);
+    for(const member of base)if(remove)next.delete(member);else next.add(member);
+    bus.exec({op:'SELECTION_SET',payload:[...next]});return remove;
+  }
+  if(!state.selection.has(id)||event.altKey)bus.exec({op:'SELECTION_SET',payload:base});
+  return false;
+}
 
 let liveGestureFrame=0,liveGestureUpdate:(()=>void)|null=null;
 function queueGestureUpdate(update:()=>void):void{liveGestureUpdate=update;if(!liveGestureFrame)liveGestureFrame=requestAnimationFrame(flushGestureUpdate);}
@@ -1108,29 +1139,20 @@ if (state.selection.size > 1) {
   if (!hit) {
     const connector = front?.type==='connector'?state.connectors.get(front.id):undefined;
     if (connector) {
-      const ids=memberSelection(state,connector.id,isolatedGroup);bus.exec({op:"SELECTION_SET",payload:ids});
+      if(selectClickedEntity(connector.id,e)){gesture={kind:'none'};return;}const ids=[...state.selection];
       if(!ids.some(id=>itemLocked(state,id))){bus.beginTransaction("Mover seleção");gesture={kind:"drag",ids,start:p,delta:{x:0,y:0},initial:captureSelection(state,ids),bounds:selectedBounds(state,ids)};return;}
       gesture = { kind: "none" };
       return;
     }
     const stroke=front?.type==='stroke'?state.strokes.get(front.id):undefined;
-    if(stroke){const ids=memberSelection(state,stroke.id,isolatedGroup);bus.exec({op:"SELECTION_SET",payload:ids});if(!ids.some(id=>itemLocked(state,id))){bus.beginTransaction("Mover seleção");gesture={kind:"drag",ids,start:p,delta:{x:0,y:0},initial:captureSelection(state,ids),bounds:selectedBounds(state,ids)};}return;}
+    if(stroke){if(selectClickedEntity(stroke.id,e)){gesture={kind:'none'};return;}const ids=[...state.selection];if(!ids.some(id=>itemLocked(state,id))){bus.beginTransaction("Mover seleção");gesture={kind:"drag",ids,start:p,delta:{x:0,y:0},initial:captureSelection(state,ids),bounds:selectedBounds(state,ids)};}return;}
     isolatedGroup=null;
     bus.exec({ op: "SELECTION_SET", payload: [] });
     gesture = { kind: "marquee", start: p, current: p };
     return;
   }
 
-  if (!state.selection.has(hit.id)) {
-    const base = e.altKey ? [hit.id] : groupMembersOf(hit.id);
-    const ids = e.shiftKey ? [...new Set([...state.selection, ...base])] : base;
-    bus.exec({ op: "SELECTION_SET", payload: ids });
-  } else if (e.shiftKey) {
-    const ids = [...state.selection].filter((id) => id !== hit.id);
-    bus.exec({ op: "SELECTION_SET", payload: ids });
-    gesture = { kind: "none" };
-    return;
-  }
+  if(selectClickedEntity(hit.id,e)){gesture={kind:'none'};return;}
 
   if(hit.link&&/^(https?:|mailto:)/i.test(hit.link)&&!e.altKey&&!e.shiftKey&&!e.ctrlKey&&!e.metaKey)clickedObjectLink={id:hit.id,url:hit.link,start:p};
 
@@ -1358,7 +1380,7 @@ function endGesture(e: PointerEvent): void {
     mindmapUI?.clearDrop();
     creationPreview.clear();
     brushPreview.clear();brushCursor?.adjusting(false);drawingUI?.commitSettings();
-    bus.endTransaction();gesture={kind:"none"};pendingConnection=null;connectPreview=null;activeGuides=[];drawSelection();updateCursor();return;
+    bus.endTransaction();gesture={kind:"none"};pendingConnection=null;connectPreview=null;activeGuides=[];drawSelection();updateCursor();refreshChrome();return;
   }
   let completionId:string|undefined;
   switch (gesture.kind) {
@@ -1453,6 +1475,7 @@ function endGesture(e: PointerEvent): void {
   bus.endTransaction();
   if(objectLink&&e.type==='pointerup'){const rect=app.canvas.getBoundingClientRect(),point=camera.screenToWorld({x:e.clientX-rect.left,y:e.clientY-rect.top});if(Math.hypot(point.x-objectLink.start.x,point.y-objectLink.start.y)*camera.scale<4&&state.widgets.has(objectLink.id))window.open(objectLink.url,'_blank','noopener,noreferrer');}
   gesture = { kind: "none" };
+  refreshChrome();
   activeGuides = [];
   connectPreview = null;
   drawSelection();
@@ -1499,6 +1522,10 @@ window.addEventListener("keydown", (e) => {
     return;
   }
 
+  // Native controls own Space/Enter and navigation while they have focus.
+  // Modifier commands such as Undo remain available outside text-entry fields.
+  if([' ','Enter','Tab','ArrowUp','ArrowDown','ArrowLeft','ArrowRight','Home','End','PageUp','PageDown'].includes(e.key)&&target?.closest('button,summary,a[href],[role="button"],[role="menuitem"],[role="checkbox"]')&&!e.ctrlKey&&!e.metaKey)return;
+
   if(mindmapUI?.handleKey(e))return;
   if (e.code === "Space") {
     spaceDown = true;
@@ -1530,7 +1557,7 @@ window.addEventListener("keydown", (e) => {
   if (mod && (e.key === "]" || e.key === "[")) {
     e.preventDefault();
     const ids = [...state.selection];
-    if (ids.length === 0) return;
+    if (ids.length === 0||ids.some(id=>itemLocked(state,id))) return;
     const direction = e.key === "]"
       ? e.shiftKey ? "front" : "forward"
       : e.shiftKey ? "back" : "backward";
@@ -1542,7 +1569,7 @@ window.addEventListener("keydown", (e) => {
     bus.exec({ op: "SELECTION_SET", payload: [...state.order,...state.connectorOrder,...state.strokeOrder].filter(id=>!entityHidden(id)) });
     return;
   }
-  if(mod&&key==="g"){e.preventDefault();if(e.shiftKey)ungroupSelection(state,bus);else groupSelection(state,bus);return;}
+  if(mod&&key==="g"){e.preventDefault();if([...state.selection].some(id=>itemLocked(state,id)))return;if(e.shiftKey)ungroupSelection(state,bus);else groupSelection(state,bus);return;}
   // Let the browser dispatch native copy/paste events, including clipboard images.
   if(mod&&(key==='c'||key==='v'))return;
   if(mod&&key==="d"){e.preventDefault();duplicateSnapshot(state,bus,captureSelection(state));return;}
@@ -1668,31 +1695,38 @@ function editWaypoint(remove:boolean){
 }
 async function copySelectionImage(){
   const r=selectionRect();if(!r)return;
-  const subset={...state,widgets:new Map([...state.widgets].filter(([id])=>state.selection.has(id))),order:state.order.filter(id=>state.selection.has(id)),connectors:new Map([...state.connectors].filter(([id])=>state.selection.has(id))),connectorOrder:state.connectorOrder.filter(id=>state.selection.has(id)),strokes:new Map([...state.strokes].filter(([id])=>state.selection.has(id))),strokeOrder:state.strokeOrder.filter(id=>state.selection.has(id))};
+  const selectedConnectors=[...state.connectors].filter(([id])=>state.selection.has(id)).map(([id,c])=>{
+    const endpoint=(e:Endpoint):Endpoint=>{if(e.kind==='point'||state.selection.has(e.widgetId))return e;const point=resolveEndpoint(e,state.widgets);return point?{kind:'point',...point}:e;};
+    return [id,{...c,start:endpoint(c.start),end:endpoint(c.end)}] as const;
+  });
+  const subset={...state,widgets:new Map([...state.widgets].filter(([id])=>state.selection.has(id))),order:state.order.filter(id=>state.selection.has(id)),connectors:new Map(selectedConnectors),connectorOrder:state.connectorOrder.filter(id=>state.selection.has(id)),strokes:new Map([...state.strokes].filter(([id])=>state.selection.has(id))),strokeOrder:state.strokeOrder.filter(id=>state.selection.has(id))};
   const svg=await embedSvgFonts(boardToSvg(subset,{background:"none"}),[...subset.widgets.values()].map(w=>w.style.fontFamily)),url=URL.createObjectURL(new Blob([svg],{type:"image/svg+xml"}));
   try{const img=new Image();img.src=url;await img.decode();const canvas=document.createElement("canvas"),scale=Math.min(2,4096/Math.max(img.width,img.height));canvas.width=Math.max(1,Math.ceil(img.width*scale));canvas.height=Math.max(1,Math.ceil(img.height*scale));canvas.getContext("2d")!.drawImage(img,0,0,canvas.width,canvas.height);const blob=await new Promise<Blob|null>(resolve=>canvas.toBlob(resolve));if(blob){try{await navigator.clipboard.write([new ClipboardItem({"image/png":blob})]);}catch{downloadBlob(blob,"selecao.png");}}}finally{URL.revokeObjectURL(url);}
 }
 const lassoButton=document.createElement("button");lassoButton.dataset.tool="lasso";lassoButton.dataset.label="Selecionar com laço (L)";lassoButton.setAttribute("aria-label","Laço");lassoButton.title="Laço (L)";lassoButton.innerHTML='<svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M8 17c-9-1-7-13 4-13 11 0 13 11 3 13-6 2-11 0-8-3 3-2 7 3 3 7"/></svg>';toolbar.querySelector('[data-tool="eraser"]')?.after(lassoButton);
 // Local editor controls
-images = installImages({state,bus,camera,app,world,nodeAt:id=>scene.nodeAt(id),onChange:()=>{syncScene();refreshChrome();}});
-backgroundUI=installBackground({state,bus,camera,app,world,onChange:()=>{gridDirty=true;syncScene();refreshChrome();}});
+images = installImages({state,bus,camera,app,world,getBoardKey:mediaBoardKey,nodeAt:id=>scene.nodeAt(id),onChange:()=>{syncScene();refreshChrome();}});
+backgroundUI=installBackground({state,bus,camera,app,world,getBoardKey:mediaBoardKey,onChange:()=>{gridDirty=true;syncScene();refreshChrome();}});
 layersUI=installLayers({state,bus,camera,onSelect:()=>{isolatedGroup=null;setTool('select');},onChange:()=>{syncScene();drawSelection();refreshChrome();}});
 const mindImagePicker=document.createElement('input');mindImagePicker.type='file';mindImagePicker.accept='image/*';mindImagePicker.multiple=true;
 let mindImageTarget:{parentId:string;boardKey:string|null}|null=null;
-mindImagePicker.addEventListener('change',()=>{const files=Array.from(mindImagePicker.files??[]),target=mindImageTarget;mindImagePicker.value='';mindImageTarget=null;if(!target||!files.length)return;void images?.importFiles(files,{label:'Imagem no mapa mental',canInsert:()=>target.boardKey===(home?.currentId()??null)&&!!state.widgets.get(target.parentId)?.mind,afterCreate:ids=>{for(const id of ids)attachMindWidget(state,bus,target.parentId,id);}});});
-mindmapUI=installMindmapUI({state,bus,camera,setTool:t=>setTool(t),getTool:()=>tool,onEdit:id=>{const w=state.widgets.get(id);if(w&&!w.locked)beginEdit(w);},onLink:()=>linkUI?.open(),onImage:parentId=>{mindImageTarget={parentId,boardKey:home?.currentId()??null};mindImagePicker.click();},onChange:()=>{syncScene();drawSelection();refreshChrome();}});
+mindImagePicker.addEventListener('change',()=>{const files=Array.from(mindImagePicker.files??[]),target=mindImageTarget;mindImagePicker.value='';mindImageTarget=null;if(!target||!files.length)return;void images?.importFiles(files,{label:'Imagem no mapa mental',canInsert:()=>target.boardKey===mediaBoardKey()&&!!state.widgets.get(target.parentId)?.mind&&!state.widgets.get(target.parentId)?.locked,afterCreate:ids=>{for(const id of ids)attachMindWidget(state,bus,target.parentId,id);}});});
+mindmapUI=installMindmapUI({state,bus,camera,setTool:t=>setTool(t),getTool:()=>tool,onEdit:id=>{const w=state.widgets.get(id);if(w&&!w.locked)beginEdit(w);},onLink:()=>linkUI?.open(),onImage:parentId=>{mindImageTarget={parentId,boardKey:mediaBoardKey()};mindImagePicker.click();},onChange:()=>{syncScene();drawSelection();refreshChrome();}});
 linkUI=installLinkUI({state,bus,getEditor:()=>editor,commitEditor:()=>endEdit(true),onChange:()=>{syncScene();drawSelection();refreshChrome();}});
-audioUI=installAudio({state,bus,camera,getTool:()=>tool,setTool:t=>setTool(t),getBoardKey:()=>home?.currentId()??null,onChange:()=>{syncScene();drawSelection();refreshChrome();}});
+audioUI=installAudio({state,bus,camera,getTool:()=>tool,setTool:t=>setTool(t),getBoardKey:mediaBoardKey,onChange:()=>{syncScene();drawSelection();refreshChrome();}});
 structuredUI=installStructuredTextUI({state,bus,camera,getTool:()=>tool,setTool:t=>setTool(t as Tool),onChange:()=>{syncScene();drawSelection();refreshChrome();}});
 connectorCompletion=installConnectorCompletion({state,bus,camera});
 const imagePicker = document.createElement("input");
+let imagePickerBoardKey:string|null=null;
 imagePicker.type="file"; imagePicker.accept="image/*"; imagePicker.multiple=true;
-imagePicker.addEventListener("change",()=>{if(imagePicker.files) void images?.importFiles(imagePicker.files); imagePicker.value="";});
+imagePicker.addEventListener("change",()=>{const boardKey=imagePickerBoardKey;if(imagePicker.files) void images?.importFiles(imagePicker.files,{canInsert:()=>boardKey===mediaBoardKey()}); imagePicker.value="";});
 editorUI = installEditorUI({state,bus,camera,setTool:t=>setTool(t as Tool),getTool:()=>tool,
+  entityAt:p=>frontmostEntityAt(p)?.id,
+  isTransforming:()=>['drag','resize','multi-resize','rotate','multi-rotate','bend','reconnect'].includes(gesture.kind),
   onLink:()=>linkUI?.open(),
   setConnectorDefault:options=>{connectorDefault=options;},
   onStyleDefaults:(type,patch)=>{creationStyles[type]={...creationStyles[type],...patch};},
-  setShape:s=>{selectedShape=s;},getShape:()=>selectedShape,onImage:()=>imagePicker.click(),
+  setShape:s=>{selectedShape=s;},getShape:()=>selectedShape,onImage:()=>{imagePickerBoardKey=mediaBoardKey();imagePicker.click();},
   onCrop:()=>images?.cropSelected(),onResetCrop:()=>images?.resetCrop(),
   onCircleCrop:()=>images?.circleCropSelected(),onEditText:()=>{const w=state.widgets.get([...state.selection][0]!);if(w&&!w.locked&&w.type!=="image")beginEdit(w);},
   onImageActualSize:()=>{
@@ -1707,7 +1741,7 @@ installIcons();
 drawingUI=installDrawingUI({getTool:()=>tool,setTool:t=>setTool(t as Tool),onChange:()=>brushCursor?.update()});
 brushCursor=installBrushCursor({camera,getTool:()=>tool,getSettings:()=>drawingUI!.settings(tool==='highlighter'?'highlighter':'brush'),temporaryHand:()=>spaceDown||gesture.kind==='pan'});
 app.canvas.addEventListener('pointerleave',()=>brushCursor?.leave());
-const projectFiles=installProjectFiles({state,bus,camera,sync:()=>{gridDirty=true;syncScene();drawSelection();refreshChrome();if(home&&!home.currentId())void home.adoptCurrent();else{home?.updateCurrent();scheduleSave();}}});
+const projectFiles=installProjectFiles({state,bus,camera,getBoardKey:mediaBoardKey,sync:()=>{boardEpoch++;gridDirty=true;syncScene();drawSelection();refreshChrome();if(home&&!home.currentId())void home.adoptCurrent();else{home?.updateCurrent();scheduleSave();}}});
 const title=document.getElementById("board-title")!;title.contentEditable="true";title.setAttribute("role","textbox");title.setAttribute("aria-label","Nome do board");title.setAttribute("spellcheck","false");title.addEventListener("keydown",e=>{if(e.key==="Enter"){e.preventDefault();title.blur();}});title.addEventListener("blur",()=>{if(!title.textContent?.trim())title.textContent="Board sem título";home?.updateCurrent({title:title.textContent??"Board"});scheduleSave();});
 
 // ------------------------------------------------------------------ loop
