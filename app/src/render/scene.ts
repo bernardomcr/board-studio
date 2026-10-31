@@ -11,13 +11,16 @@ import type { BoardState } from "../core/commands";
 import { widgetAABB, rectsIntersect, pointInWidget, widgetCorners, type Rect } from "../core/geometry";
 import { connectorGeometry, connectorBounds, connectorCaptionPoints } from "../core/connectors";
 import { strokeBounds, type StrokePoint } from "../core/strokes";
-import {paintStroke} from './stroke-paint';
+import {paintStroke,strokeRenderKey} from './stroke-paint';
 import { parseRich, type Run } from "../core/richtext";
 import { paintConnector } from "./connector-paint";
 import type { Widget } from "../core/model";
 import { borderPattern, canonicalShape, patternedContour, shapeContours, shapePolygon, shapeDetails } from "../core/shapes";
 import {resolvedWidgetStyle} from '../core/style-scale';
 import {fitTextResolution,textRasterDensity,TEXT_SAMPLING} from './text-quality';
+import {mindNodeHidden,mindConnectorHidden,mindTopicText} from '../core/mindmap';
+import {audioSignature,paintAudioCard,paintAudioLabels} from './audio-paint';
+import {renderStructuredText} from './structured-text';
 
 interface Node {
   container: Container;
@@ -40,7 +43,7 @@ export class BoardScene {
   private connectorNodes = new Map<string, Graphics>();
   private connectorLabels = new Map<string, Text[]>();
   private strokeNodes = new Map<string, Graphics>();
-  private strokePaintKeys=new Map<string,{points:StrokePoint[];length:number;lastX:number;lastY:number;lastR:number;color:string;tool:string;opacity?:number;precision?:boolean}>();
+  private strokePaintKeys=new Map<string,{points:StrokePoint[];length:number;lastX:number;lastY:number;lastR:number;color:string;tool:string;opacity?:number;precision?:boolean;precisionSmoothing?:number;displayKey:string}>();
   private clipContainers = new Map<string, { container: Container; mask: Graphics; sig:string }>();
   /** retângulos clicáveis de link, em coordenadas locais do objeto */
   private links = new Map<string, Array<{ x: number; y: number; w: number; h: number; url: string }>>();
@@ -76,9 +79,9 @@ export class BoardScene {
         this.strokeNodes.set(id, node);
         node.label=id;this.layer.addChild(node);
       }
-      const last=stroke.points[stroke.points.length-1]!,key=this.strokePaintKeys.get(id);
-      if(!key||key.points!==stroke.points||key.length!==stroke.points.length||key.lastX!==last.x||key.lastY!==last.y||key.lastR!==last.r||key.color!==stroke.color||key.tool!==stroke.tool||key.opacity!==stroke.opacity||key.precision!==stroke.precision){
-        paintStroke(node,stroke);this.strokePaintKeys.set(id,{points:stroke.points,length:stroke.points.length,lastX:last.x,lastY:last.y,lastR:last.r,color:stroke.color,tool:stroke.tool,opacity:stroke.opacity,precision:stroke.precision});
+      const last=stroke.points[stroke.points.length-1]!,key=this.strokePaintKeys.get(id),displayKey=strokeRenderKey(stroke,this.zoom);
+      if(!key||key.points!==stroke.points||key.length!==stroke.points.length||key.lastX!==last.x||key.lastY!==last.y||key.lastR!==last.r||key.color!==stroke.color||key.tool!==stroke.tool||key.opacity!==stroke.opacity||key.precision!==stroke.precision||key.precisionSmoothing!==stroke.precisionSmoothing||key.displayKey!==displayKey){
+        paintStroke(node,stroke,{zoom:this.zoom});this.strokePaintKeys.set(id,{points:stroke.points,length:stroke.points.length,lastX:last.x,lastY:last.y,lastR:last.r,color:stroke.color,tool:stroke.tool,opacity:stroke.opacity,precision:stroke.precision,precisionSmoothing:stroke.precisionSmoothing,displayKey});
       }
 
       node.visible=!stroke.hidden&&(!visible||rectsIntersect(visible,strokeBounds(stroke)));
@@ -112,7 +115,7 @@ export class BoardScene {
       }
       paintConnector(node, connector, geometry);
 
-      node.visible=!connector.hidden&&(!visible||rectsIntersect(visible,connectorBounds(geometry)));
+      node.visible=!connector.hidden&&!mindConnectorHidden(state,connector)&&(!visible||rectsIntersect(visible,connectorBounds(geometry)));
       node.zIndex = connector.z;
 
       const captions = connectorCaptionPoints(connector, geometry);
@@ -250,7 +253,7 @@ export class BoardScene {
       if (node.container.parent !== target) target.addChild(node.container);
       node.container.mask=frame?this.clipFor(frame).mask:null;
 
-      node.container.visible = !widget.hidden&&(!visible||rectsIntersect(visible,widgetAABB(widget)));
+      node.container.visible = !widget.hidden&&!mindNodeHidden(state,widget.id)&&(!visible||rectsIntersect(visible,widgetAABB(widget)));
     }
   }
 
@@ -276,7 +279,7 @@ export class BoardScene {
     container.rotation = w.rotation;
 
     const style=w.style;
-    const backgroundSig=[w.type,w.width,w.height,w.type==='shape'?w.shape:'',style.fillColor,style.fillOpacity,style.borderColor,style.borderWidth,style.borderScale,style.borderStyle,style.borderOpacity,style.cornerRadius,Math.round(Math.log2(Math.max(.02,this.zoom))*2)].join('|');
+    const backgroundSig=[w.type,w.width,w.height,w.type==='shape'?w.shape:'',style.fillColor,style.fillOpacity,style.borderColor,style.borderWidth,style.borderScale,style.borderStyle,style.borderOpacity,style.cornerRadius,audioSignature(w),Math.round(Math.log2(Math.max(.02,this.zoom))*2)].join('|');
     if(node.backgroundSig!==backgroundSig){node.backgroundSig=backgroundSig;graphics.clear();drawBackground(graphics,w,this.zoom);}
 
     this.layoutText(node, w);
@@ -287,10 +290,12 @@ export class BoardScene {
 
   private layoutText(node: Node, w: Widget): void {
     if (w.type === "image") return;
+    if(w.audio){node.sig='';paintAudioLabels(node.text,w,this.textResolution);return;}
+    if(renderStructuredText(node.text,w,this.textResolution)){node.sig='';return;}
     for (const child of node.text.children) if (child instanceof Text){const resolution=fitTextResolution(child,this.textResolution);if(child.resolution!==resolution)child.resolution=resolution;}
     const pad = w.type==='text'?0:10;
     const maxWidth = Math.max(1, w.width - pad * 2);
-    const content = w.type === "frame" ? w.title : w.content;
+    const content = w.type === "frame" ? w.title : mindTopicText(w);
 
     const sig = [
       content,
@@ -459,6 +464,7 @@ function placeLine(
 }
 
 function drawBackground(g: Graphics, w: Widget, zoom: number): void {
+  if(w.audio){paintAudioCard(g,w,zoom);return;}
   w={...w,style:resolvedWidgetStyle(w)};
   const { style } = w;
 

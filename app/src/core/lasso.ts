@@ -3,6 +3,7 @@ import { connectorGeometry } from "./connectors";
 import { rotate, widgetAABB, widgetCenter, type Vec } from "./geometry";
 import type { Widget } from "./model";
 import { shapeContours } from "./shapes";
+import {mindNodeHidden,mindConnectorHidden} from './mindmap';
 
 const EPS = 1e-8;
 function pointSegmentDistance(point: Vec, a: Vec, b: Vec): number {
@@ -62,7 +63,7 @@ export function lassoHits(state: BoardState, polygon: Vec[]): string[] {
   const bounds = { minX: Math.min(...polygon.map(p => p.x)), minY: Math.min(...polygon.map(p => p.y)), maxX: Math.max(...polygon.map(p => p.x)), maxY: Math.max(...polygon.map(p => p.y)) };
   const ids: string[] = [];
   for (const id of state.order) {
-    const widget = state.widgets.get(id); if (!widget||widget.hidden) continue;
+    const widget = state.widgets.get(id); if (!widget||widget.hidden||mindNodeHidden(state,id)) continue;
     const box = widgetAABB(widget);
     if (box.maxX < bounds.minX || box.maxY < bounds.minY || box.minX > bounds.maxX || box.minY > bounds.maxY) continue;
     const contour = widgetContour(widget);
@@ -70,7 +71,7 @@ export function lassoHits(state: BoardState, polygon: Vec[]): string[] {
     if (pathHits(contour, polygon) || widget.type !== "frame" && polygon.some(p => lassoContains(contour, p))) ids.push(id);
   }
   for (const id of state.connectorOrder) {
-    const connector = state.connectors.get(id); if (!connector||connector.hidden) continue;
+    const connector = state.connectors.get(id); if (!connector||connector.hidden||mindConnectorHidden(state,connector)) continue;
     const geometry = connectorGeometry(connector, state.widgets);
     if (geometry && pathHits(geometry.points, polygon, connector.style.strokeWidth / 2)) ids.push(id);
   }

@@ -37,7 +37,7 @@ export function validateBoardBackground(value: unknown): BoardBackground | null 
   const encoded = image.src.slice(image.src.indexOf(',') + 1);
   if (encoded.length % 4 || encoded.length / 4 * 3 - (encoded.endsWith('==') ? 2 : encoded.endsWith('=') ? 1 : 0) > BACKGROUND_MAX_BYTES) return null;
   for (const field of ['x', 'y', 'width', 'height', 'opacity']) if (typeof image[field] !== 'number' || !Number.isFinite(image[field])) return null;
-  if (Math.abs(image.x as number) > 10_000_000 || Math.abs(image.y as number) > 10_000_000 || (image.width as number) < 1 || (image.height as number) < 1 || (image.width as number) > 10_000_000 || (image.height as number) > 10_000_000 || (image.opacity as number) < 0 || (image.opacity as number) > 1) return null;
+  if ((image.width as number) < 1 || (image.height as number) < 1 || (image.opacity as number) < 0 || (image.opacity as number) > 1) return null;
   result.image = { src: image.src, x: image.x as number, y: image.y as number, width: image.width as number, height: image.height as number, opacity: image.opacity as number };
   return result;
 }

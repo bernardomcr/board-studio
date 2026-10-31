@@ -372,7 +372,7 @@ export class CommandBus {
         }
         if(widget.type==='text'&&!(incoming.textSizing==='natural'&&incoming.width!==undefined&&incoming.height!==undefined)){
           const style={...(patch.style??widget.style)};
-          if(sized&&incoming.style?.fontSize===undefined){const ratio=incoming.width!==undefined?incoming.width/widget.width:(incoming.height??widget.height)/widget.height;style.fontSize=Math.max(1,Math.min(10000,widget.style.fontSize*ratio));}
+          if(sized&&incoming.style?.fontSize===undefined){const ratio=incoming.width!==undefined?incoming.width/widget.width:(incoming.height??widget.height)/widget.height;const fontSize=widget.style.fontSize*ratio;if(Number.isFinite(fontSize))style.fontSize=Math.max(.1,fontSize);}
           const text=naturalText({...widget,...patch,style} as typeof widget);
           patch={...patch,style,width:text.width,height:text.height,textSizing:'natural'};
         }

@@ -1,8 +1,9 @@
 import {AlphaFilter,Container,Graphics,Rectangle} from 'pixi.js';
 import type {Camera} from './core/camera';
 import type {StrokePoint,Stroke} from './core/strokes';
+import {PRECISION_LOOKAHEAD} from './core/strokes';
 import type {DrawingSettings} from './drawing-ui';
-import {paintStroke,clearStrokePaint} from './render/stroke-paint';
+import {paintStroke,clearStrokePaint,strokeScreenCoverage} from './render/stroke-paint';
 
 /** Completed sections remain immutable: one input sample never rebuilds the whole scribble. */
 export function installBrushPreview(stage:Container,camera:Camera){
@@ -12,12 +13,12 @@ export function installBrushPreview(stage:Container,camera:Camera){
   const resetGeometry=()=>{for(const child of layer.removeChildren())child.destroy({children:true});tail=new Graphics();layer.addChild(tail);frozen=0;};
   function paint(){
     scheduled=0;if(!current)return;
-    const key=[camera.x,camera.y,camera.scale,camera.width,camera.height].join('|'),style=[current.settings.color,current.settings.precision,current.settings.width].join('|');
+    const key=[camera.x,camera.y,camera.scale,camera.width,camera.height,devicePixelRatio].join('|'),style=[current.settings.color,current.settings.precision,current.settings.precisionSmoothing,current.settings.width].join('|');
     if(key!==cameraKey||current.points!==pointsReference||style!==geometryStyle){resetGeometry();cameraKey=key;pointsReference=current.points;geometryStyle=style;}
-    const {points,settings}=current,stroke:Stroke={id:'live-brush',type:'stroke',tool:'brush',points,color:settings.color,precision:settings.precision,opacity:1,z:0};
-    opacity.alpha=settings.opacity;layer.filters=settings.opacity<1?[opacity]:null;layer.filterArea=new Rectangle(0,0,camera.width,camera.height);
-    const options={transform:(p:{x:number;y:number})=>camera.worldToScreen(p),scale:camera.scale};
-    const complete=Math.max(0,Math.floor((points.length-1-4)/128)*128);
+    const {points,settings}=current,stroke:Stroke={id:'live-brush',type:'stroke',tool:'brush',points,color:settings.color,precision:settings.precision,precisionSmoothing:settings.precisionSmoothing,opacity:1,z:0};
+    opacity.alpha=settings.opacity*strokeScreenCoverage(settings.width*camera.scale,1);layer.filters=opacity.alpha<1?[opacity]:null;layer.filterArea=new Rectangle(0,0,camera.width,camera.height);
+    const options={transform:(p:{x:number;y:number})=>camera.worldToScreen(p),scale:camera.scale,zoom:1,applyCoverage:false};
+    const lookahead=settings.precision?PRECISION_LOOKAHEAD:1,complete=Math.max(0,Math.floor((points.length-1-lookahead)/128)*128);
     while(frozen<complete){const g=new Graphics();paintStroke(g,stroke,{...options,startSegment:frozen,endSegment:frozen+128});layer.addChildAt(g,layer.children.length-1);frozen+=128;}
     paintStroke(tail,stroke,{...options,startSegment:frozen,endSegment:Math.max(0,points.length-1)});
   }

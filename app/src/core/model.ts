@@ -3,6 +3,10 @@
  * (ver docs/01-modelo-de-dados.md).
  */
 
+import type {ChecklistData,TableData} from './structured-text';
+
+import type {AudioMetadata} from './audio';
+
 export type WidgetType = "sticky_note" | "shape" | "text" | "frame" | "image";
 
 export interface Style {
@@ -27,7 +31,26 @@ export interface Style {
   textAlignVertical: "top" | "middle" | "bottom";
 }
 
+export interface MindMetadata {
+  rootId:string;
+  parentId:string|null;
+  side:'left'|'right';
+  order:number;
+  collapsed?:boolean;
+  layout?:'balanced'|'right'|'left'|'org'|'list';
+  color?:string;
+  lineShape?:'straight'|'curved'|'elbowed';
+  notes?:string;
+  icon?:string;
+  theme?:string;
+}
+
 export interface BaseWidget {
+  audio?:AudioMetadata;
+  checklist?:ChecklistData;
+  table?:TableData;
+  /** Mind-map structure is separate from ordinary groups and manual visibility. */
+  mind?:MindMetadata;
   name?: string;
   hidden?: boolean;
   locked?: boolean;

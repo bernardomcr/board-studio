@@ -74,12 +74,14 @@
       #toolbar {
         position: fixed; top: 50%; left: var(--sp-150); transform: translateY(-50%);
         display: flex; flex-direction: column; gap: 2px;
+        max-height: calc(100dvh - 140px); overflow-y: auto; overscroll-behavior: contain; scrollbar-width: thin;
         padding: 6px; z-index: 10;
         background: #fff; border: 1px solid var(--cloud-200);
         border-radius: var(--r-150); box-shadow: var(--shadow-1);
       }
 
       #toolbar button {
+        flex-shrink: 0;
         display: grid; place-items: center;
         width: 44px; height: 44px; padding: 0;
         border: 0; border-radius: var(--r-100); background: transparent;

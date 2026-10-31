@@ -71,7 +71,7 @@ export async function writeStoredBoard(key: string, data: unknown): Promise<void
     if(++visited>10000)return;
     for(const [field,item]of Object.entries(value)){
       if(field==='points'&&Array.isArray(item)){points+=item.length;if(points>12000)return;}
-      else if(typeof item==='string'&&item.startsWith('data:image/')){imageBytes+=item.length;if(imageBytes>1000000)return;}
+      else if(typeof item==='string'&&/^data:(?:image|audio)\//.test(item)){imageBytes+=item.length;if(imageBytes>1000000)return;}
       else if(item&&typeof item==='object')pending.push(item);
     }
   }

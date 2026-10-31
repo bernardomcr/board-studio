@@ -19,7 +19,8 @@ export function resizeFreeText(w:TextWidget,handle:HandleId,p:Vec):Pick<Widget,'
   const sx=handle.includes('e')?1:handle.includes('w')?-1:0,sy=handle.includes('s')?1:handle.includes('n')?-1:0;
   const local=worldToLocal(w,p),anchor={x:sx===1?0:sx===-1?w.width:w.width/2,y:sy===1?0:sy===-1?w.height:w.height/2};
   const vector={x:sx*w.width,y:sy*w.height};
-  const factor=Math.max(1/Math.max(1,w.style.fontSize),Math.min(10000/Math.max(1,w.style.fontSize),((local.x-anchor.x)*vector.x+(local.y-anchor.y)*vector.y)/(vector.x*vector.x+vector.y*vector.y)));
+  const length=Math.hypot(vector.x,vector.y),projection=((local.x-anchor.x)*(vector.x/length)+(local.y-anchor.y)*(vector.y/length))/length;
+  const factor=Math.max(1/Math.max(1,w.style.fontSize),Number.isFinite(projection)?projection:1);
   const width=w.width*factor,height=w.height*factor,c=widgetCenter(w);
   const fixed=rotate({x:anchor.x-w.width/2,y:anchor.y-w.height/2},w.rotation),offset=rotate({x:-sx*width/2,y:-sy*height/2},w.rotation);
   return {x:c.x+fixed.x-offset.x-width/2,y:c.y+fixed.y-offset.y-height/2,width,height,textSizing:'natural',style:{...w.style,fontSize:w.style.fontSize*factor}};

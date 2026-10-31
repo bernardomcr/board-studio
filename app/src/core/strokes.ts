@@ -27,27 +27,43 @@ export interface Stroke {
   opacity?: number;
   /** Fit a smooth local spline; ordinary brush keeps the sampled centerline. */
   precision?: boolean;
+  /** World-space precision window, captured from the drawing zoom. */
+  precisionSmoothing?:number;
   points: StrokePoint[];
   z: number;
 }
 
 export interface StrokeCubic {p0:StrokePoint;p1:Vec;p2:Vec;p3:StrokePoint}
 export interface StrokeGeometry {knots:StrokePoint[];points:StrokePoint[];curves:StrokeCubic[];uniform:boolean;radius:number}
-const geometryCache=new WeakMap<StrokePoint[],{length:number;lastX:number;lastY:number;lastR:number;precision:boolean;geometry:StrokeGeometry}>();
+const geometryCache=new WeakMap<StrokePoint[],{length:number;lastX:number;lastY:number;lastR:number;precision:boolean;smoothing:number;geometry:StrokeGeometry}>();
+/** A fitted point plus its tangent needs at most this many future raw samples. */
+export const PRECISION_LOOKAHEAD=98;
 export const strokeOpacity=(stroke:Stroke):number=>Math.max(0,Math.min(1,stroke.opacity??(stroke.tool==='highlighter'?.35:1)));
 const safePoint=(point:StrokePoint):StrokePoint=>({x:point.x,y:point.y,r:Math.max(.01,point.r)});
 
 /** Local smoothing never changes the finished interior when more input arrives. */
-function precisionPoint(points:StrokePoint[],index:number):StrokePoint{
-  const point=safePoint(points[index]!);
-  if(points.length<3||index===0||index===points.length-1)return point;
-  const weights=[1,4,6,4,1];
-  let x=0,y=0;for(let j=-2;j<=2;j++){const p=points[Math.max(0,Math.min(points.length-1,index+j))]!;x+=p.x*weights[j+2]!;y+=p.y*weights[j+2]!;}
-  x=x/16-point.x;y=y/16-point.y;
-  // Sparse fast reversals must retain their intended turn, rather than averaging
-  // hundreds of board units away. Smoothing only removes local hand jitter.
-  const length=Math.hypot(x,y),limit=Math.max(.2,Math.min(2,point.r*.25)),amount=length>limit?limit/length:1;
-  return {x:point.x+x*amount,y:point.y+y*amount,r:point.r};
+function precisionPoint(points:StrokePoint[],index:number,smoothing:number,at:(i:number)=>StrokePoint):StrokePoint{
+  const point=at(index);
+  if(points.length<3||index===0||index===points.length-1||smoothing<=0)return point;
+  // Integrate over arc length rather than sample count. Fast/coalesced input and
+  // dense slow input therefore receive the same visible smoothing window.
+  const sigma=smoothing*.5,window=smoothing*1.5,variance=2*sigma*sigma;
+  let sumX=0,sumY=0,total=0,left=0,right=0;
+  for(const direction of [-1,1]){
+    let previous=point,travel=0;
+    for(let step=1;step<=PRECISION_LOOKAHEAD-2;step++){
+      const nextIndex=index+step*direction;if(nextIndex<0||nextIndex>=points.length)break;
+      const next=at(nextIndex),length=Math.hypot(next.x-previous.x,next.y-previous.y);if(length<1e-8){previous=next;continue;}
+      const segment=Math.min(length,window-travel),middle=travel+segment*.5,weight=segment*Math.exp(-middle*middle/variance),fraction=segment/(2*length);
+      sumX+=(previous.x+(next.x-previous.x)*fraction)*weight;sumY+=(previous.y+(next.y-previous.y)*fraction)*weight;total+=weight;travel+=segment;
+      if(travel>=window)break;previous=next;
+    }
+    if(direction<0)left=travel;else right=travel;
+  }
+  if(total<1e-12)return point;
+  // Preserve the exact pen-down/up position and ease the nearby fit into it.
+  const amount=Math.min(1,left/window,right/window);
+  return {x:point.x+(sumX/total-point.x)*amount,y:point.y+(sumY/total-point.y)*amount,r:point.r};
 }
 function cubicBetween(a:StrokePoint,b:StrokePoint,c:StrokePoint,d:StrokePoint):StrokeCubic{
   const ab=Math.max(.0001,Math.sqrt(Math.hypot(b.x-a.x,b.y-a.y))),bc=Math.max(.0001,Math.sqrt(Math.hypot(c.x-b.x,c.y-b.y))),cd=Math.max(.0001,Math.sqrt(Math.hypot(d.x-c.x,d.y-c.y)));
@@ -59,14 +75,15 @@ function cubicBetween(a:StrokePoint,b:StrokePoint,c:StrokePoint,d:StrokePoint):S
   const x=tangent('x'),y=tangent('y');return {p0:b,p1:{x:x[0]!,y:y[0]!},p2:{x:x[1]!,y:y[1]!},p3:c};
 }
 export function strokeGeometry(stroke:Stroke):StrokeGeometry{
-  const raw=stroke.points,last=raw[raw.length-1],precision=stroke.precision??stroke.tool==='pen',cached=geometryCache.get(raw);
-  if(cached&&cached.length===raw.length&&cached.lastX===last?.x&&cached.lastY===last?.y&&cached.lastR===last?.r&&cached.precision===precision)return cached.geometry;
-  const geometry=strokeGeometryRange(stroke,0,raw.length-1);geometryCache.set(raw,{length:raw.length,lastX:last?.x??NaN,lastY:last?.y??NaN,lastR:last?.r??NaN,precision,geometry});return geometry;
+  const raw=stroke.points,last=raw[raw.length-1],precision=stroke.precision??stroke.tool==='pen',smoothing=stroke.precisionSmoothing??8,cached=geometryCache.get(raw);
+  if(cached&&cached.length===raw.length&&cached.lastX===last?.x&&cached.lastY===last?.y&&cached.lastR===last?.r&&cached.precision===precision&&cached.smoothing===smoothing)return cached.geometry;
+  const geometry=strokeGeometryRange(stroke,0,raw.length-1);geometryCache.set(raw,{length:raw.length,lastX:last?.x??NaN,lastY:last?.y??NaN,lastR:last?.r??NaN,precision,smoothing,geometry});return geometry;
 }
 /** Compute only the requested raw-segment range and its local tangent neighbours. */
 export function strokeGeometryRange(stroke:Stroke,start=0,end=stroke.points.length-1):StrokeGeometry{
-  const raw=stroke.points,precision=stroke.precision??stroke.tool==='pen',from=Math.max(0,start),to=Math.min(raw.length-1,end),memo=new Map<number,StrokePoint>();
-  const at=(i:number)=>{const index=Math.max(0,Math.min(raw.length-1,i));let p=memo.get(index);if(!p){p=precision?precisionPoint(raw,index):safePoint(raw[index]!);memo.set(index,p);}return p;};
+  const raw=stroke.points,precision=stroke.precision??stroke.tool==='pen',smoothing=stroke.precisionSmoothing??8,from=Math.max(0,start),to=Math.min(raw.length-1,end),memo=new Map<number,StrokePoint>(),rawMemo=new Map<number,StrokePoint>();
+  const rawAt=(i:number)=>{let point=rawMemo.get(i);if(!point){point=safePoint(raw[i]!);rawMemo.set(i,point);}return point;};
+  const at=(i:number)=>{const index=Math.max(0,Math.min(raw.length-1,i));let p=memo.get(index);if(!p){p=precision?precisionPoint(raw,index,smoothing,rawAt):rawAt(index);memo.set(index,p);}return p;};
   const knots:StrokePoint[]=[],curves:StrokeCubic[]=[],points:StrokePoint[]=[];
   for(let i=from;i<=to;i++)knots.push(at(i));
   if(precision&&raw.length>2&&knots.length>1){

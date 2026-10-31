@@ -20,6 +20,9 @@ import {strokeSvgContent} from '../render/stroke-paint';
 import { borderPattern, canonicalShape, shapeDetails, shapePolygon } from "./shapes";
 import { DEFAULT_BACKGROUND } from "./background";
 import {resolvedWidgetStyle} from './style-scale';
+import {mindNodeHidden,mindConnectorHidden,mindTopicText} from './mindmap';
+import {audioCardSvg} from '../render/audio-paint';
+import {structuredSvgContent} from '../render/structured-text';
 
 const escapeXml = (value: string): string =>
   value
@@ -41,9 +44,9 @@ export function boardToSvg(state: BoardState, options: Options = {}): string {
   const scenery = options.background === undefined ? background.image : undefined;
   if (scenery) rects.push({ minX: scenery.x, minY: scenery.y, maxX: scenery.x + scenery.width, maxY: scenery.y + scenery.height });
 
-  for (const w of state.widgets.values()) if(!w.hidden){const r=widgetAABB(w),pad=resolvedWidgetStyle(w).borderWidth/2;rects.push({minX:r.minX-pad,minY:r.minY-pad,maxX:r.maxX+pad,maxY:r.maxY+pad});}
+  for (const w of state.widgets.values()) if(!w.hidden&&!mindNodeHidden(state,w.id)){const r=widgetAABB(w),pad=resolvedWidgetStyle(w).borderWidth/2;rects.push({minX:r.minX-pad,minY:r.minY-pad,maxX:r.maxX+pad,maxY:r.maxY+pad});}
   for (const c of state.connectors.values()) {
-    if(c.hidden)continue;
+    if(c.hidden||mindConnectorHidden(state,c))continue;
     const geometry = connectorGeometry(c, state.widgets);
     if (geometry) rects.push(connectorBounds(geometry));
   }
@@ -66,14 +69,15 @@ export function boardToSvg(state: BoardState, options: Options = {}): string {
   }
 
   const frames=[...state.widgets.values()].filter(w=>w.type==='frame'&&!w.hidden);
-  const ordered=[...state.widgets.values(),...state.connectors.values(),...state.strokes.values()].filter(w=>!w.hidden).sort((a,b)=>a.z-b.z);
+  const ordered=[...state.widgets.values(),...state.connectors.values(),...state.strokes.values()].filter(w=>!w.hidden&&(w.type==='connector'?!mindConnectorHidden(state,w):w.type==='stroke'||!mindNodeHidden(state,w.id))).sort((a,b)=>a.z-b.z);
 
   for (const widget of ordered) {
     if(widget.type==='connector'){parts.push(connectorSvg(widget,state));continue;}
     if(widget.type==='stroke'){parts.push(strokeSvg(widget));continue;}
     const cx=widget.x+widget.width/2,cy=widget.y+widget.height/2;
     const frame=widget.type==='frame'?undefined:frames.filter(f=>pointInWidget(f,{x:cx,y:cy})).sort((a,b)=>a.width*a.height-b.width*b.height)[0];
-    if(frame){const clip='frame-clip-'+widget.id.replace(/[^a-zA-Z0-9_-]/g,'');parts.push(`<defs><clipPath id="${clip}"><polygon points="${widgetCorners(frame).map(p=>`${p.x},${p.y}`).join(' ')}"/></clipPath></defs><g clip-path="url(#${clip})">${widgetSvg(widget)}</g>`);}else parts.push(widgetSvg(widget));
+    const rendered=widgetSvg(widget),linked=widget.link&&/^(https?:|mailto:)/i.test(widget.link)?`<a href="${escapeXml(widget.link)}" target="_blank">${rendered}</a>`:rendered;
+    if(frame){const clip='frame-clip-'+widget.id.replace(/[^a-zA-Z0-9_-]/g,'');parts.push(`<defs><clipPath id="${clip}"><polygon points="${widgetCorners(frame).map(p=>`${p.x},${p.y}`).join(' ')}"/></clipPath></defs><g clip-path="url(#${clip})">${linked}</g>`);}else parts.push(linked);
   }
 
   parts.push("</svg>");
@@ -83,6 +87,7 @@ export function boardToSvg(state: BoardState, options: Options = {}): string {
 function widgetSvg(w: Widget): string {
   w={...w,style:resolvedWidgetStyle(w)};
   const transform = `translate(${round(w.x)},${round(w.y)}) rotate(${round((w.rotation * 180) / Math.PI)},${round(w.width / 2)},${round(w.height / 2)})`;
+  if(w.audio)return `<g transform="${transform}">${audioCardSvg(w)}</g>`;
 
   if (w.type === "image") {
     const crop = w.crop ?? { x: 0, y: 0, width: 1, height: 1 };
@@ -107,7 +112,7 @@ function widgetSvg(w: Widget): string {
   }
 
   const body = backgroundSvg(w);
-  const text = textSvg(w);
+  const text = structuredSvgContent(w)??textSvg(w);
   return `<g transform="${transform}">${body}${text}</g>`;
 }
 
@@ -165,7 +170,7 @@ function borderSvg(style: Style): string {
 }
 
 function textSvg(w: Widget): string {
-  const content=w.type==='frame'?'':w.content;if(!content.trim())return '';
+  const content=w.type==='frame'?'':mindTopicText(w);if(!content.trim())return '';
   const pad=w.type==='text'?0:10,maxWidth=w.type==='text'?Infinity:Math.max(10,w.width-pad*2),lineHeight=w.style.fontSize*1.35;
   const anchor=w.style.textAlign==='center'?'middle':w.style.textAlign==='right'?'end':'start';
   const x=w.style.textAlign==='center'?w.width/2:w.style.textAlign==='right'?w.width-pad:pad;

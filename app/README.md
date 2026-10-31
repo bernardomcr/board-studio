@@ -23,6 +23,10 @@ No Windows, `../TESTAR.cmd` compila e abre `http://localhost:4173`. Os boards fi
 | Laço | L |
 | Forma / texto / nota / quadro | R / T / S / F |
 | Conector | C ou puxar uma porta de um objeto |
+| Mapa mental | Botão Mapa mental; Tab adiciona filho, Enter adiciona irmão |
+| Recolher um ramo | Espaço com um tópico selecionado ou botão de recolher |
+| Lista / tabela / áudio | Botões na barra lateral |
+| Link em texto ou objeto | Ctrl+K ou botão de link da seleção |
 | Suspender encaixe de conector | Ctrl (Command no macOS) |
 | Restringir direção de conector | Shift |
 | Redimensionar | Arrastar alças; texto muda o tamanho das letras |

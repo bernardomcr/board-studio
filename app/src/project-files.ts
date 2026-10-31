@@ -7,6 +7,9 @@ import type { Stroke } from "./core/strokes";
 import { DEFAULT_BACKGROUND, validateBoardBackground, type BoardBackground } from "./core/background";
 import {loadBoardFont} from './fonts';
 import {migrateFrameSnapshots} from './core/layer-migration';
+import {validateMindMetadata,validateMindMapGraph} from './core/mindmap';
+import {validateAudioMetadata} from './core/audio';
+import {validateStructuredMetadataFields} from './core/structured-text';
 
 interface BoardFile {
   layerOrderVersion?:1;
@@ -29,7 +32,7 @@ function str(value: unknown, max = 1000000): string {
   if (typeof value !== "string" || value.length > max) return fail("Campo de texto inválido.");
   return value;
 }
-function number(value: unknown, low = -1e8, high = 1e8): number {
+function number(value: unknown, low = -Infinity, high = Infinity): number {
   if (typeof value !== "number" || !Number.isFinite(value) || value < low || value > high) return fail("Medida ou posição inválida.");
   return value;
 }
@@ -58,15 +61,19 @@ export function validateBoardFile(value: unknown): BoardFile {
   const widgets = list(data.widgets).map(raw => {
     const w = record(raw), style = record(w.style);
     const type = one(w.type, ["shape", "sticky_note", "text", "frame", "image"] as const);
+    if(w.audio!==undefined&&(type!=='shape'||w.checklist!==undefined||w.table!==undefined))fail('Cartão de áudio incompatível com este objeto.');
+    if((w.checklist!==undefined||w.table!==undefined)&&type!=='shape'&&type!=='text')fail('Conteúdo estruturado incompatível com este objeto.');
     const base = {
-      id: id(w.id), type, name:w.name===undefined?undefined:str(w.name,1000),hidden:!!w.hidden, locked:w.locked===undefined?undefined:!!w.locked, link:w.link===undefined?undefined:str(w.link,4000), x: number(w.x), y: number(w.y), width: number(w.width, .001, 1e7), height: number(w.height, .001, 1e7),
+      mind:w.mind===undefined?undefined:validateMindMetadata(w.mind),
+      audio:w.audio===undefined?undefined:validateAudioMetadata(w.audio),...validateStructuredMetadataFields(w),
+      id: id(w.id), type, name:w.name===undefined?undefined:str(w.name,1000),hidden:!!w.hidden, locked:w.locked===undefined?undefined:!!w.locked, link:w.link===undefined?undefined:str(w.link,4000), x: number(w.x), y: number(w.y), width: number(w.width, .001), height: number(w.height, .001),
       rotation: number(w.rotation), z: number(w.z),
       style: {
         fillColor: color(style.fillColor), fillOpacity: number(style.fillOpacity, 0, 1), borderColor: color(style.borderColor),
-        borderOpacity:style.borderOpacity===undefined?undefined:number(style.borderOpacity,0,1),cornerRadius:style.cornerRadius===undefined?undefined:number(style.cornerRadius,0,10000),
-        borderScale:style.borderScale===undefined?undefined:number(style.borderScale,0,10),borderWidth: number(style.borderWidth, 0, 1e7), borderStyle: one(style.borderStyle, ["normal", "dotted", "dashed"] as const),
+        borderOpacity:style.borderOpacity===undefined?undefined:number(style.borderOpacity,0,1),cornerRadius:style.cornerRadius===undefined?undefined:number(style.cornerRadius,0),
+        borderScale:style.borderScale===undefined?undefined:number(style.borderScale,0),borderWidth: number(style.borderWidth, 0), borderStyle: one(style.borderStyle, ["normal", "dotted", "dashed"] as const),
         fontWeight:style.fontWeight===undefined?undefined:one(style.fontWeight,["normal","bold"] as const),fontStyle:style.fontStyle===undefined?undefined:one(style.fontStyle,["normal","italic"] as const),textDecoration:style.textDecoration===undefined?undefined:one(style.textDecoration,["none","underline","line-through"] as const),highlightColor:style.highlightColor===undefined?undefined:color(style.highlightColor),
-        color: color(style.color), fontFamily: str(style.fontFamily, 256), fontSize: number(style.fontSize, .1, 10000),
+        color: color(style.color), fontFamily: str(style.fontFamily, 256), fontSize: number(style.fontSize, .1),
         textAlign: one(style.textAlign, ["left", "center", "right"] as const), textAlignVertical: one(style.textAlignVertical, ["top", "middle", "bottom"] as const),
       },
     };
@@ -82,7 +89,7 @@ export function validateBoardFile(value: unknown): BoardFile {
       const c = record(w.crop); crop = { x: number(c.x, 0, 1), y: number(c.y, 0, 1), width: number(c.width, .000001, 1), height: number(c.height, .000001, 1) };
       if (crop.x + crop.width > 1.000001 || crop.y + crop.height > 1.000001) fail("Recorte de imagem inválido.");
     }
-    return { ...base, type, content, src, crop, maskShape:w.maskShape===undefined?undefined:one(w.maskShape,["rectangle","ellipse","round_rectangle"] as const),flipX:!!w.flipX,flipY:!!w.flipY,opacity:w.opacity===undefined?undefined:number(w.opacity,0,1),naturalWidth: number(w.naturalWidth, 1, 100000), naturalHeight: number(w.naturalHeight, 1, 100000) };
+    return { ...base, type, content, src, crop, maskShape:w.maskShape===undefined?undefined:one(w.maskShape,["rectangle","ellipse","round_rectangle"] as const),flipX:!!w.flipX,flipY:!!w.flipY,opacity:w.opacity===undefined?undefined:number(w.opacity,0,1),naturalWidth: number(w.naturalWidth, 1), naturalHeight: number(w.naturalHeight, 1) };
   }) as Widget[];
   const widgetIds = new Set(widgets.map(widget => widget.id));
   const endpoint = (value: unknown): Endpoint => {
@@ -93,22 +100,23 @@ export function validateBoardFile(value: unknown): BoardFile {
   };
   const connectors: Connector[] = list(data.connectors).map(raw => {
     const c = record(raw), style = record(c.style);
-    return { id: id(c.id),name:c.name===undefined?undefined:str(c.name,1000),hidden:!!c.hidden,locked:!!c.locked,waypoints:c.waypoints==null?c.waypoints as null|undefined:list(c.waypoints,1000).map(v=>{const p=record(v);return {x:number(p.x),y:number(p.y)}}),captionPositions:c.captionPositions===undefined?undefined:list(c.captionPositions,100).map(v=>number(v,0,1)), type: one(c.type, ["connector"] as const), start: endpoint(c.start), end: endpoint(c.end),
+    return { id: id(c.id),mindBranch:c.mindBranch===undefined?undefined:id(c.mindBranch),name:c.name===undefined?undefined:str(c.name,1000),hidden:!!c.hidden,locked:!!c.locked,waypoints:c.waypoints==null?c.waypoints as null|undefined:list(c.waypoints,1000).map(v=>{const p=record(v);return {x:number(p.x),y:number(p.y)}}),captionPositions:c.captionPositions===undefined?undefined:list(c.captionPositions,100).map(v=>number(v,0,1)), type: one(c.type, ["connector"] as const), start: endpoint(c.start), end: endpoint(c.end),
       shape: one(c.shape, ["straight", "elbowed", "curved"] as const), z: number(c.z),
       controlPoint: c.controlPoint == null ? c.controlPoint as null | undefined : (() => { const p = record(c.controlPoint); return { x: number(p.x), y: number(p.y) }; })(),
-      style: { strokeStyle:style.strokeStyle===undefined?undefined:one(style.strokeStyle,["normal","dashed","dotted"] as const),strokeColor: color(style.strokeColor), strokeWidth: number(style.strokeWidth, .01, 1000),
+      style: { strokeStyle:style.strokeStyle===undefined?undefined:one(style.strokeStyle,["normal","dashed","dotted"] as const),strokeColor: color(style.strokeColor), strokeWidth: number(style.strokeWidth, .01),
         startCap: style.startCap === undefined ? undefined : one(style.startCap, ["none", "arrow","triangle","circle","diamond","bar"] as const),
         endCap: style.endCap === undefined ? undefined : one(style.endCap, ["none", "arrow","triangle","circle","diamond","bar"] as const) },
       captions: c.captions === undefined ? undefined : list(c.captions, 100).map(value => str(value)),
     };
   });
+  validateMindMapGraph(widgets,connectors);
   let totalPoints = 0;
   const strokes: Stroke[] = list(data.strokes).map(raw => {
     const s = record(raw), points = list(s.points, 200000); totalPoints += points.length;
     if (totalPoints > 1000000) fail("O arquivo contém pontos de desenho demais.");
     return { id: id(s.id),name:s.name===undefined?undefined:str(s.name,1000),hidden:!!s.hidden,locked:!!s.locked,type: one(s.type, ["stroke"] as const), tool: one(s.tool, ["brush", "pen", "highlighter"] as const), color: color(s.color), z: number(s.z),
-      opacity:s.opacity===undefined?undefined:number(s.opacity,0,1),precision:s.precision===undefined?undefined:typeof s.precision==='boolean'?s.precision:fail('Precisão de pincel inválida.'),
-      points: points.map(value => { const p = record(value); return { x: number(p.x), y: number(p.y), r: number(p.r, .001, 10000) }; }) };
+      opacity:s.opacity===undefined?undefined:number(s.opacity,0,1),precision:s.precision===undefined?undefined:typeof s.precision==='boolean'?s.precision:fail('Precisão de pincel inválida.'),precisionSmoothing:s.precisionSmoothing===undefined?undefined:number(s.precisionSmoothing,0),
+      points: points.map(value => { const p = record(value); return { x: number(p.x), y: number(p.y), r: number(p.r, .001) }; }) };
   });
   const seen = new Set<string>(); unique(widgets, seen); unique(connectors, seen); unique(strokes, seen);
   const groupIds = new Set<string>();

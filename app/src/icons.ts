@@ -11,7 +11,7 @@ import {
   Route, ArrowLeftRight, FlipHorizontal2, Eye, EyeOff, PanelRight, SlidersHorizontal,
   AlignEndVertical, AlignCenterVertical, AlignStartHorizontal, AlignEndHorizontal,
   AlignCenterHorizontal, AlignHorizontalSpaceBetween, AlignVerticalSpaceBetween,
-  RotateCw, Move, RectangleHorizontal, SquareRoundCorner, FileImage, FileCode2, type IconNode,
+  RotateCw, Move, RectangleHorizontal, SquareRoundCorner, FileImage, FileCode2, Network, CornerDownRight, GitFork, Mic, AudioLines, Play, Pause, Square, type IconNode,
 } from 'lucide';
 
 const symbols:Record<string,IconNode>={
@@ -36,6 +36,8 @@ const symbols:Record<string,IconNode>={
   'distribute-x':AlignHorizontalSpaceBetween,'distribute-y':AlignVerticalSpaceBetween,
   rotation:RotateCw,position:Move,rectangle:RectangleHorizontal,'corner-radius':SquareRoundCorner,
   'file-image':FileImage,'file-code':FileCode2,
+  mindmap:Network,'mind-child':CornerDownRight,'mind-layout':GitFork,
+  audio:AudioLines,mic:Mic,play:Play,pause:Pause,stop:Square,upload:Upload,
 };
 const cache=new Map<string,string>(),missing=new Set<string>();
 const escapeAttr=(value:unknown)=>String(value).replace(/[&"<>]/g,c=>({'&':'&amp;','"':'&quot;','<':'&lt;','>':'&gt;'}[c]!));

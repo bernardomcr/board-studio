@@ -6,6 +6,7 @@ import type { Vec } from "./core/geometry";
 import { borderPattern, patternedContour, shapeContours } from "./core/shapes";
 import {resolvedWidgetStyle} from './core/style-scale';
 import {configureRasterSampling} from './render/raster-quality';
+import {installClipboardImages} from './clipboard-images';
 
 type Crop = { x: number; y: number; width: number; height: number };
 type MaskShape = "rectangle" | "ellipse" | "round_rectangle";
@@ -14,6 +15,7 @@ interface ImageAPI {
   state: BoardState; bus: CommandBus; camera: Camera; app: Application;
   world: Container; nodeAt?: (id: string) => Container | undefined; onChange?: () => void;
 }
+export interface ImageImportOptions{point?:Vec;label?:string;afterCreate?(ids:string[]):void;canInsert?():boolean}
 const FULL: Crop = { x: 0, y: 0, width: 1, height: 1 };
 const asImage = (w: Widget | undefined): ImageItem | undefined => (w as unknown as ImageItem)?.type === "image" ? w as unknown as ImageItem : undefined;
 
@@ -41,6 +43,7 @@ export function installImages(api: ImageAPI) {
 
   function notice(message: string) {
     const toast = document.createElement("div");
+    toast.setAttribute('role','status');
     toast.textContent = message;
     toast.style.cssText = "position:fixed;left:50%;bottom:28px;transform:translateX(-50%);background:#191812;color:white;border-radius:8px;padding:12px 18px;z-index:100;font:14px Segoe UI,sans-serif;max-width:90vw";
     document.body.append(toast); setTimeout(() => toast.remove(), 5000);
@@ -155,26 +158,35 @@ export function installImages(api: ImageAPI) {
     return {src:canvas.toDataURL("image/png"),naturalWidth:canvas.width,naturalHeight:canvas.height};
   }
 
-  async function importFiles(files: FileList | File[], point?: Vec) {
-    const ids: string[] = [];
+  async function importFiles(files: FileList | File[], pointOrOptions?:Vec|ImageImportOptions) {
+    const options:ImageImportOptions=pointOrOptions&&'x'in pointOrOptions?{point:pointOrOptions}:pointOrOptions??{};
+    const decoded:Array<{src:string;naturalWidth:number;naturalHeight:number}>=[],center=options.point??{x:camera.x,y:camera.y};
     for (const file of Array.from(files)) {
       if (!file.type.startsWith("image/")) continue;
       if (file.size > 25 * 1024 * 1024) { notice("Escolha uma imagem de até 25 MB."); continue; }
       try {
-        const source=await readImage(file);
+        decoded.push(await readImage(file));
+      } catch(error) { notice(`${file.name}: ${error instanceof Error?error.message:"Não foi possível importar a imagem."}`); }
+    }
+    const ids:string[]=[];
+    if(options.canInsert&&!options.canInsert()){notice('O tópico ou o board mudou. Escolha a imagem novamente no destino desejado.');return ids;}
+    if(decoded.length){bus.beginTransaction(options.label??'Inserir imagens');try{
+      for(const source of decoded){
         const scale = Math.min(1, 520 / source.naturalWidth, 420 / source.naturalHeight);
         const width = source.naturalWidth * scale, height = source.naturalHeight * scale;
-        const center = point ?? { x: camera.x, y: camera.y };
         const image: ImageItem = {
           id: nextId("image"), type: "image", ...source,
           x: center.x - width / 2 + ids.length * 24, y: center.y - height / 2 + ids.length * 24,
           width, height, rotation: 0, z: 0, content: "", style: { ...SHAPE_STYLE, borderWidth: 0, fillColor: "transparent" },
         };
         bus.exec({ op: "WIDGET_CREATE", payload: image }); ids.push(image.id);
-      } catch(error) { notice(`${file.name}: ${error instanceof Error?error.message:"Não foi possível importar a imagem."}`); }
+      }
+      options.afterCreate?.(ids);
+      bus.exec({ op: "SELECTION_SET", payload: ids });
+    }finally{bus.endTransaction();}
     }
-    if (ids.length) bus.exec({ op: "SELECTION_SET", payload: ids });
     sync(); api.onChange?.();
+    return ids;
   }
 
   function replaceSelected() {
@@ -330,11 +342,6 @@ export function installImages(api: ImageAPI) {
     const rect = api.app.canvas.getBoundingClientRect();
     void importFiles(e.dataTransfer.files, camera.screenToWorld({ x: e.clientX - rect.left, y: e.clientY - rect.top }));
   });
-  document.addEventListener("paste", e => {
-    const target = e.target as HTMLElement;
-    if (target?.isContentEditable || target?.closest("input,textarea") || modal) return;
-    const files = e.clipboardData?.files; if (!files?.length) return;
-    e.preventDefault(); void importFiles(files);
-  });
+  installClipboardImages({importFiles:files=>importFiles(files),notice,blocked:()=>!!modal||document.body.classList.contains('home-visible')||!!document.querySelector('[role="dialog"][aria-modal="true"]')});
   return { sync, importFiles, cropSelected, circleCropSelected, resetCrop, replaceSelected, flipSelected, setMask, downloadSelected };
 }

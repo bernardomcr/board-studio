@@ -6,6 +6,8 @@ export type Endpoint = { kind: "anchor"; widgetId: string; x: number; y: number 
 export type ConnectorShape = "straight" | "elbowed" | "curved";
 export type CapStyle = "none" | "arrow" | "triangle" | "circle" | "diamond" | "bar";
 export interface Connector {
+  /** Child topic owning an automatically routed mind-map branch. */
+  mindBranch?:string;
   id: string; type: "connector"; start: Endpoint; end: Endpoint; shape: ConnectorShape;
   locked?: boolean;
   hidden?: boolean;
