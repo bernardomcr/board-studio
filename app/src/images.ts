@@ -18,7 +18,7 @@ interface ImageAPI {
   world: Container; nodeAt?: (id: string) => Container | undefined; onChange?: () => void;
   getBoardKey?(): string | null;
 }
-export interface ImageImportOptions{point?:Vec;label?:string;afterCreate?(ids:string[]):void;canInsert?():boolean}
+export interface ImageImportOptions{point?:Vec;zoom?:number;viewport?:{width:number;height:number};label?:string;afterCreate?(ids:string[]):void;canInsert?():boolean}
 const FULL: Crop = { x: 0, y: 0, width: 1, height: 1 };
 const asImage = (w: Widget | undefined): ImageItem | undefined => (w as unknown as ImageItem)?.type === "image" ? w as unknown as ImageItem : undefined;
 
@@ -168,6 +168,8 @@ export function installImages(api: ImageAPI) {
     const boardKey = api.getBoardKey?.();
     const options:ImageImportOptions=pointOrOptions&&'x'in pointOrOptions?{point:pointOrOptions}:pointOrOptions??{};
     const decoded:Array<{src:string;naturalWidth:number;naturalHeight:number}>=[],center=options.point??{x:camera.x,y:camera.y};
+    const requestedZoom=options.zoom??camera.scale,zoom=Number.isFinite(requestedZoom)&&requestedZoom>0?requestedZoom:1,viewport=options.viewport??{width:camera.width,height:camera.height};
+    const screenWidth=Math.min(520,Math.max(32,viewport.width-160)),screenHeight=Math.min(420,Math.max(32,viewport.height-180));
     for (const file of Array.from(files)) {
       if (!file.type.startsWith("image/")) continue;
       if (file.size > 25 * 1024 * 1024) { notice("Escolha uma imagem de até 25 MB."); continue; }
@@ -179,11 +181,11 @@ export function installImages(api: ImageAPI) {
     if(!sameBoard(boardKey)||options.canInsert&&!options.canInsert()){notice('O tópico ou o board mudou. Escolha a imagem novamente no destino desejado.');return ids;}
     if(decoded.length){bus.beginTransaction(options.label??'Inserir imagens');try{
       for(const source of decoded){
-        const scale = Math.min(1, 520 / source.naturalWidth, 420 / source.naturalHeight);
+        const scale = Math.min(1, screenWidth / source.naturalWidth, screenHeight / source.naturalHeight)/zoom;
         const width = source.naturalWidth * scale, height = source.naturalHeight * scale;
         const image: ImageItem = {
           id: nextId("image"), type: "image", ...source,
-          x: center.x - width / 2 + ids.length * 24, y: center.y - height / 2 + ids.length * 24,
+          x: center.x - width / 2 + ids.length * 24/zoom, y: center.y - height / 2 + ids.length * 24/zoom,
           width, height, rotation: 0, z: 0, content: "", style: { ...SHAPE_STYLE, borderWidth: 0, fillColor: "transparent" },
         };
         bus.exec({ op: "WIDGET_CREATE", payload: image }); ids.push(image.id);
@@ -359,6 +361,6 @@ export function installImages(api: ImageAPI) {
     const rect = api.app.canvas.getBoundingClientRect();
     void importFiles(e.dataTransfer.files, camera.screenToWorld({ x: e.clientX - rect.left, y: e.clientY - rect.top }));
   });
-  installClipboardImages({importFiles:(files,canInsert)=>importFiles(files,{canInsert}),getBoardKey:api.getBoardKey,notice,blocked:()=>!!modal||document.body.classList.contains('home-visible')||[...document.querySelectorAll<HTMLElement>('[role="dialog"][aria-modal="true"]')].some(dialog=>!dialog.hidden&&dialog.getClientRects().length>0)});
+  installClipboardImages({importFiles:(files,canInsert,placement)=>importFiles(files,{canInsert,...placement}),getPlacement:()=>({point:{x:camera.x,y:camera.y},zoom:camera.scale,viewport:{width:camera.width,height:camera.height}}),getBoardKey:api.getBoardKey,notice,blocked:()=>!!modal||document.body.classList.contains('home-visible')||[...document.querySelectorAll<HTMLElement>('[role="dialog"][aria-modal="true"]')].some(dialog=>!dialog.hidden&&dialog.getClientRects().length>0)});
   return { sync, importFiles, cropSelected, circleCropSelected, resetCrop, replaceSelected, flipSelected, setMask, downloadSelected };
 }

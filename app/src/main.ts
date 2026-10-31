@@ -802,6 +802,24 @@ let clipboard: EntitySnapshot = {widgets:[],connectors:[],strokes:[],groups:[]};
 let clipboardToken='';
 const BOARD_CLIPBOARD_TYPE='application/x-board-studio';
 const canvasClipboardBlocked=()=>!!home?.transitioning()||document.body.classList.contains('home-visible')||[...document.querySelectorAll<HTMLElement>('dialog[open],[role="dialog"][aria-modal="true"]')].some(dialog=>!dialog.hidden&&dialog.getClientRects().length>0);
+function pasteSnapshot():void{
+  const widgets=new Map(clipboard.widgets.map(w=>[w.id,w] as const)),rects:Rect[]=clipboard.widgets.map(widgetAABB);
+  for(const c of clipboard.connectors){
+    // Match the endpoints duplicateSnapshot will publish, including detached
+    // anchors frozen when copied. Their original widgets may have moved/gone.
+    const endpoint=(field:'start'|'end'):Endpoint=>{
+      const e=c[field];if(e.kind==='point'||widgets.has(e.widgetId))return e;
+      const position=clipboard.endpointPositions?.[c.id]?.[field]??resolveEndpoint(e,state.widgets);
+      return position?{kind:'point',...position}:e;
+    };
+    const geometry=connectorGeometry({...c,start:endpoint('start'),end:endpoint('end')},widgets);if(geometry)rects.push(connectorBounds(geometry));
+  }
+  for(const stroke of clipboard.strokes)rects.push(strokeBounds(stroke));
+  const bounds=unionRect(rects),view=camera.visibleWorldRect(),margin=16/camera.scale;
+  if(bounds&&(bounds.minX+24<view.minX+margin||bounds.maxX+24>view.maxX-margin||bounds.minY+24<view.minY+margin||bounds.maxY+24>view.maxY-margin)){
+    duplicateSnapshot(state,bus,clipboard,camera.x-(bounds.minX+bounds.maxX)/2,camera.y-(bounds.minY+bounds.maxY)/2);
+  }else duplicateSnapshot(state,bus,clipboard);
+}
 document.addEventListener('copy',event=>{
   if(event.defaultPrevented||isClipboardEditor(event.target)||canvasClipboardBlocked()||!event.clipboardData)return;
   const snapshot=captureSelection(state);if(!snapshot.widgets.length&&!snapshot.connectors.length&&!snapshot.strokes.length)return;
@@ -813,8 +831,9 @@ document.addEventListener('copy',event=>{
 // Images consume their native paste first. A stale in-app copy must never
 // suppress a screenshot or a photo copied later in another application.
 window.addEventListener('paste',event=>{
-  if(event.defaultPrevented||isClipboardEditor(event.target)||canvasClipboardBlocked()||!event.clipboardData)return;
-  if(clipboardToken&&event.clipboardData.getData(BOARD_CLIPBOARD_TYPE)===clipboardToken){event.preventDefault();duplicateSnapshot(state,bus,clipboard);}
+  const title=event.target instanceof Element?event.target.closest<HTMLElement>('#board-title'):null;
+  if(event.defaultPrevented||isClipboardEditor(event.target)&&!title||canvasClipboardBlocked()||!event.clipboardData)return;
+  if(clipboardToken&&event.clipboardData.getData(BOARD_CLIPBOARD_TYPE)===clipboardToken){event.preventDefault();title?.blur();pasteSnapshot();}
 });
 
 const pointers = new Map<number, { x: number; y: number }>();
@@ -1836,7 +1855,19 @@ drawingUI=installDrawingUI({getTool:()=>tool,setTool:t=>setTool(t as Tool),onCha
 brushCursor=installBrushCursor({camera,getTool:()=>tool,getSettings:()=>drawingUI!.settings(tool==='highlighter'?'highlighter':'brush'),getEraserRadius:()=>drawingUI?.eraserRadius()??12,temporaryHand:()=>spaceDown||gesture.kind==='pan'});
 app.canvas.addEventListener('pointerleave',()=>brushCursor?.leave());
 const projectFiles=installProjectFiles({state,bus,camera,getBoardKey:mediaBoardKey,sync:()=>{boardEpoch++;gridDirty=true;syncScene();drawSelection();refreshChrome();if(home&&!home.currentId())void home.adoptCurrent();else{home?.updateCurrent();scheduleSave();}}});
-const title=document.getElementById("board-title")!;title.contentEditable="true";title.setAttribute("role","textbox");title.setAttribute("aria-label","Nome do board");title.setAttribute("spellcheck","false");title.addEventListener("keydown",e=>{if(e.key==="Enter"){e.preventDefault();title.blur();}});title.addEventListener("blur",()=>{if(!title.textContent?.trim())title.textContent="Board sem título";home?.updateCurrent({title:title.textContent??"Board"});scheduleSave();});
+const title=document.getElementById("board-title")!;
+title.contentEditable='plaintext-only';if(!title.isContentEditable)title.contentEditable='true';
+title.setAttribute('role','textbox');title.setAttribute('aria-label','Nome do board');title.setAttribute('spellcheck','false');
+title.addEventListener('keydown',event=>{if(event.key==='Enter'){event.preventDefault();title.blur();}});
+title.addEventListener('paste',event=>{
+  if(event.defaultPrevented||!event.clipboardData)return;
+  // Internal object paste is handled by the canvas listener after this target.
+  if(clipboardToken&&event.clipboardData.getData(BOARD_CLIPBOARD_TYPE)===clipboardToken)return;
+  event.preventDefault();let text=event.clipboardData.getData('text/plain');
+  if(!text){const doc=new DOMParser().parseFromString(event.clipboardData.getData('text/html'),'text/html');for(const node of doc.querySelectorAll('script,style,template,iframe,object,embed,svg,img,canvas,video,audio'))node.remove();text=doc.body.textContent??'';}
+  document.execCommand('insertText',false,text.replace(/[\r\n]+/g,' '));
+});
+title.addEventListener('blur',()=>{title.textContent=title.textContent?.replace(/[\r\n]+/g,' ').trim()||'Board sem título';home?.updateCurrent({title:title.textContent});scheduleSave();});
 
 // ------------------------------------------------------------------ loop
 

@@ -57,7 +57,8 @@ test('HTML embedded images paste once and a blocked external image gives an acti
 
 test('paste stays native in fields and uses the inline text editor without creating board images',async({page})=>{
   await blank(page);await fixture(page);
-  const input=page.getByRole('textbox',{name:'Nome do board',exact:true});await input.focus();
+  await page.evaluate(()=>{const input=document.createElement('input');input.id='native-clipboard-field';input.setAttribute('aria-label','Campo de texto nativo');document.body.append(input);});
+  const input=page.getByRole('textbox',{name:'Campo de texto nativo',exact:true});await input.focus();
   const field=await input.evaluate(element=>{const data=new DataTransfer();data.setData('text/html','<img src="data:image/png;base64,invalid">');const event=new ClipboardEvent('paste',{clipboardData:data,bubbles:true,cancelable:true});element.dispatchEvent(event);return event.defaultPrevented;});
   expect(field).toBe(false);
   await page.locator('#app canvas').dblclick({position:{x:725,y:500}});await expect(page.locator('#inline-editor')).toBeVisible();

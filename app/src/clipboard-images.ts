@@ -32,22 +32,34 @@ function clipboardSources(data:DataTransfer):string[]{
   return [...new Set(sources)];
 }
 
+export interface ClipboardImagePlacement {
+  point:{x:number;y:number};zoom:number;viewport:{width:number;height:number};
+}
+
 export function installClipboardImages(api:{
-  importFiles(files:File[],canInsert?:()=>boolean):Promise<unknown>;
+  importFiles(files:File[],canInsert?:()=>boolean,placement?:ClipboardImagePlacement):Promise<unknown>;
   notice(message:string):void;
   blocked():boolean;
   getBoardKey?():string|null;
+  getPlacement?():ClipboardImagePlacement;
 }){
-  const insert=async(files:File[],canInsert:()=>boolean)=>{try{await api.importFiles(files,canInsert);}catch{api.notice('Não foi possível inserir a imagem no board. Tente novamente ou importe o arquivo pelo botão Imagem.');}};
+  const insert=async(files:File[],canInsert:()=>boolean,placement?:ClipboardImagePlacement)=>{try{await api.importFiles(files,canInsert,placement);}catch{api.notice('Não foi possível inserir a imagem no board. Tente novamente ou importe o arquivo pelo botão Imagem.');}};
   const paste=(event:ClipboardEvent)=>{
-    if(event.defaultPrevented||api.blocked()||isClipboardEditor(event.target)||!event.clipboardData)return;
-    const boardKey=api.getBoardKey?.(),canInsert=()=>!api.getBoardKey||api.getBoardKey()===boardKey;
+    if(event.defaultPrevented||!event.clipboardData)return;
+    const title=event.target instanceof Element?event.target.closest<HTMLElement>('#board-title'):null;
+    if(isClipboardEditor(event.target)&&!title)return;
     // Read all native clipboard representations synchronously: some browsers clear
     // the event's DataTransfer as soon as the paste listener returns.
     const files=clipboardFiles(event.clipboardData);
-    if(files.length){event.preventDefault();void insert(files,canInsert);return;}
-    const sources=clipboardSources(event.clipboardData);if(!sources.length)return;
+    const sources=files.length?[]:clipboardSources(event.clipboardData);if(!files.length&&!sources.length)return;
     event.preventDefault();
+    // The title is a name field, never an HTML image container. Intercept before
+    // its plaintext paste handler, even when the board cannot accept objects.
+    if(api.blocked())return;
+    const boardKey=api.getBoardKey?.();if(api.getBoardKey&&boardKey===null)return;
+    const canInsert=()=>!api.getBoardKey||api.getBoardKey()===boardKey,placement=api.getPlacement?.();
+    title?.blur();
+    if(files.length){void insert(files,canInsert,placement);return;}
     void (async()=>{
       const images:File[]=[];
       for(const [index,source]of sources.entries()){
@@ -63,9 +75,9 @@ export function installClipboardImages(api:{
           api.notice('Não foi possível colar a imagem: o site de origem pode ter bloqueado o acesso. Use “Copiar imagem” no navegador ou baixe e arraste o arquivo para o board.');
         }
       }
-      if(images.length)await insert(images,canInsert);
+      if(images.length)await insert(images,canInsert,placement);
     })();
   };
-  document.addEventListener('paste',paste);
-  return {destroy:()=>document.removeEventListener('paste',paste)};
+  document.addEventListener('paste',paste,true);
+  return {destroy:()=>document.removeEventListener('paste',paste,true)};
 }
