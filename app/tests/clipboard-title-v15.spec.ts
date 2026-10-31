@@ -31,6 +31,20 @@ async function paste(page,{selector='#board-title',html='',text='',images=[]}={}
 async function title(page){const field=page.getByRole('textbox',{name:'Nome do board',exact:true});await field.focus();return field;}
 const images=page=>page.evaluate(()=>[...window.__board.state.widgets.values()].filter(w=>w.type==='image'));
 
+test('renaming through the title updates metadata without capturing the body or disturbing content history',async({page})=>{
+ await blank(page);const src=await png(page,60,30);const renamed=await page.evaluate(async src=>{
+  const b=window.__board,{createWidget}=await import('/src/core/model.ts');
+  b.bus.exec({op:'WIDGET_CREATE',payload:{...createWidget('shape',{x:-120,y:-60,content:'Conteúdo preservado'}),id:'title-content'}});
+  b.bus.exec({op:'WIDGET_CREATE',payload:{...createWidget('image',{x:100,y:80,width:120,height:60}),id:'title-media',src,naturalWidth:60,naturalHeight:30}});
+  b.bus.exec({op:'WIDGET_UPDATE',payload:{id:'title-content',patch:{x:210}}});b.bus.undo();
+  const body=()=>JSON.stringify({widgets:[...b.state.widgets],order:b.state.order,connectors:[...b.state.connectors],connectorOrder:b.state.connectorOrder,strokes:[...b.state.strokes],strokeOrder:b.state.strokeOrder,groups:[...b.state.groups],background:b.state.background,journal:b.bus.snapshot(),camera:{x:b.camera.x,y:b.camera.y,scale:b.camera.scale}}),before=body(),nativeClone=window.structuredClone;let captures=0;
+  window.structuredClone=function(value,...args){if(value?.layerOrderVersion===1&&Array.isArray(value.widgets)&&value.journal)captures++;return nativeClone(value,...args);};
+  try{const title=document.getElementById('board-title');title.focus();title.textContent='Nome novo sem copiar o quadro';title.blur();const index=JSON.parse(localStorage.getItem('board-app:home:v1')),id=decodeURIComponent(location.hash.slice('#board/'.length));return {captures,bodySame:body()===before,title:title.textContent,indexTitle:index.boards.find(board=>board.id===id)?.title,canRedo:b.bus.canRedo};}
+  finally{window.structuredClone=nativeClone;}
+ },src);
+ expect(renamed).toEqual({captures:0,bodySame:true,title:'Nome novo sem copiar o quadro',indexTitle:'Nome novo sem copiar o quadro',canRedo:true});await page.keyboard.press('Control+Shift+z');expect(await page.evaluate(()=>window.__board.state.widgets.get('title-content').x)).toBe(210);await page.keyboard.press('Control+z');expect(await page.evaluate(()=>window.__board.state.widgets.get('title-content').x)).toBe(-120);await page.evaluate(()=>window.__board.saveNow());await page.reload();await page.waitForFunction(()=>window.__board?.booted);await expect(page.locator('#board-title')).toHaveText('Nome novo sem copiar o quadro');expect(await page.evaluate(()=>({x:window.__board.state.widgets.get('title-content').x,canRedo:window.__board.bus.canRedo}))).toEqual({x:-120,canRedo:true});expect((await images(page))[0].src).toBe(src);
+});
+
 test('image files pasted with the title focused become useful centered canvas objects at macro and high zoom',async({browser,baseURL})=>{
  const context=await browser.newContext({baseURL,viewport:{width:1280,height:900},deviceScaleFactor:2}),page=await context.newPage();
  try{

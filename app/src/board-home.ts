@@ -161,8 +161,10 @@ export function installBoardHome(api: HomeAPI) {
   function updateCurrent(change: { title?: string } = {}) {
     if(transitioning)return;
     const board = meta(); if (!board) return;
-    const captured = api.capture() as { title?: unknown };
-    board.title = titleOf(change.title ?? captured?.title, board.title); board.editedAt = Date.now();
+    // A supplied name is metadata only. Capturing the complete board here
+    // would clone embedded media and the journal just to read its title.
+    const currentTitle = change.title ?? (api.capture() as { title?: unknown })?.title;
+    board.title = titleOf(currentTitle, board.title); board.editedAt = Date.now();
     try { saveIndex(); } catch (error) { report(error); }
   }
   async function adoptCurrent(title?: string) {

@@ -51,7 +51,7 @@ import {appendConnectorCaption,connectorCaptionAt,connectorCaptionLayout,caption
 import {installBoardHome} from "./board-home";
 import {ensureFonts,loadBoardFont,embedSvgFonts,boardFontFamilies} from "./fonts";
 import {installIcons} from "./icons";
-import {positionContextPanel} from "./context-position";
+import {positionContextPanel,workspaceTop} from "./context-position";
 import {readStoredBoard,writeStoredBoard} from "./core/board-storage";
 import { installProjectFiles } from "./project-files";
 import {groupLeaves,memberSelection,enclosingGroup,groupSelection,ungroupSelection,captureSelection,duplicateSnapshot,transformSnapshot,selectedBounds,itemLocked,type EntitySnapshot} from "./core/groups";
@@ -179,7 +179,7 @@ function loadBoard(stored?:SavedBoard): boolean {
 let saveTimer:ReturnType<typeof setTimeout>|null=null;
 function savedBoard():SavedBoard{return structuredClone({layerOrderVersion:1 as const,userFonts:snapshotUserFonts(boardFontFamilies(state.widgets.values(),state.connectors.values())),savedAt:Date.now(),title:document.getElementById("board-title")!.textContent??"Board",background:state.background??{...DEFAULT_BACKGROUND},widgets:[...state.widgets.values()],order:state.order,connectors:[...state.connectors.values()],connectorOrder:state.connectorOrder,strokes:[...state.strokes.values()],strokeOrder:state.strokeOrder,groups:[...state.groups.entries()],journal:bus.snapshot(),camera:{x:camera.x,y:camera.y,scale:camera.scale}});}
 async function persistBoard(flushEditors=false){if(home&&(!home.currentId()||home.transitioning()))return;if(flushEditors){flushGestureUpdate();structuredUI?.finalizeInteractions();}try{await writeStoredBoard(storageKey(),savedBoard());document.getElementById("save-warning")?.remove();}catch{let notice=document.getElementById("save-warning");if(!notice){notice=document.createElement("div");notice.id="save-warning";notice.style.cssText="position:fixed;bottom:60px;left:50%;transform:translateX(-50%);z-index:80;background:#fff9b1;padding:12px 18px;border-radius:8px;font:13px Segoe UI";document.body.append(notice);}notice.textContent="Não foi possível salvar automaticamente. Use Salvar arquivo para guardar seu trabalho.";}}
-function scheduleSave(){if(home&&(!home.currentId()||home.transitioning()))return;if(saveTimer)clearTimeout(saveTimer);saveTimer=setTimeout(()=>{saveTimer=null;if(gesture.kind!=='none'){scheduleSave();return;}void persistBoard();},400);}
+function scheduleSave(){if(home&&(!home.currentId()||home.transitioning()))return;if(saveTimer)clearTimeout(saveTimer);saveTimer=setTimeout(()=>{saveTimer=null;if(gesture.kind!=='none'||momentum.active){scheduleSave();return;}void persistBoard();},400);}
 window.addEventListener("pagehide",()=>{void persistBoard(true);});
 
 const state: BoardState = {
@@ -195,7 +195,7 @@ const state: BoardState = {
 };
 const scene = new BoardScene(world);
 const bus = new CommandBus(state, () => {
-  syncScene();
+  syncScene(false);
   drawSelection();
   refreshChrome();
   scheduleSave();
@@ -214,12 +214,14 @@ let audioUI:ReturnType<typeof installAudio>|undefined;
 let structuredUI:ReturnType<typeof installStructuredTextUI>|undefined;
 let clickedObjectLink:{id:string;url:string;start:Vec}|null=null;
 let lastBackground:BoardBackground|undefined;
-function syncScene(): void {
+function syncScene(refreshOverlays=true): void {
   if(lastBackground!==state.background){lastBackground=state.background;gridDirty=true;}
   scene.sync(state, camera.visibleWorldRect(), camera.scale);
   images?.sync();
   backgroundUI?.sync();
-  audioUI?.refresh();structuredUI?.refresh();
+  // Content commands refresh chrome immediately afterwards; camera-only syncs
+  // still need overlays here. Avoid updating both overlay trees twice per move.
+  if(refreshOverlays){audioUI?.refresh();structuredUI?.refresh();}
 }
 
 function syncSize(): void {
@@ -743,7 +745,7 @@ function refreshAlignBar(): void {
   const width = alignbar.offsetWidth || 280;
   const left = Math.max(8, Math.min(window.innerWidth - width - 8, top.x));
   alignbar.style.left = `${left}px`;
-  alignbar.style.top = `${Math.max(8, top.y - 46)}px`;
+  alignbar.style.top = `${Math.max(workspaceTop(), top.y - 46)}px`;
 }
 
 alignbar.addEventListener("click", (e) => {

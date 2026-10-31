@@ -1,6 +1,7 @@
 // Browser fixtures use the editor's development bridge; all storage is isolated per test.
 // @ts-nocheck
 import { test, expect, type Page } from '@playwright/test';
+import {openDrawingPalette} from './helpers/drawing-palette';
 
 async function blank(page:Page,title='Teste local'){
   await page.goto('/');await page.waitForFunction(()=>window.__board?.booted);
@@ -88,10 +89,10 @@ test('brush preview and committed paths agree after pan and at multiple zoom lev
 
 test('precision and common erasers preserve independent history on sparse geometry without a lasso tool',async({page})=>{
   await blank(page);await page.evaluate(()=>{const b=window.__board;b.bus.exec({op:'STROKE_CREATE',payload:{id:'erase',type:'stroke',tool:'pen',color:'#000000',z:0,points:[{x:-200,y:0,r:2},{x:200,y:0,r:2}]}});});
-  await page.locator('[data-tool="eraser"]').click();await page.getByRole('radio',{name:'Borracha de precisão',exact:true}).click();
+  await page.locator('[data-tool="eraser"]').click();await openDrawingPalette(page);await page.getByRole('radio',{name:'Borracha de precisão',exact:true}).click();
   await page.mouse.move(800,500);await page.mouse.down();await page.mouse.up();expect(await page.evaluate(()=>window.__board.state.strokes.size)).toBe(1);expect(await page.evaluate(()=>window.__board.state.strokes.get('erase').erasures?.length??0)).toBeGreaterThan(0);
   await page.keyboard.press('Control+z');expect(await page.evaluate(()=>window.__board.state.strokes.get('erase').erasures??[])).toEqual([]);
-  await page.getByRole('radio',{name:'Borracha comum',exact:true}).click();await page.mouse.click(800,500);expect(await page.evaluate(()=>window.__board.state.strokes.size)).toBe(0);await page.keyboard.press('Control+z');expect(await page.evaluate(()=>window.__board.state.strokes.get('erase').points)).toEqual([{x:-200,y:0,r:2},{x:200,y:0,r:2}]);await expect(page.locator('#toolbar [data-tool="lasso"]')).toHaveCount(0);
+  await openDrawingPalette(page);await page.getByRole('radio',{name:'Borracha comum',exact:true}).click();await page.mouse.click(800,500);expect(await page.evaluate(()=>window.__board.state.strokes.size)).toBe(0);await page.keyboard.press('Control+z');expect(await page.evaluate(()=>window.__board.state.strokes.get('erase').points)).toEqual([{x:-200,y:0,r:2},{x:200,y:0,r:2}]);await expect(page.locator('#toolbar [data-tool="lasso"]')).toHaveCount(0);
 });
 
 test('all font choices load real local faces and rich formatting round-trips',async({page})=>{

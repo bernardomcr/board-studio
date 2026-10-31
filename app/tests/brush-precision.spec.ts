@@ -1,5 +1,6 @@
 // @ts-nocheck
 import {test,expect} from '@playwright/test';
+import {openDrawingPalette} from './helpers/drawing-palette';
 async function ready(page){await page.goto('/');await page.waitForFunction(()=>window.__board?.booted);}
 async function blank(page){await ready(page);await page.getByRole('button',{name:'Criar board',exact:true}).click();await page.getByRole('dialog',{name:'Criar board'}).getByRole('button',{name:'Criar board',exact:true}).click();await expect(page.locator('#board-home')).toBeHidden();}
 
@@ -40,7 +41,7 @@ test('subpixel strokes remain continuous at two percent without increasing their
 
 test('native precision at two percent records the visible smoothing window and survives reload',async({page})=>{
  await blank(page);await page.evaluate(()=>{const c=window.__board.camera;c.x=0;c.y=0;c.scale=.02;});
- await page.locator('[data-tool="brush"]').click();await page.getByRole('checkbox',{name:'Precisão do pincel',exact:true}).check();await page.getByRole('slider',{name:'Suavização da precisão',exact:true}).press('End');
+ await page.locator('[data-tool="brush"]').click();await openDrawingPalette(page);await page.getByRole('checkbox',{name:'Precisão do pincel',exact:true}).check();await page.getByRole('slider',{name:'Suavização da precisão',exact:true}).press('End');
  await page.mouse.move(500,550);await page.mouse.down();for(let i=1;i<=320;i++){const x=500+i*1.8,y=550+40*Math.sin((x-500)/120)+2*Math.sin(i*1.4);await page.mouse.move(x,y);}await page.mouse.up();
  const result=await page.evaluate(async()=>{const b=window.__board,s=[...b.state.strokes.values()][0],{strokeGeometry}=await import('/src/core/strokes.ts'),g=strokeGeometry(s);let raw=0,smooth=0,n=0;for(let i=40;i<s.points.length-40;i++){const a=s.points[i-1],p=s.points[i],c=s.points[i+1],u=g.knots[i-1],v=g.knots[i],w=g.knots[i+1];raw+=((a.y-2*p.y+c.y)*b.camera.scale)**2;smooth+=((u.y-2*v.y+w.y)*b.camera.scale)**2;n++;}return {smoothing:s.precisionSmoothing,raw:Math.sqrt(raw/n),smooth:Math.sqrt(smooth/n),count:s.points.length,first:g.knots[0],last:g.knots.at(-1),expectedFirst:s.points[0],expectedLast:s.points.at(-1)};});
  expect(result.smoothing).toBeCloseTo(8100,8);expect(result.count).toBeGreaterThan(300);expect(result.smooth).toBeLessThan(result.raw*.1);expect(result.first).toEqual(result.expectedFirst);expect(result.last).toEqual(result.expectedLast);await page.evaluate(()=>window.__board.saveNow());await page.reload();await page.waitForFunction(()=>window.__board?.booted);expect(await page.evaluate(()=>[...window.__board.state.strokes.values()][0].precisionSmoothing)).toBeCloseTo(8100,8);

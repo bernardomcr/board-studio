@@ -7,7 +7,7 @@ import {mindNodeHidden} from './core/mindmap';
 import {checklistFromLines,checklistLayout,tableLayout,tableTracks,tableTrackScale,tableWithGrid,resizedTableTracks,tableGrid,createChecklistWidget,createTableWidget,setChecklistItem,setTableCell,resizeTable,validateTable,type LocalRect} from './core/structured-text';
 import {naturalText} from './core/text-layout';
 import {plainText} from './core/richtext';
-import {positionContextPanel} from './context-position';
+import {positionContextPanel,workspaceTop} from './context-position';
 import {icon} from './icons';
 
 interface StructuredAPI {state:BoardState;bus:CommandBus;camera:Camera;getTool():string;getBoardKey?():string|null;isInteracting?():boolean;setTool(tool:string):void;onChange?():void;placeWidget?(widget:Widget):void}
@@ -23,6 +23,8 @@ export function installStructuredTextUI(api:StructuredAPI){
  const overlay=document.createElement('div');overlay.id='structured-overlay';document.body.append(overlay);
  const dividers=document.createElement('div');dividers.id='table-dividers';dividers.hidden=true;document.body.append(dividers);
  const actions=document.createElement('div');actions.id='table-quick-actions';actions.hidden=true;actions.setAttribute('role','toolbar');actions.setAttribute('aria-label','Linhas e colunas da tabela');document.body.append(actions);
+ const hidden=(element:HTMLElement,value:boolean)=>{if(element.hidden!==value)element.hidden=value;};
+ let actionsKey='',actionsPose='';
  const toolbar=document.getElementById('toolbar')!;
  function toolButton(label:string,symbol:string,action:()=>void){const b=document.createElement('button');b.type='button';b.className='tool';b.dataset.label=label;b.setAttribute('aria-label',label);b.title=label;b.innerHTML=icon(symbol);b.onclick=action;toolbar.append(b);return b;}
  toolButton('Tabela','grid',()=>configureTable());
@@ -116,21 +118,26 @@ export function installStructuredTextUI(api:StructuredAPI){
  }
  function refresh(){
   if(trackDrag&&!trackEditable())cancelTracks();
-  positionCellEditor();positionChecklistEditor();const active=api.getTool()==='select'&&!space&&!api.isInteracting?.()&&!document.body.classList.contains('home-visible');overlay.hidden=!active;dividers.hidden=!active;
+  positionCellEditor();positionChecklistEditor();const active=api.getTool()==='select'&&!space&&!api.isInteracting?.()&&!document.body.classList.contains('home-visible');hidden(overlay,!active);if(!active)hidden(dividers,true);
   // Checkbox hit areas cannot be used during a canvas gesture. Keep their DOM
   // retained and hidden instead of rebuilding/clipping every row on each move.
-  if(!active){actions.hidden=true;if(trackDrag&&!state.widgets.has(trackDrag.id)){trackDrag=null;bus.endTransaction();}return;}
+  if(!active){hidden(actions,true);if(trackDrag&&!state.widgets.has(trackDrag.id)){trackDrag=null;bus.endTransaction();}return;}
   const frames=visibleFrames(state),widgets=active?[...state.widgets.values()].filter(w=>w.checklist&&!w.hidden&&!w.locked&&!mindNodeHidden(state,w.id)):[],key=JSON.stringify([widgets.map(w=>[w.id,w.x,w.y,w.width,w.height,w.rotation,w.z,w.checklist]),camera.x,camera.y,camera.scale,camera.width,camera.height,state.order.map(id=>{const w=state.widgets.get(id)!;return [id,w.x,w.y,w.width,w.height,w.rotation,w.hidden,w.z,mindNodeHidden(state,id)];})]);
   if(key!==overlayKey){overlayKey=key;overlay.replaceChildren();for(const w of widgets)for(const row of checklistLayout(w)){const polygon=localRectFramePolygon(w,row.box,frames);if(!polygon.length)continue;const c=widgetCenter(w),worldPoint=(local:Vec)=>{const p=rotate({x:row.box.x+local.x-w.width/2,y:row.box.y+local.y-w.height/2},w.rotation);return {x:c.x+p.x,y:c.y+p.y};},center=worldPoint({x:polygon.reduce((sum,p)=>sum+p.x,0)/polygon.length,y:polygon.reduce((sum,p)=>sum+p.y,0)/polygon.length}),screenPolygon=polygon.map(p=>camera.worldToScreen(worldPoint(p)));if(Math.max(...screenPolygon.map(p=>p.x))<0||Math.max(...screenPolygon.map(p=>p.y))<0||Math.min(...screenPolygon.map(p=>p.x))>camera.width||Math.min(...screenPolygon.map(p=>p.y))>camera.height||covered(w,center,frames))continue;
    const button=document.createElement('button');button.type='button';button.setAttribute('role','checkbox');button.setAttribute('aria-label',plainText(row.item.text)||'Item da lista');button.setAttribute('aria-checked',String(row.item.checked));button.dataset.checklistItem=row.item.id;button.style.width=`${row.box.width}px`;button.style.height=`${row.box.height}px`;button.style.transform=matrix(w,row.box);button.style.clipPath=framePolygonCss(polygon);button.addEventListener('pointerdown',event=>prepareCheckbox(event,button));button.addEventListener('keydown',event=>{if(event.key===' '||event.key==='Enter'){event.preventDefault();event.stopPropagation();button.click();}});button.onclick=event=>{event.stopPropagation();if(event.detail>0&&editedCheckboxes.has(button))return;const current=state.widgets.get(w.id);if(!current||current.hidden||current.locked||mindNodeHidden(state,w.id))return;const currentFrames=visibleFrames(state);if(!localRectFramePolygon(current,row.box,currentFrames).length)return;if(event.detail){const o=origin(),point=camera.screenToWorld({x:event.clientX-o.x,y:event.clientY-o.y});if(!framePointVisible(current,point,currentFrames)||covered(current,point,currentFrames))return;}bus.beginTransaction('Marcar tarefa');bus.exec({op:'SELECTION_SET',payload:[w.id]});setChecklistItem(state,bus,w.id,row.item.id);bus.endTransaction();};overlay.append(button);
   }}
   const selected=state.selection.size===1?state.widgets.get([...state.selection][0]!):undefined,panel=document.getElementById('selection-properties');
-  actions.hidden=!active||!selected?.table||!!selected.locked||!!selected.hidden;
+  hidden(actions,!active||!selected?.table||!!selected.locked||!!selected.hidden);
   renderDividers(selected,active);
-  if(!actions.hidden&&selected?.table){const rows=selected.table.cells.length,columns=selected.table.cells[0]!.length;actions.innerHTML=`<button data-grid-rows="1" aria-label="Adicionar linha">${icon('plus',13)}Linha</button><button data-grid-columns="1" aria-label="Adicionar coluna">${icon('plus',13)}Coluna</button><button data-grid-rows="-1" aria-label="Remover última linha" ${rows===1?'disabled':''}>${icon('minus',13)}Linha</button><button data-grid-columns="-1" aria-label="Remover última coluna" ${columns===1?'disabled':''}>${icon('minus',13)}Coluna</button>`;const b=camera.worldToScreen({x:selected.x+selected.width/2,y:selected.y+selected.height}),o=origin();actions.style.left=`${Math.max(78,Math.min(innerWidth-actions.offsetWidth-12,b.x+o.x-actions.offsetWidth/2))}px`;actions.style.top=`${Math.min(innerHeight-actions.offsetHeight-54,Math.max(68,b.y+o.y+18))}px`;}
+  if(!actions.hidden&&selected?.table){
+   const rows=selected.table.cells.length,columns=selected.table.cells[0]!.length,key=[selected.id,rows,columns].join('|');
+   if(key!==actionsKey){actionsKey=key;actionsPose='';actions.innerHTML=`<button data-grid-rows="1" aria-label="Adicionar linha">${icon('plus',13)}Linha</button><button data-grid-columns="1" aria-label="Adicionar coluna">${icon('plus',13)}Coluna</button><button data-grid-rows="-1" aria-label="Remover última linha" ${rows===1?'disabled':''}>${icon('minus',13)}Linha</button><button data-grid-columns="-1" aria-label="Remover última coluna" ${columns===1?'disabled':''}>${icon('minus',13)}Coluna</button>`;}
+   const dockTop=workspaceTop(),pose=[selected.x,selected.y,selected.width,selected.height,camera.x,camera.y,camera.scale,camera.width,camera.height,innerWidth,innerHeight,dockTop].join('|');
+   if(pose!==actionsPose){actionsPose=pose;const width=actions.offsetWidth,height=actions.offsetHeight,b=camera.worldToScreen({x:selected.x+selected.width/2,y:selected.y+selected.height}),o=origin();actions.style.left=`${Math.max(78,Math.min(innerWidth-width-12,b.x+o.x-width/2))}px`;actions.style.top=`${Math.max(dockTop,Math.min(innerHeight-height-54,b.y+o.y+18))}px`;}
+  }
  }
  function renderDividers(w:Widget|undefined,active:boolean){
-  dividers.hidden=!active||!w?.table||!!w.locked||!!w.hidden||w.width*camera.scale<96||w.height*camera.scale<48;if(dividers.hidden||!w?.table){dividerKey='';return;}
+  hidden(dividers,!active||!w?.table||!!w.locked||!!w.hidden||w.width*camera.scale<96||w.height*camera.scale<48);if(dividers.hidden||!w?.table){dividerKey='';return;}
   // Retain the pressed separator until pointer capture is released. Rebuilding
   // it during a live command would drop fast pointer samples mid-gesture.
   if(trackDrag)return;const key=JSON.stringify([w.id,w.x,w.y,w.width,w.height,w.rotation,w.table,camera.x,camera.y,camera.scale]);if(key===dividerKey)return;dividerKey=key;dividers.replaceChildren();const tracks=tableTracks(w),top=tableLayout(w).title?.height??0,frames=visibleFrames(state);

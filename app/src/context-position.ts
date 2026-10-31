@@ -2,6 +2,16 @@ import type { Camera } from './core/camera';
 import type { BoardState } from './core/commands';
 import { selectedBounds } from './core/groups';
 
+/** Top of the board workspace, below every visible row of application chrome. */
+export function workspaceTop():number{
+  let bottom=0;
+  for(const id of ['toolbar','topbar','theme-toggle','layers-toggle']){
+    const element=document.getElementById(id);if(!element)continue;
+    const rect=element.getBoundingClientRect();if(rect.width>0&&rect.height>0)bottom=Math.max(bottom,rect.bottom);
+  }
+  return Math.max(12,bottom+10);
+}
+
 /** Anchor the complete toolbar to the selection, independent of its open menu. */
 export function positionContextPanel(panel:HTMLElement,state:BoardState,camera:Camera){
   if(panel.hidden)return;
@@ -27,7 +37,7 @@ function workspaceLimits(){
   const tools=document.getElementById('toolbar'),rect=tools?.getBoundingClientRect();
   const horizontal=!!rect&&rect.width>rect.height;
   const left=horizontal?12:innerWidth>600?(innerHeight<=460?98:78):12;
-  const top=horizontal?Math.max(68,rect!.bottom+10):68;
+  const top=workspaceTop();
   return {left,right:Math.max(left+220,layerLeft),top};
 }
 

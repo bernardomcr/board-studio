@@ -1,5 +1,5 @@
 import { FONT_OPTIONS, loadBoardFont } from './fonts';
-import { compactContextPanel, positionContextPanel, installContextStyles } from './context-position';
+import { compactContextPanel, positionContextPanel, installContextStyles, workspaceTop } from './context-position';
 import type { BoardState, CommandBus, Command } from './core/commands';
 import type { Camera } from './core/camera';
 import type { Connector, ConnectorShape,ConnectorCaptionStyle } from './core/connectors';
@@ -150,7 +150,7 @@ export function installEditorUI(api: EditorUIApi) {
       const c=connectorChoices[Number(b.dataset.connectorChoice)]!;b.setAttribute('aria-pressed',String(c.shape===defaults.shape&&c.arrow===(defaults.style.endCap!=='none')));
     }
   }
-  function positionToolPicker(panel:HTMLElement){const toolbar=document.getElementById('toolbar')?.getBoundingClientRect(),button=document.querySelector<HTMLElement>(`[data-tool="${panel===picker?'shape':panel===stickyPicker?'sticky_note':'connector'}"]`)?.getBoundingClientRect();Object.assign(panel.style,{top:`${(toolbar?.bottom??66)+10}px`,transform:'none',maxWidth:`${innerWidth-24}px`,maxHeight:`${Math.max(100,innerHeight-(toolbar?.bottom??66)-28)}px`});panel.style.left=`${Math.max(12,Math.min(innerWidth-panel.offsetWidth-12,button?.left??toolbar?.left??12))}px`;}
+  function positionToolPicker(panel:HTMLElement){const toolbar=document.getElementById('toolbar')?.getBoundingClientRect(),button=document.querySelector<HTMLElement>(`[data-tool="${panel===picker?'shape':panel===stickyPicker?'sticky_note':'connector'}"]`)?.getBoundingClientRect(),top=workspaceTop();Object.assign(panel.style,{top:`${top}px`,transform:'none',maxWidth:`${innerWidth-24}px`,maxHeight:`${Math.max(100,innerHeight-top-18)}px`});panel.style.left=`${Math.max(12,Math.min(innerWidth-panel.offsetWidth-12,button?.left??toolbar?.left??12))}px`;}
   window.addEventListener('resize',()=>{for(const panel of [picker,connectorPicker,stickyPicker])if(!panel.hidden)positionToolPicker(panel);});
   function chooseConnector(index:number) {
     const choice=connectorChoices[index];if(!choice)return;

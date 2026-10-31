@@ -1,5 +1,6 @@
 // @ts-nocheck
 import {test,expect} from '@playwright/test';
+import {openDrawingPalette} from './helpers/drawing-palette';
 import {readFile} from 'node:fs/promises';
 
 async function blank(page){
@@ -31,9 +32,9 @@ test('text grows beyond ten thousand through the font field and drag handles and
 });
 
 test('brush and eraser slider ranges keep growing and restore sizes above their old caps',async({page})=>{
- await blank(page);await page.locator('[data-tool="brush"]').click();const brush=page.getByRole('slider',{name:'Tamanho do pincel',exact:true});await brush.press('End');await expect(brush).toHaveValue('4096');await brush.press('End');await expect(brush).toHaveValue('8192');expect(Number(await brush.getAttribute('max'))).toBeGreaterThan(8192);
- await page.locator('[data-tool="eraser"]').click();const eraser=page.getByRole('slider',{name:'Raio da borracha em pixels',exact:true});await eraser.press('End');await expect(eraser).toHaveValue('512');await eraser.press('End');await expect(eraser).toHaveValue('1024');
- await page.reload();await page.waitForFunction(()=>window.__board?.booted);await page.locator('[data-tool="brush"]').click();await expect(page.getByRole('slider',{name:'Tamanho do pincel',exact:true})).toHaveValue('8192');await page.locator('[data-tool="eraser"]').click();await expect(page.getByRole('slider',{name:'Raio da borracha em pixels',exact:true})).toHaveValue('1024');
+ await blank(page);await page.locator('[data-tool="brush"]').click();await openDrawingPalette(page);const brush=page.getByRole('slider',{name:'Tamanho do pincel',exact:true});await brush.press('End');await expect(brush).toHaveValue('4096');await brush.press('End');await expect(brush).toHaveValue('8192');expect(Number(await brush.getAttribute('max'))).toBeGreaterThan(8192);
+ await page.locator('[data-tool="eraser"]').click();await openDrawingPalette(page);const eraser=page.getByRole('slider',{name:'Raio da borracha em pixels',exact:true});await eraser.press('End');await expect(eraser).toHaveValue('512');await eraser.press('End');await expect(eraser).toHaveValue('1024');
+ await page.reload();await page.waitForFunction(()=>window.__board?.booted);await page.locator('[data-tool="brush"]').click();await openDrawingPalette(page);await expect(page.getByRole('slider',{name:'Tamanho do pincel',exact:true})).toHaveValue('8192');await page.locator('[data-tool="eraser"]').click();await openDrawingPalette(page);await expect(page.getByRole('slider',{name:'Raio da borracha em pixels',exact:true})).toHaveValue('1024');
 });
 
 test('project files accept large finite geometry and reject non-finite dimensions without relaxing opacity or file budgets',async({page})=>{

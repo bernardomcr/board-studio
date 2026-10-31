@@ -8,13 +8,14 @@ import {MAX_AUDIO_BYTES,createAudioWidget,audioWaveform,formatAudioTime,type Aud
 import {audioCardLayout} from './render/audio-paint';
 import {audioDefaults} from './audio-defaults';
 import {icon} from './icons';
+import {workspaceTop} from './context-position';
 
 interface AudioAPI{
   state:BoardState;bus:CommandBus;camera:Camera;
   getTool?():string;setTool?(tool:'select'):void;getBoardKey?():string|null;
   onChange?():void;
 }
-interface Player{element:HTMLDivElement;play:HTMLButtonElement;download:HTMLButtonElement;seek:HTMLInputElement;line:HTMLDivElement;time:HTMLSpanElement;audio:HTMLAudioElement;src:string;boardKey?:string|null}
+interface Player{element:HTMLDivElement;play:HTMLButtonElement;download:HTMLButtonElement;seek:HTMLInputElement;line:HTMLDivElement;time:HTMLSpanElement;audio:HTMLAudioElement;src:string;boardKey?:string|null;pose?:{widget:Widget;view:string;frame:string;selected:boolean}}
 const message=(error:unknown,fallback:string)=>error instanceof Error?error.message:fallback;
 const sourceData=(blob:Blob)=>new Promise<string>((resolve,reject)=>{const reader=new FileReader();reader.onload=()=>resolve(String(reader.result));reader.onerror=()=>reject(new Error('Não foi possível ler o áudio.'));reader.readAsDataURL(blob);});
 async function audioDuration(blob:Blob,fallback=0):Promise<number>{
@@ -40,6 +41,10 @@ async function blobMetadata(blob:Blob,name:string,durationHint=0,samples:readonl
 
 /** Local recording, embedded originals, and native audio playback aligned to board objects. */
 export function installAudio(api:AudioAPI){
+  // Retain authored values, rather than reading normalized CSS back on every
+  // camera frame. Playback owns other fields (playhead/time), which stay live.
+  const authoredStyles=new WeakMap<HTMLElement,Record<string,string>>();
+  const styles=(element:HTMLElement,values:Record<string,string>)=>{let previous=authoredStyles.get(element);if(!previous){previous={};authoredStyles.set(element,previous);}for(const [key,value]of Object.entries(values))if(previous[key]!==value){previous[key]=value;if(key.startsWith('--'))element.style.setProperty(key,value);else (element.style as unknown as Record<string,string>)[key]=value;}};
   const {state,bus,camera}=api,players=new Map<string,Player>();let popup:HTMLDivElement|null=null,recording:HTMLDivElement|null=null,playFrame=0;
   const style=document.createElement('style');style.textContent=`
   #audio-create-menu{position:fixed;z-index:46;width:212px;padding:6px;background:#fff;color:#303746;border:1px solid #e4e7ed;border-radius:9px;box-shadow:0 5px 24px #15171b26;font:12px Inter,'Segoe UI',sans-serif}
@@ -96,7 +101,7 @@ export function installAudio(api:AudioAPI){
     document.body.append(menu);positionMenu();
     menu.querySelector<HTMLButtonElement>('[data-record]')!.onclick=()=>openRecorder();menu.querySelector<HTMLButtonElement>('[data-import]')!.onclick=()=>{closeMenu();picker.click();};
   }
-  function positionMenu(){if(!popup)return;const rect=toolbarButton.getBoundingClientRect();popup.style.left=`${Math.max(12,Math.min(innerWidth-226,rect.left))}px`;popup.style.top=`${Math.max(12,Math.min(innerHeight-popup.offsetHeight-16,rect.bottom+10))}px`;}
+  function positionMenu(){if(!popup)return;const rect=toolbarButton.getBoundingClientRect();popup.style.left=`${Math.max(12,Math.min(innerWidth-226,rect.left))}px`;popup.style.top=`${Math.max(workspaceTop(),Math.min(innerHeight-popup.offsetHeight-16,rect.bottom+10))}px`;}
   window.addEventListener('resize',positionMenu);
   toolbarButton.addEventListener('click',event=>{event.stopPropagation();openMenu();});
   document.addEventListener('pointerdown',event=>{if(popup&&!popup.contains(event.target as Node)&&!toolbarButton.contains(event.target as Node))closeMenu();});
@@ -132,23 +137,27 @@ export function installAudio(api:AudioAPI){
   function refresh(){
     const homeVisible=document.body.classList.contains('home-visible');
     for(const [id,player]of players)if(!state.widgets.get(id)?.audio||!homeVisible&&api.getBoardKey&&player.boardKey!==api.getBoardKey()){player.audio.pause();player.audio.removeAttribute('src');player.audio.load();player.element.remove();players.delete(id);}
-    const visible=camera.visibleWorldRect(),selectionTool=!api.getTool||api.getTool()==='select',frames=visibleFrames(state);
+    const visible=camera.visibleWorldRect(),selectionTool=!api.getTool||api.getTool()==='select',frames=visibleFrames(state),view=[camera.x,camera.y,camera.scale,camera.width,camera.height].join('|');
     for(const node of state.widgets.values()){
       if(!node.audio)continue;let player=players.get(node.id);if(!player){player=newPlayer(node.id,node.audio.src);players.set(node.id,player);}else if(player.src!==node.audio.src){player.audio.pause();player.audio.src=node.audio.src;player.src=node.audio.src;}
       const box=widgetAABB(node),outside=box.maxX<visible.minX||box.minX>visible.maxX||box.maxY<visible.minY||box.minY>visible.maxY;
-      player.element.hidden=homeVisible||!!node.hidden||mindNodeHidden(state,node.id)||outside||!selectionTool||node.width*camera.scale<60||node.height*camera.scale<24;
-      if(homeVisible||node.hidden||mindNodeHidden(state,node.id))player.audio.pause();
+      const hiddenNode=!!node.hidden||mindNodeHidden(state,node.id),hidden=homeVisible||hiddenNode||outside||!selectionTool||node.width*camera.scale<60||node.height*camera.scale<24,selected=state.selection.has(node.id);
+      if(player.element.hidden!==hidden)player.element.hidden=hidden;
+      if(player.element.dataset.selected!==String(selected))player.element.dataset.selected=String(selected);
+      if((homeVisible||hiddenNode)&&!player.audio.paused)player.audio.pause();
+      if(hidden){player.pose=undefined;continue;}
+      const frame=frameForWidget(node,frames),frameKey=frame?[frame.id,frame.x,frame.y,frame.width,frame.height,frame.rotation].join('|'):'';
+      if(player.pose?.widget===node&&player.pose.view===view&&player.pose.frame===frameKey&&player.pose.selected===selected)continue;
+      player.pose={widget:node,view,frame:frameKey,selected};
       const center=camera.worldToScreen({x:node.x+node.width/2,y:node.y+node.height/2}),layout=audioCardLayout(node),scale=camera.scale;
-      Object.assign(player.element.style,{left:`${center.x}px`,top:`${center.y}px`,width:`${node.width*scale}px`,height:`${node.height*scale}px`,transform:`translate(-50%,-50%) rotate(${node.rotation}rad)`});
-      player.element.style.setProperty('--audio-fill',node.style.fillColor==='transparent'?'#ffffff':node.style.fillColor);player.element.style.setProperty('--audio-ink',node.style.color==='transparent'?'#4262ff':node.style.color);player.element.dataset.selected=String(state.selection.has(node.id));
-      Object.assign(player.play.style,{left:`${layout.playX/node.width*100}%`,top:`${layout.playY/node.height*100}%`,width:`${layout.playRadius*1.6*scale}px`,height:`${layout.playRadius*1.6*scale}px`});
-      Object.assign(player.download.style,{left:'94%',top:'18%',width:`${Math.max(18,16*layout.unit*scale)}px`,height:`${Math.max(18,16*layout.unit*scale)}px`});
-      Object.assign(player.seek.style,{left:`${layout.waveX/node.width*100}%`,top:`${(layout.waveY-layout.waveHeight)/node.height*100}%`,width:`${layout.waveWidth/node.width*100}%`,height:`${layout.waveHeight*2*scale}px`});
-      Object.assign(player.line.style,{top:`${(layout.waveY-layout.waveHeight)/node.height*100}%`,height:`${layout.waveHeight*2*scale}px`});
-      Object.assign(player.time.style,{fontFamily:'Inter, sans-serif',fontSize:`${10*layout.unit*scale}px`,padding:`0 ${3*layout.unit*scale}px`});
+      styles(player.element,{left:`${center.x}px`,top:`${center.y}px`,width:`${node.width*scale}px`,height:`${node.height*scale}px`,transform:`translate(-50%,-50%) rotate(${node.rotation}rad)`,'--audio-fill':node.style.fillColor==='transparent'?'#ffffff':node.style.fillColor,'--audio-ink':node.style.color==='transparent'?'#4262ff':node.style.color});
+      styles(player.play,{left:`${layout.playX/node.width*100}%`,top:`${layout.playY/node.height*100}%`,width:`${layout.playRadius*1.6*scale}px`,height:`${layout.playRadius*1.6*scale}px`});
+      styles(player.download,{left:'94%',top:'18%',width:`${Math.max(18,16*layout.unit*scale)}px`,height:`${Math.max(18,16*layout.unit*scale)}px`});
+      styles(player.seek,{left:`${layout.waveX/node.width*100}%`,top:`${(layout.waveY-layout.waveHeight)/node.height*100}%`,width:`${layout.waveWidth/node.width*100}%`,height:`${layout.waveHeight*2*scale}px`});
+      styles(player.line,{top:`${(layout.waveY-layout.waveHeight)/node.height*100}%`,height:`${layout.waveHeight*2*scale}px`});
+      styles(player.time,{fontFamily:'Inter, sans-serif',fontSize:`${10*layout.unit*scale}px`,padding:`0 ${3*layout.unit*scale}px`});
       // Controls follow frame clipping just like the card's canvas content.
-      const frame=frameForWidget(node,frames);
-      player.element.style.clipPath=frame?`polygon(${widgetCorners(frame).map(point=>{const local=worldToLocal(node,point);return `${local.x*scale}px ${local.y*scale}px`;}).join(',')})`:'';
+      styles(player.element,{clipPath:frame?`polygon(${widgetCorners(frame).map(point=>{const local=worldToLocal(node,point);return `${local.x*scale}px ${local.y*scale}px`;}).join(',')})`:''});
     }
   }
   let lastHomeVisible=document.body.classList.contains('home-visible');

@@ -1,5 +1,6 @@
 // @ts-nocheck
 import {test,expect} from '@playwright/test';
+import {openDrawingPalette} from './helpers/drawing-palette';
 import {readFile} from 'node:fs/promises';
 
 async function blank(page){
@@ -9,7 +10,7 @@ async function blank(page){
   await expect(page.locator('#board-home')).toBeHidden();
 }
 async function brush(page,size=40,opacity=40){
-  await page.locator('[data-tool="brush"]').click();
+  await page.locator('[data-tool="brush"]').click();await openDrawingPalette(page);
   await page.getByRole('slider',{name:'Tamanho do pincel',exact:true}).evaluate((el,value)=>{el.value=String(value);el.dispatchEvent(new Event('input',{bubbles:true}));el.dispatchEvent(new Event('change',{bubbles:true}));},size);
   const range=page.getByRole('slider',{name:'Opacidade do pincel',exact:true});
   await range.press('Home');for(let value=0;value<opacity;value+=10)await range.press('PageUp');
@@ -28,7 +29,7 @@ test('brush precision and Alt-left size/opacity gestures use the visible tip and
   await expect(page.locator('#brush-adjustment')).toBeVisible();await expect(page.locator('#brush-adjustment')).toHaveText('Tamanho 32  ·  Opacidade 60%');
   expect(await page.evaluate(()=>({kind:window.__board.gesture().kind,strokes:window.__board.state.strokes.size}))).toEqual({kind:'brush-adjust',strokes:0});
   await page.mouse.up();await page.keyboard.up('Alt');await expect(page.locator('#brush-adjustment')).toBeHidden();
-  await expect(page.getByRole('slider',{name:'Tamanho do pincel',exact:true})).toHaveValue('32');
+  await openDrawingPalette(page);await expect(page.getByRole('slider',{name:'Tamanho do pincel',exact:true})).toHaveValue('32');
   await expect(page.getByRole('slider',{name:'Opacidade do pincel',exact:true})).toHaveValue('60');await expect(page.locator('#brush-tip')).toHaveCSS('width','64px');
   await page.mouse.move(650,650);await page.mouse.down();await page.mouse.move(850,680,{steps:20});await page.mouse.up();
   const stroke=await page.evaluate(()=>[...window.__board.state.strokes.values()][0]);
@@ -36,8 +37,7 @@ test('brush precision and Alt-left size/opacity gestures use the visible tip and
   expect(new Set(stroke.points.map(p=>p.r)).size).toBe(1);
   await page.keyboard.down('Space');await expect(page.locator('#brush-tip')).toBeHidden();await expect(page.locator('#app canvas')).toHaveCSS('cursor','grab');await page.keyboard.up('Space');await expect(page.locator('#brush-tip')).toBeVisible();
   expect(await page.evaluate(()=>JSON.parse(localStorage.getItem('board-app:drawing-settings')).brush)).toMatchObject({width:32,opacity:.6,precision:true});
-  await page.evaluate(()=>window.__board.saveNow());await page.reload();await page.waitForFunction(()=>window.__board?.booted);await page.locator('[data-tool="brush"]').click();
-  await expect(page.getByRole('slider',{name:'Tamanho do pincel',exact:true})).toHaveValue('32');await expect(page.getByRole('slider',{name:'Opacidade do pincel',exact:true})).toHaveValue('60');await expect(page.getByRole('checkbox',{name:'Precisão do pincel',exact:true})).toBeChecked();
+  await page.evaluate(()=>window.__board.saveNow());await page.reload();await page.waitForFunction(()=>window.__board?.booted);await page.locator('[data-tool="brush"]').click();await openDrawingPalette(page);await expect(page.getByRole('slider',{name:'Tamanho do pincel',exact:true})).toHaveValue('32');await expect(page.getByRole('slider',{name:'Opacidade do pincel',exact:true})).toHaveValue('60');await expect(page.getByRole('checkbox',{name:'Precisão do pincel',exact:true})).toBeChecked();
 });
 
 test('a long real brush gesture has identical opacity at crossings and frozen-preview chunk joins before and after release',async({page})=>{

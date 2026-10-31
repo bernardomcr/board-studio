@@ -6,26 +6,39 @@
  --blue-500:var(--studio-accent);--blue-450:#d87852;--blue-100:var(--studio-tint);--blue-50:var(--studio-tint);
  --cloud-50:#f6f3ed;--cloud-100:var(--studio-soft);--cloud-200:var(--studio-line);--cloud-300:#c8c1b6;--cloud-400:#a29d94;--cloud-500:var(--studio-muted);--cloud-600:#626366;--cloud-700:#474b50;--cloud-800:var(--studio-ink);--cloud-900:var(--studio-ink);
  --font:'Inter','Noto Sans',system-ui,sans-serif;--shadow-1:var(--studio-shadow);
+ --studio-tools-height:48px;--studio-dock-height:96px;
 }
 :root[data-theme=dark]{
  color-scheme:dark;--studio-surface:#24272c;--studio-raised:#2d3036;--studio-soft:#34383f;--studio-line:#41464e;--studio-ink:#f2f0eb;--studio-muted:#afb1b5;
  --studio-accent:#f09b72;--studio-tint:#4a342d;--studio-shadow:0 10px 32px #0003,0 1px 3px #0003;
  --cloud-50:#1c1f23;--cloud-300:#646971;--cloud-400:#92969d;--cloud-600:#c1c3c8;--cloud-700:#d9dadc;
 }
-html body #topbar{top:14px;left:14px;gap:7px;max-width:calc(100vw - 225px)}
+/* The tools and document commands form one continuous dock at the window edge. */
+html body:not(.home-visible)::before{content:'';position:fixed;inset:0 0 auto;height:var(--studio-dock-height);z-index:9;background:var(--studio-surface);border-bottom:1px solid var(--studio-line);box-shadow:0 2px 8px #24272c08;pointer-events:auto}
+html body #topbar{top:var(--studio-tools-height);left:8px;right:215px;gap:4px;height:48px;max-width:none;align-items:center}
 html body .chip{height:42px;border-radius:12px;background:var(--studio-surface);color:var(--studio-ink);border-color:var(--studio-line);box-shadow:var(--studio-shadow);font-size:12px;font-weight:600}
-html body #board-title{line-height:42px;max-width:min(300px,25vw);min-width:50px;letter-spacing:-.025em;font-size:14px}
+html body #topbar .chip{height:38px;padding:0 6px;border:0;border-radius:7px;box-shadow:none;background:transparent}
+html body #topbar .chip:has(#undo){flex:none;gap:2px;padding:0 5px;border-left:1px solid var(--studio-line);border-right:1px solid var(--studio-line);border-radius:0}
+html body #topbar .chip button{width:28px;height:32px}
+html body #board-title{flex:1;line-height:38px;max-width:min(420px,36vw);min-width:44px;letter-spacing:-.025em;font-size:14px}
+html body #board-title:focus-visible{outline:2px solid var(--studio-accent);outline-offset:-2px;background:var(--studio-raised)}
+html body #project-file-controls{position:relative;flex:none;gap:2px;min-width:0}
+html body #project-file-controls button{font-size:11px!important;padding:0 6px!important}
+html body #project-file-controls [role=status]{position:absolute;width:1px;height:1px;overflow:hidden;clip-path:inset(50%);white-space:nowrap}
+html body #topbar button:focus-visible{outline:2px solid var(--studio-accent);outline-offset:2px}
 html body #toolbar{
- top:76px;left:50%;bottom:auto;transform:translateX(-50%);display:flex;flex-direction:row;align-items:center;gap:3px;--tool-size:42px;
- padding:6px 8px;border:1px solid var(--studio-line);border-radius:18px;background:var(--studio-surface);box-shadow:var(--studio-shadow);max-width:calc(100vw - 24px);overflow:visible;
+ top:0;left:0;right:0;bottom:auto;transform:none;display:flex;flex-direction:row;align-items:center;justify-content:center;gap:3px;--tool-size:40px;
+ width:100%;height:var(--studio-tools-height);padding:3px 8px;border:0;border-bottom:1px solid var(--studio-line);border-radius:0;background:var(--studio-surface);box-shadow:none;max-width:none;overflow:visible;
 }
-html body #toolbar button{width:42px;height:42px;min-width:0;border-radius:11px;color:var(--cloud-700)}
+html body #toolbar button{width:40px;height:40px;min-width:0;border-radius:9px;color:var(--cloud-700)}
 html body #toolbar button.active{color:var(--studio-accent);background:var(--studio-tint);box-shadow:inset 0 0 0 1px color-mix(in srgb,var(--studio-accent) 18%,transparent)}
 html body #toolbar button:hover:not(:disabled){background:var(--studio-soft)}
 html body #toolbar button.active:hover{background:var(--studio-tint)}
 html body #toolbar .sep{width:1px;min-width:1px;height:24px;margin:0 4px;background:var(--studio-line)}
 html body #toolbar button>svg{width:21px;height:21px}
 html body #toolbar button::after{left:50%;top:calc(100% + 14px);transform:translateX(-50%);background:var(--studio-ink);color:var(--studio-surface);box-shadow:var(--studio-shadow);border-radius:8px;padding:7px 10px;font-size:11px}
+html body #toolbar button:first-child::after{left:0;transform:none}
+html body #toolbar button:last-child::after{left:auto;right:0;transform:none}
 html body #toolbar button .key{font-size:8px;right:3px;bottom:2px;opacity:.65}
 html body :is(#shape-picker,#connector-picker){z-index:36}
 html body :is(#selection-properties,#mindmap-properties){border-radius:14px;border-color:var(--studio-line);background:var(--studio-surface);color:var(--studio-ink);box-shadow:var(--studio-shadow)}
@@ -34,7 +47,7 @@ html body :is(#selection-properties,#mindmap-properties) :is(button,summary):hov
 html body :is(#selection-properties,#mindmap-properties) :is(.property-popover,.nested-popover){background:var(--studio-surface);color:var(--studio-ink);border-color:var(--studio-line);border-radius:14px;box-shadow:var(--studio-shadow)}
 html body :is(#selection-properties,#mindmap-properties) hr{border-color:var(--studio-line)}
 html body :is(#selection-properties,#mindmap-properties) :is(input,select){color:var(--studio-ink);border-color:var(--studio-line);background-color:var(--studio-raised);accent-color:var(--studio-accent)}
-html body :is(#shape-picker,#connector-picker,#sticky-picker,#drawing-panel,#eraser-panel,#audio-create-menu,#board-background-panel,#layers-panel,.font-picker-popover,.brand-dialog,.board-modal,.context-menu){background:var(--studio-surface);color:var(--studio-ink);border-color:var(--studio-line);border-radius:16px;box-shadow:var(--studio-shadow)}
+html body :is(#shape-picker,#connector-picker,#sticky-picker,#drawing-palette,#drawing-panel,#eraser-panel,#audio-create-menu,#board-background-panel,#layers-panel,.font-picker-popover,.brand-dialog,.board-modal,.context-menu){background:var(--studio-surface);color:var(--studio-ink);border-color:var(--studio-line);border-radius:16px;box-shadow:var(--studio-shadow)}
 html body :is(#board-background-toggle,#layers-toggle,#zoombar){background:var(--studio-surface);color:var(--studio-ink);border-color:var(--studio-line);border-radius:12px;box-shadow:var(--studio-shadow)}
 html body #board-background-panel button{background:var(--studio-raised);border-color:var(--studio-line)}
 html body :is(#board-background-panel,#layers-panel) :is(input,select){background:var(--studio-raised);color:var(--studio-ink);border-color:var(--studio-line);accent-color:var(--studio-accent)}
@@ -42,20 +55,23 @@ html body :is(#layers-footer,#layers-panel header){border-color:var(--studio-lin
 html body .font-picker-option{color:var(--studio-ink)}
 html body :is(.font-picker-search,.font-picker-upload){background:var(--studio-raised);color:var(--studio-accent);border-color:var(--studio-line)}
 html body :is(.font-picker-option:hover,.font-picker-option[data-active=true],.font-picker-option[aria-selected=true]){background:var(--studio-tint);color:var(--studio-accent)}
-html body #interface-controls{position:fixed;top:14px;right:163px;z-index:35}
-html body #theme-toggle{display:grid;place-items:center;width:42px;height:42px;border:1px solid var(--studio-line);border-radius:12px;background:var(--studio-surface);color:var(--studio-ink);box-shadow:var(--studio-shadow);cursor:pointer}
+html body #interface-controls{position:fixed;top:54px;right:163px;z-index:35}
+html body #theme-toggle{display:grid;place-items:center;width:36px;height:36px;border:0;border-radius:8px;background:transparent;color:var(--studio-ink);box-shadow:none;cursor:pointer}
+html body #layers-controls{top:54px;right:12px}
+html body #layers-toggle{height:36px;border:0;border-radius:8px;background:transparent;box-shadow:none}
+html body #layers-panel{top:calc(var(--studio-dock-height) + 8px)}
 html body #theme-toggle:hover{color:var(--studio-accent);background:var(--studio-tint)}
 html body #theme-toggle:focus-visible{outline:2px solid var(--studio-accent);outline-offset:3px}
 html body .studio-mark{display:flex;align-items:center;gap:10px;font-family:Inter,sans-serif;font-size:16px;letter-spacing:-.045em;font-weight:750;color:var(--studio-ink)}
 html body .studio-mark svg{width:32px;height:32px;flex:none}
 html body .studio-mark em{font-style:normal;font-weight:450;color:var(--studio-muted)}
-html body #board-home-trigger{color:var(--studio-accent)!important;background:var(--studio-surface)!important;border-color:var(--studio-line)!important;border-radius:12px!important}
-html body #drawing-panel :is(button,summary),html body #eraser-panel button{color:var(--studio-ink)}
-html body :is(#drawing-panel,#eraser-panel) input{accent-color:var(--studio-accent)}
+html body #board-home-trigger{flex:none;width:36px!important;height:36px!important;color:var(--studio-accent)!important;background:transparent!important;border:0!important;box-shadow:none!important;border-radius:8px!important}
+html body :is(#drawing-palette,#drawing-panel) :is(button,summary),html body #eraser-panel button{color:var(--studio-ink)}
+html body :is(#drawing-palette,#drawing-panel,#eraser-panel) input{accent-color:var(--studio-accent)}
 html body :is(#shape-picker,#connector-picker) button{color:var(--studio-ink)}
 html body :is(#shape-picker,#connector-picker) button:hover{background:var(--studio-soft);color:var(--studio-accent)}
 html body #sticky-picker .sticky-pad-open{background:var(--studio-soft);color:var(--studio-ink)}
-html body :is(#drawing-panel,#eraser-panel,#sticky-picker) :is(header,h2,label,p){color:inherit}
+html body :is(#drawing-palette,#drawing-panel,#eraser-panel,#sticky-picker) :is(header,h2,label,p){color:inherit}
 html body #board-home{background:var(--cloud-50);color:var(--studio-ink)}
 html body #board-home :is(.home-sidebar,.home-main,.home-header,.home-card,.board-card,.home-dialog,.home-list-row){background:var(--studio-surface);border-color:var(--studio-line);color:var(--studio-ink)}
 html body #board-home :is(input,select){background:var(--studio-raised);border-color:var(--studio-line);color:var(--studio-ink)}
@@ -70,8 +86,11 @@ html body .background-grid-opacity output{color:var(--studio-muted);font-variant
 html body #drawing-palette{transform:none;background:var(--studio-surface);border-color:var(--studio-line);color:var(--studio-ink);border-radius:16px;box-shadow:var(--studio-shadow)}
 html body #drawing-palette :is(button,input){color:inherit;accent-color:var(--studio-accent)}
 html body #drawing-palette button:not([data-color]){background:var(--studio-raised)}
+html body #drawing-palette button:not([data-color]):hover{background:var(--studio-soft);color:var(--studio-accent)}
 html body #drawing-palette :is(button[aria-checked=true],button[aria-pressed=true]):not([data-color]){background:var(--studio-tint);color:var(--studio-accent)}
-html body #drawing-palette :is(header,.drawing-heading){border-color:var(--studio-line)}
+html body #drawing-palette :is(header,.drawing-heading,.drawing-precision,.drawing-brand){border-color:var(--studio-line)}
+html body #drawing-palette :is(output,.drawing-note,.smoothing-labels){color:var(--studio-muted)}
+html body #drawing-palette :focus-visible{outline-color:var(--studio-accent)}
 html body #board-home{grid-template-columns:220px minmax(0,1fr)}
 html body #board-home :is(.bh-side,.bh-top,.bh-card,.bh-view){background:var(--studio-surface);border-color:var(--studio-line);color:var(--studio-ink)}
 html body #board-home .bh-side{padding-top:30px}
@@ -108,17 +127,20 @@ html[data-theme=dark] body :is(#selection-properties,#mindmap-properties) :is(.m
 html[data-theme=dark] body .font-picker-trigger:hover{background:var(--studio-soft)!important;color:var(--studio-ink)!important}
 html[data-theme=dark] body :is(#selection-properties,#mindmap-properties) .property-popover .menu-action:hover{background:var(--studio-soft);color:var(--studio-accent)}
 html body.home-visible #interface-controls{right:24px;top:20px;z-index:120}
-@media(max-width:850px){html body #topbar{max-width:calc(100vw - 112px)}html body #board-title{max-width:180px}html body #interface-controls{right:64px}html body #layers-toggle{width:42px;padding:9px;gap:0}html body #layers-toggle :is(.layers-label,.layers-total){display:none}html body #topbar .chip{padding:0 8px}html body #toolbar{top:72px;--tool-size:38px;gap:2px;padding:5px}html body #toolbar button{width:38px;height:38px}}
-@media(max-width:560px){html body #topbar{gap:4px;left:8px;top:10px}html body #topbar #board-title{max-width:110px;font-size:12px}html body #topbar .chip:has(#export){gap:0}html body #topbar #export-svg,html body #topbar #help{display:none}html body #toolbar{left:8px;right:8px;transform:none;top:66px;max-width:none;justify-content:center;gap:1px;padding:4px;--tool-size:32px;border-radius:13px}html body #toolbar button{width:clamp(24px,7.3vw,32px);height:34px;border-radius:8px}html body #toolbar .sep{margin:0 2px;height:20px}html body #toolbar button .key{display:none}html body #toolbar button>svg{width:19px;height:19px}html body #interface-controls{right:58px;top:10px}html body #layers-controls{right:8px;top:10px}}
+@media(max-width:850px){html body #topbar{right:104px}html body #board-title{max-width:220px}html body #interface-controls{right:56px}html body #layers-toggle{width:36px;padding:8px;gap:0}html body #layers-toggle :is(.layers-label,.layers-total){display:none}html body #toolbar{gap:2px}html body #toolbar button{width:38px;height:38px}}
 @media(max-width:740px){html body #board-home{grid-template-columns:64px minmax(0,1fr)}html body #board-home .bh-side{padding-left:8px;padding-right:8px}html body #board-home .bh-top{padding-right:72px}html body #board-home .studio-mark{margin-left:6px;gap:0}html body #board-home .studio-mark>span{display:none}html body.home-visible #interface-controls{right:18px;top:12px}}
 @media(max-width:740px){
- html body #topbar{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1.65fr);gap:8px;width:calc(100vw - 16px);max-width:none}
+ :root{--studio-tools-height:44px;--studio-dock-height:128px}
+ html body #topbar{top:44px;left:0;right:0;display:grid;grid-template-columns:minmax(124px,1fr) minmax(0,1.4fr);grid-template-rows:36px 36px;gap:4px;width:100%;height:84px;padding:4px 8px;max-width:none}
  html body #board-home-trigger{grid-column:1;grid-row:1;justify-self:start}
- html body #topbar #board-title{grid-column:1/3;grid-row:1;margin-left:40px;margin-right:104px;max-width:none;min-width:0}
- html body #topbar .chip:has(#undo){grid-column:1;grid-row:2;justify-content:center;padding:0 8px}
- html body #project-file-controls{grid-column:2;grid-row:2;justify-content:center;min-width:0;gap:2px;padding:0 4px;position:relative}
+ html body #topbar #board-title{grid-column:1/3;grid-row:1;margin-left:40px;margin-right:104px;max-width:none;min-width:0;height:36px;line-height:36px;font-size:13px}
+ html body #topbar .chip:has(#undo){grid-column:1;grid-row:2;justify-content:center;height:36px;padding:0 2px;border:0}
+ html body #project-file-controls{grid-column:2;grid-row:2;justify-content:center;height:36px;min-width:0;gap:2px;padding:0 4px;position:relative}
  html body #project-file-controls button{font-size:11px!important;padding:0 5px!important}
- html body #project-file-controls [role=status]{position:absolute;width:1px;height:1px;overflow:hidden;clip-path:inset(50%);white-space:nowrap}
- html body #toolbar{top:114px}
+ html body #toolbar{padding:3px 6px;gap:2px}
+ html body #toolbar button{width:36px;height:36px}
+ html body #interface-controls{top:48px;right:56px}
+ html body #layers-controls{top:48px;right:8px}
 }
+@media(max-width:560px){html body #toolbar{gap:1px;padding:4px;--tool-size:32px}html body #toolbar button{width:clamp(24px,7.3vw,32px);height:34px;border-radius:8px}html body #toolbar .sep{margin:0 2px;height:20px}html body #toolbar button .key{display:none}html body #toolbar button>svg{width:19px;height:19px}html body #topbar .chip:has(#undo){gap:0}html body #topbar .chip:has(#undo) button{width:24px;height:32px}}
 @media(prefers-reduced-motion:reduce){html body *{scroll-behavior:auto!important;transition:none!important}}
