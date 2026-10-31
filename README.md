@@ -23,6 +23,9 @@ No Windows, `TESTAR.cmd` compila e abre a versão de produção em `http://local
 - Conectores retos, curvos e em cotovelo; pontos intermediários, seis terminações, inversão da direção, tracejado/pontilhado e múltiplos rótulos posicionáveis. Uma ponta solta pode criar um objeto conectado ou continuar livre.
 - Imagens com original preservado, substituição, tamanho original, máscaras retangular/elíptica/arredondada, espelhamento, opacidade e recorte não destrutivo. Recorte circular com prévia e borda personalizada independente da foto.
 - Grupos aninhados com formas, imagens, conectores e traços; movimentação, escala, rotação, duplicação e bloqueio.
+- Painel Camadas com grupos recolhíveis, nomes, miniaturas, ocultar, bloquear, seleção múltipla e ordenação por arraste ou botões. A ordem visual inclui fotos, texto, formas, traços e conectores.
+- Texto livre sem quebra automática por caixa: arrastar as alças aumenta/reduz as letras. Transformação com posição, proporção, tamanho e rotação.
+- Bordas proporcionais com barra de espessura e presets; acompanham o tamanho dos objetos. Pontos de conexão ao passar o mouse e curvas ajustáveis com prévia estável.
 - 25 famílias tipográficas locais, formatação de texto, paletas com transparente e barras de ícones específicas para cada seleção.
 - Caneta, marca-texto, borracha de traço inteiro/precisão e seleção com laço.
 - Desfazer/refazer, exportação PNG/SVG e arquivos editáveis `.board.json`.
@@ -44,6 +47,8 @@ No Windows, os testes também podem usar o Chrome instalado. `CHROME_PATH` permi
 ## Fontes e licenças
 
 As fontes são distribuídas localmente com as licenças upstream em `app/public/fonts`. O manifesto registra as fontes de download e os hashes dos arquivos. Noto Sans é usada na interface; Inter e Figtree são alternativas disponíveis. O seletor inclui também as famílias abertas disponíveis na coleção de fontes do Miro.
+
+Os ícones usam Lucide; a licença ISC está em `app/public/licenses/lucide-LICENSE.txt`.
 
 ## Estrutura
 

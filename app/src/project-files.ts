@@ -5,8 +5,11 @@ import { SHAPE_OPTIONS, type Widget } from "./core/model";
 import type { Connector, Endpoint } from "./core/connectors";
 import type { Stroke } from "./core/strokes";
 import { DEFAULT_BACKGROUND, validateBoardBackground, type BoardBackground } from "./core/background";
+import {loadBoardFont} from './fonts';
+import {migrateFrameSnapshots} from './core/layer-migration';
 
 interface BoardFile {
+  layerOrderVersion?:1;
   format: "local-board"; version: 1; title: string;
   widgets: Widget[]; order: string[]; connectors: Connector[]; connectorOrder: string[];
   strokes: Stroke[]; strokeOrder: string[]; groups: Array<[string, string[]]>;
@@ -56,12 +59,12 @@ export function validateBoardFile(value: unknown): BoardFile {
     const w = record(raw), style = record(w.style);
     const type = one(w.type, ["shape", "sticky_note", "text", "frame", "image"] as const);
     const base = {
-      id: id(w.id), type, locked:w.locked===undefined?undefined:!!w.locked, link:w.link===undefined?undefined:str(w.link,4000), x: number(w.x), y: number(w.y), width: number(w.width, .001, 1e7), height: number(w.height, .001, 1e7),
+      id: id(w.id), type, name:w.name===undefined?undefined:str(w.name,1000),hidden:!!w.hidden, locked:w.locked===undefined?undefined:!!w.locked, link:w.link===undefined?undefined:str(w.link,4000), x: number(w.x), y: number(w.y), width: number(w.width, .001, 1e7), height: number(w.height, .001, 1e7),
       rotation: number(w.rotation), z: number(w.z),
       style: {
         fillColor: color(style.fillColor), fillOpacity: number(style.fillOpacity, 0, 1), borderColor: color(style.borderColor),
         borderOpacity:style.borderOpacity===undefined?undefined:number(style.borderOpacity,0,1),cornerRadius:style.cornerRadius===undefined?undefined:number(style.cornerRadius,0,10000),
-        borderWidth: number(style.borderWidth, 0, 1000), borderStyle: one(style.borderStyle, ["normal", "dotted", "dashed"] as const),
+        borderScale:style.borderScale===undefined?undefined:number(style.borderScale,0,10),borderWidth: number(style.borderWidth, 0, 1e7), borderStyle: one(style.borderStyle, ["normal", "dotted", "dashed"] as const),
         fontWeight:style.fontWeight===undefined?undefined:one(style.fontWeight,["normal","bold"] as const),fontStyle:style.fontStyle===undefined?undefined:one(style.fontStyle,["normal","italic"] as const),textDecoration:style.textDecoration===undefined?undefined:one(style.textDecoration,["none","underline","line-through"] as const),highlightColor:style.highlightColor===undefined?undefined:color(style.highlightColor),
         color: color(style.color), fontFamily: str(style.fontFamily, 256), fontSize: number(style.fontSize, .1, 10000),
         textAlign: one(style.textAlign, ["left", "center", "right"] as const), textAlignVertical: one(style.textAlignVertical, ["top", "middle", "bottom"] as const),
@@ -71,7 +74,7 @@ export function validateBoardFile(value: unknown): BoardFile {
     const content = str(w.content);
     if (type === "shape") return { ...base, type, content, shape: one(w.shape, SHAPE_OPTIONS.map(option => option.id)) };
     if (type === "sticky_note") return { ...base, type, content, shape: one(w.shape, ["square"] as const) };
-    if (type === "text") return { ...base, type, content };
+    if (type === "text") return { ...base, type, content,...(w.textSizing==='natural'?{textSizing:'natural' as const}:{}) };
     const src = str(w.src, 50000000);
     if (!/^data:image\/(png|jpeg|webp|gif|avif|bmp);base64,[A-Za-z0-9+/=\s]+$/.test(src)) fail("A imagem deve estar incorporada no arquivo.");
     let crop: { x: number; y: number; width: number; height: number } | undefined;
@@ -90,7 +93,7 @@ export function validateBoardFile(value: unknown): BoardFile {
   };
   const connectors: Connector[] = list(data.connectors).map(raw => {
     const c = record(raw), style = record(c.style);
-    return { id: id(c.id),locked:!!c.locked,waypoints:c.waypoints==null?c.waypoints as null|undefined:list(c.waypoints,1000).map(v=>{const p=record(v);return {x:number(p.x),y:number(p.y)}}),captionPositions:c.captionPositions===undefined?undefined:list(c.captionPositions,100).map(v=>number(v,0,1)), type: one(c.type, ["connector"] as const), start: endpoint(c.start), end: endpoint(c.end),
+    return { id: id(c.id),name:c.name===undefined?undefined:str(c.name,1000),hidden:!!c.hidden,locked:!!c.locked,waypoints:c.waypoints==null?c.waypoints as null|undefined:list(c.waypoints,1000).map(v=>{const p=record(v);return {x:number(p.x),y:number(p.y)}}),captionPositions:c.captionPositions===undefined?undefined:list(c.captionPositions,100).map(v=>number(v,0,1)), type: one(c.type, ["connector"] as const), start: endpoint(c.start), end: endpoint(c.end),
       shape: one(c.shape, ["straight", "elbowed", "curved"] as const), z: number(c.z),
       controlPoint: c.controlPoint == null ? c.controlPoint as null | undefined : (() => { const p = record(c.controlPoint); return { x: number(p.x), y: number(p.y) }; })(),
       style: { strokeStyle:style.strokeStyle===undefined?undefined:one(style.strokeStyle,["normal","dashed","dotted"] as const),strokeColor: color(style.strokeColor), strokeWidth: number(style.strokeWidth, .01, 1000),
@@ -103,7 +106,7 @@ export function validateBoardFile(value: unknown): BoardFile {
   const strokes: Stroke[] = list(data.strokes).map(raw => {
     const s = record(raw), points = list(s.points, 200000); totalPoints += points.length;
     if (totalPoints > 1000000) fail("O arquivo contém pontos de desenho demais.");
-    return { id: id(s.id),locked:!!s.locked,type: one(s.type, ["stroke"] as const), tool: one(s.tool, ["pen", "highlighter"] as const), color: color(s.color), z: number(s.z),
+    return { id: id(s.id),name:s.name===undefined?undefined:str(s.name,1000),hidden:!!s.hidden,locked:!!s.locked,type: one(s.type, ["stroke"] as const), tool: one(s.tool, ["pen", "highlighter"] as const), color: color(s.color), z: number(s.z),
       points: points.map(value => { const p = record(value); return { x: number(p.x), y: number(p.y), r: number(p.r, .001, 10000) }; }) };
   });
   const seen = new Set<string>(); unique(widgets, seen); unique(connectors, seen); unique(strokes, seen);
@@ -120,7 +123,7 @@ export function validateBoardFile(value: unknown): BoardFile {
   const camera = record(data.camera);
   const background=data.background===undefined?{...DEFAULT_BACKGROUND}:validateBoardBackground(data.background);
   if(!background)fail("Fundo do board inválido.");
-  return { format: "local-board", version: 1, title: str(data.title, 1000), widgets, connectors, strokes, groups,
+  return { format: "local-board", version: 1,layerOrderVersion:1, title: str(data.title, 1000), widgets:data.layerOrderVersion===1?widgets:migrateFrameSnapshots(widgets), connectors, strokes, groups,
     background: background!,
     order: order(data.order, widgets), connectorOrder: order(data.connectorOrder, connectors), strokeOrder: order(data.strokeOrder, strokes),
     camera: { x: number(camera.x), y: number(camera.y), scale: number(camera.scale, MIN_SCALE, MAX_SCALE) } };
@@ -138,7 +141,7 @@ export function installProjectFiles(api: { state: BoardState; bus: CommandBus; c
   container.append(saveButton, openButton, status); document.getElementById("topbar")?.append(container);
   const input = document.createElement("input"); input.type = "file"; input.accept = ".board.json,.json,application/json"; input.hidden = true; document.body.append(input);
   saveButton.onclick = () => {
-    const data: BoardFile = { format: "local-board", version: 1, title: document.getElementById("board-title")?.textContent ?? "Board",
+    const data: BoardFile = { format: "local-board", version: 1,layerOrderVersion:1, title: document.getElementById("board-title")?.textContent ?? "Board",
       background:state.background??{...DEFAULT_BACKGROUND},
       widgets: [...state.widgets.values()], order: [...state.order], connectors: [...state.connectors.values()], connectorOrder: [...state.connectorOrder],
       strokes: [...state.strokes.values()], strokeOrder: [...state.strokeOrder], groups: [...state.groups.entries()], camera: { x: camera.x, y: camera.y, scale: camera.scale } };
@@ -152,6 +155,7 @@ export function installProjectFiles(api: { state: BoardState; bus: CommandBus; c
     try {
       if (file.size > 100 * 1024 * 1024) fail("Escolha um projeto de até 100 MB.");
       const data = validateBoardFile(JSON.parse(await file.text()));
+      await Promise.all([...new Set(data.widgets.map(w=>w.style.fontFamily))].map(loadBoardFont));
       // Nothing changes until every field and reference has passed validation.
       const widgetById = new Map(data.widgets.map(w => [w.id, w]));
       const connectorById = new Map(data.connectors.map(c => [c.id, c]));
@@ -162,6 +166,8 @@ export function installProjectFiles(api: { state: BoardState; bus: CommandBus; c
         ...data.order.map(id => ({ op: "WIDGET_UPDATE" as const, payload: { id, patch: { z: widgetById.get(id)!.z } } })),
         ...data.connectorOrder.map(id => ({ op: "CONNECTOR_CREATE" as const, payload: connectorById.get(id)! })),
         ...data.strokeOrder.map(id => ({ op: "STROKE_CREATE" as const, payload: strokeById.get(id)! })),
+        ...data.connectorOrder.map(id=>({op:'CONNECTOR_UPDATE' as const,payload:{id,patch:{z:connectorById.get(id)!.z}}})),
+        ...data.strokeOrder.map(id=>({op:'STROKE_UPDATE' as const,payload:{id,patch:{z:strokeById.get(id)!.z}}})),
         ...data.groups.map(([id, items]) => ({ op: "GROUP_CREATE" as const, payload: { id, items } })),
       ];
       state.widgets = new Map(); state.order = []; state.connectors = new Map(); state.connectorOrder = [];

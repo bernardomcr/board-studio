@@ -123,22 +123,22 @@ test('circular image crop and custom borders use the actual menus, undo and SVG'
   await page.keyboard.press('Control+z');expect(await page.evaluate(id=>window.__board.state.widgets.get(id),original.id)).toMatchObject({width:original.width,height:original.height});expect(await page.evaluate(id=>window.__board.state.widgets.get(id).maskShape,original.id)).toBeUndefined();await page.keyboard.press('Control+Shift+z');
   await menu(page,'border');await page.getByRole('button',{name:'Cor da borda: rosa',exact:true}).click();
   await page.locator('input[type="color"][aria-label="Cor da borda"]').evaluate(input=>{input.value='#d0296b';input.dispatchEvent(new Event('change',{bubbles:true}));});
-  await number(page,'Espessura da borda','12');await page.getByRole('combobox',{name:'Estilo da borda',exact:true}).selectOption('dashed');await number(page,'Opacidade da borda','0.8');
+  await page.getByRole('button',{name:'Borda média',exact:true}).click();await page.getByRole('combobox',{name:'Estilo da borda',exact:true}).selectOption('dashed');await number(page,'Opacidade da borda','0.8');
   await menu(page,'image');await number(page,'Opacidade da imagem','45');await page.getByRole('button',{name:'Espelhar ↔',exact:true}).click();
   await menu(page,'border');await page.screenshot({path:'../work/v5-ui-image-border.png'});
   const result=await page.evaluate(async()=>({w:[...window.__board.state.widgets.values()].find(w=>w.type==='image'),svg:(await import('/src/core/exportSvg.ts')).boardToSvg(window.__board.state)}));
-  expect(result.w.style).toMatchObject({borderWidth:12,borderColor:'#d0296b',borderStyle:'dashed',borderOpacity:.8});expect(result.w.opacity).toBe(.45);expect(result.svg).toContain('stroke-dasharray="48 24"');expect(result.svg).toContain('stroke-opacity="0.8"');expect(result.svg).toContain('opacity="0.45"');
+  expect(result.w.style).toMatchObject({borderScale:.02,borderColor:'#d0296b',borderStyle:'dashed',borderOpacity:.8});expect(result.w.style.borderWidth).toBeCloseTo(Math.min(result.w.width,result.w.height)*.02,6);expect(result.w.opacity).toBe(.45);expect(result.svg).toContain('stroke-dasharray=');expect(result.svg).toContain('stroke-opacity="0.8"');expect(result.svg).toContain('opacity="0.45"');
   await page.getByRole('combobox',{name:'Estilo da borda',exact:true}).selectOption('dotted');await page.getByRole('combobox',{name:'Estilo da borda',exact:true}).press('Tab');
-  expect(await page.evaluate(async()=>(await import('/src/core/exportSvg.ts')).boardToSvg(window.__board.state))).toContain('stroke-dasharray="0 36"');
-  await page.evaluate(()=>window.__board.saveNow());await page.reload();await page.waitForFunction(()=>window.__board?.booted);expect(await page.evaluate(id=>window.__board.state.widgets.get(id).style,original.id)).toMatchObject({borderWidth:12,borderColor:'#d0296b',borderStyle:'dotted',borderOpacity:.8});
+  expect(await page.evaluate(async()=>(await import('/src/core/exportSvg.ts')).boardToSvg(window.__board.state))).toMatch(/stroke-dasharray="0 [\d.]+"/);
+  await page.evaluate(()=>window.__board.saveNow());await page.reload();await page.waitForFunction(()=>window.__board?.booted);expect(await page.evaluate(id=>window.__board.state.widgets.get(id).style,original.id)).toMatchObject({borderScale:.02,borderColor:'#d0296b',borderStyle:'dotted',borderOpacity:.8});
 });
 
 test('transparent colors are palette choices and disappear from actual canvas rendering',async({page})=>{
   await blank(page);await fixture(page);
   const graphicsVisible=async(kind:string,id:string)=>page.evaluate(({kind,id})=>{
     const b=window.__board,world=b.app.stage.children[1],w=b.state.widgets.get(id);
-    const layer=world.children[kind==='stroke'?1:kind==='connector'?2:3];
-    const target=kind==='stroke'||kind==='connector'?layer.children[0]:layer.children.find(c=>Math.abs(c.position.x-(w.x+w.width/2))<.001).children[kind==='text'?1:0];
+    const node=world.children[3].children.find(c=>c.label===id);
+    const target=kind==='stroke'||kind==='connector'?node:node.children[kind==='text'?1:0];
     const pixels=b.app.renderer.extract.pixels({target,resolution:1}).pixels;return pixels.some((value,index)=>index%4===3&&value>0);
   },{kind,id});
   await select(page,['a']);expect(await graphicsVisible('shape','a')).toBe(true);await menu(page,'fill');await page.getByRole('button',{name:'Cor de preenchimento: transparente',exact:true}).click();await menu(page,'border');await page.getByRole('button',{name:'Cor da borda: transparente',exact:true}).click();expect(await graphicsVisible('shape','a')).toBe(false);
@@ -146,7 +146,7 @@ test('transparent colors are palette choices and disappear from actual canvas re
   await select(page,['ink']);expect(await graphicsVisible('stroke','ink')).toBe(true);await menu(page,'stroke');await page.getByRole('button',{name:'Cor do traço: transparente',exact:true}).click();expect(await graphicsVisible('stroke','ink')).toBe(false);
   await page.evaluate(async()=>{const b=window.__board,{createWidget}=await import('/src/core/model.ts');b.bus.exec({op:'WIDGET_CREATE',payload:{...createWidget('text',{x:0,y:120,width:240,height:80,content:'Texto transparente'}),id:'transparent-text'}});});
   await select(page,['transparent-text']);expect(await graphicsVisible('text','transparent-text')).toBe(true);await menu(page,'text-color');await page.getByRole('button',{name:'Cor do texto: transparente',exact:true}).click();expect(await graphicsVisible('text','transparent-text')).toBe(false);
-  const image=await importImage(page);await menu(page,'border');await number(page,'Espessura da borda','8');await page.getByRole('button',{name:'Cor da borda: transparente',exact:true}).click();expect(await page.evaluate(id=>window.__board.state.widgets.get(id).style.borderColor,image.id)).toBe('transparent');
+  const image=await importImage(page);await menu(page,'border');await page.getByRole('button',{name:'Borda média',exact:true}).click();await page.getByRole('button',{name:'Cor da borda: transparente',exact:true}).click();expect(await page.evaluate(id=>window.__board.state.widgets.get(id).style.borderColor,image.id)).toBe('transparent');
 });
 
 test('mixed groups expose applicable menus and support editing a member then ungrouping',async({page})=>{
@@ -185,8 +185,9 @@ test('connector drag and click handles offer destinations, preserve free ends an
   await page.keyboard.press('Control+z');expect(await page.evaluate(()=>window.__board.state.connectors.size)).toBe(0);
   await select(page,['source']);await page.mouse.click(750,555);await expect(completion).toBeVisible();expect(await page.evaluate(()=>window.__board.state.connectors.size)).toBe(1);
   await page.mouse.click(1300,800);await expect(completion).toBeHidden();expect(await page.evaluate(()=>[...window.__board.state.connectors.values()][0].end.kind)).toBe('point');expect(await page.evaluate(()=>window.__board.state.widgets.size)).toBe(1);
-  await page.mouse.dblclick(800,555);const label=page.getByRole('textbox',{name:'Rótulo 1',exact:true});await expect(label).toBeFocused();await label.fill('Relação');await label.press('Tab');
-  result=await page.evaluate(()=>({widgets:[...window.__board.state.widgets.values()],c:[...window.__board.state.connectors.values()][0]}));expect(result.c.captions).toEqual(['Relação']);expect(result.c.captionPositions[0]).toBeCloseTo(70/180,1);await page.screenshot({path:'../work/v5-ui-connector-label.png'});
+  const point=await page.evaluate(async()=>{const b=window.__board,c=[...b.state.connectors.values()][0],m=await import('/src/core/connectors.ts');return b.camera.worldToScreen(m.connectorPointAt(m.connectorGeometry(c,b.state.widgets),.4));});
+  await page.mouse.dblclick(point.x,point.y);const label=page.getByRole('textbox',{name:'Rótulo 1',exact:true});await expect(label).toBeFocused();await label.fill('Relação');await label.press('Tab');
+  result=await page.evaluate(()=>({widgets:[...window.__board.state.widgets.values()],c:[...window.__board.state.connectors.values()][0]}));expect(result.c.captions).toEqual(['Relação']);expect(result.c.captionPositions[0]).toBeCloseTo(.4,1);await page.screenshot({path:'../work/v5-ui-connector-label.png'});
 });
 
 test('arranging a mixed group moves it as one unit and undoes every member together',async({page})=>{

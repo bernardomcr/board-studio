@@ -1,6 +1,6 @@
 /** Connector geometry reconstructed for the local editor; no cloud dependency. */
 import { rotate, widgetCenter, widgetAABB, worldToLocal, type Vec } from "./geometry";
-import { shapePolygon,canonicalShape } from "./shapes";
+import { shapeContours,canonicalShape } from "./shapes";
 import type { Widget } from "./model";
 export type Endpoint = { kind: "anchor"; widgetId: string; x: number; y: number } | { kind: "point"; x: number; y: number };
 export type ConnectorShape = "straight" | "elbowed" | "curved";
@@ -8,6 +8,8 @@ export type CapStyle = "none" | "arrow" | "triangle" | "circle" | "diamond" | "b
 export interface Connector {
   id: string; type: "connector"; start: Endpoint; end: Endpoint; shape: ConnectorShape;
   locked?: boolean;
+  hidden?: boolean;
+  name?: string;
   /** A world-space bend point. Curves pass through it at t=.5. */
   controlPoint?: Vec | null;
   /** Ordered user-editable bends in world coordinates. Null restores automatic routing. */
@@ -24,10 +26,16 @@ const EPS = 1e-8;
 const mid = (a: Vec, b: Vec): Vec => ({ x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 });
 const length = (a: Vec, b: Vec) => Math.hypot(a.x - b.x, a.y - b.y);
 const unit = (v: Vec): Vec => { const size = Math.hypot(v.x, v.y); return size > EPS ? { x: v.x / size, y: v.y / size } : { x: 0, y: 0 }; };
+const outlineCache=new Map<string,Vec[]>();
 function outline(w: Widget): Vec[] {
-  const coords = w.type === "shape" ? shapePolygon(w.shape, w.width, w.height) : null;
+  const key=`${w.type}:${w.type==='shape'?w.shape:w.type==='image'?w.maskShape:''}:${w.width}:${w.height}:${w.style.cornerRadius??''}`;
+  const retained=outlineCache.get(key);if(retained)return retained;
+  const coords = w.type === "shape" ? shapeContours(w.shape, w.width, w.height, .3, w.style.cornerRadius)[0]
+    : w.type === "image" && w.maskShape && w.maskShape !== "rectangle" ? shapeContours(w.maskShape === "ellipse" ? "circle" : "round_rectangle",w.width,w.height,.3,w.style.cornerRadius)[0] : null;
   if (!coords) return [{ x: 0, y: 0 }, { x: w.width, y: 0 }, { x: w.width, y: w.height }, { x: 0, y: w.height }];
-  const points: Vec[] = []; for (let i = 0; i < coords.length; i += 2) points.push({ x: coords[i]!, y: coords[i + 1]! }); return points;
+  const points: Vec[] = []; for (let i = 0; i < coords.length; i += 2) points.push({ x: coords[i]!, y: coords[i + 1]! });
+  if(points.length>1&&length(points[0]!,points.at(-1)!)<EPS)points.pop();
+  if(outlineCache.size>512)outlineCache.delete(outlineCache.keys().next().value!);outlineCache.set(key,points);return points;
 }
 function closestOnSegment(p: Vec, a: Vec, b: Vec): Vec {
   const dx = b.x - a.x, dy = b.y - a.y, size = dx * dx + dy * dy;
@@ -185,14 +193,23 @@ export function connectorGeometry(connector: Connector, widgets: Map<string, Wid
     };
     candidates.sort((p, q) => penalty(p) - penalty(q)); return { points: clean([a, ...candidates[0]!, b]) };
   }
-  let p1: Vec, p2: Vec;
-  if (control) {
-    const q = { x: 2 * control.x - (a.x + b.x) / 2, y: 2 * control.y - (a.y + b.y) / 2 };
-    p1 = { x: a.x + (q.x - a.x) * 2 / 3, y: a.y + (q.y - a.y) * 2 / 3 };
-    p2 = { x: b.x + (q.x - b.x) * 2 / 3, y: b.y + (q.y - b.y) * 2 / 3 };
-  } else {
-    const reach = Math.max(24, Math.min(160, length(a, b) * .45));
-    p1 = { x: a.x + n1.x * reach, y: a.y + n1.y * reach }; p2 = { x: b.x + n2.x * reach, y: b.y + n2.y * reach };
+  const reach = Math.max(24, Math.min(600, length(a, b) * .5));
+  let p1={ x: a.x + n1.x * reach, y: a.y + n1.y * reach },p2={ x: b.x + n2.x * reach, y: b.y + n2.y * reach };
+  if(connector.start.kind==='point'&&connector.end.kind==='point'){
+    // A deliberately curved free line should retain a visible, gentle bow.
+    const d={x:b.x-a.x,y:b.y-a.y},normal={x:-fallback.y,y:fallback.x},bow=Math.min(120,length(a,b)*.18);
+    p1={x:a.x+d.x/3+normal.x*bow,y:a.y+d.y/3+normal.y*bow};
+    p2={x:a.x+d.x*2/3+normal.x*bow,y:a.y+d.y*2/3+normal.y*bow};
+  }
+  if(control){
+    // Split the automatic curve, then displace its centre and the adjacent
+    // controls together. This preserves both endpoint tangents and C1 continuity.
+    // Starting a drag at the existing handle therefore does not change the path.
+    const ab=mid(a,p1),bc=mid(p1,p2),cd=mid(p2,b),abc=mid(ab,bc),bcd=mid(bc,cd),center=mid(abc,bcd);
+    const d={x:control.x-center.x,y:control.y-center.y};
+    const left={p0:a,p1:ab,p2:{x:abc.x+d.x,y:abc.y+d.y},p3:control};
+    const right={p0:control,p1:{x:bcd.x+d.x,y:bcd.y+d.y},p2:cd,p3:b};
+    return {points:[...sampleCubic(left.p0,left.p1,left.p2,left.p3),...sampleCubic(right.p0,right.p1,right.p2,right.p3).slice(1)],cubics:[left,right]};
   }
   return { points: sampleCubic(a, p1, p2, b), cubic: { p0: a, p1, p2, p3: b } };
 }
@@ -226,6 +243,7 @@ export function connectorEditPoints(connector:Connector,geometry:ConnectorGeomet
   if(connector.waypoints?.length)return connector.waypoints.map(p=>({...p}));
   if(connector.controlPoint)return [{...connector.controlPoint}];
   if(connector.shape==='elbowed')return geometry.points.slice(1,-1).map(p=>({...p}));
+  if(connector.shape==='curved'&&geometry.cubic){const c=geometry.cubic;return [{x:(c.p0.x+3*c.p1.x+3*c.p2.x+c.p3.x)/8,y:(c.p0.y+3*c.p1.y+3*c.p2.y+c.p3.y)/8}];}
   return connector.shape==='curved'?[connectorMidpoint(geometry)]:[];
 }
 /** Insert a manual point in path order without mutating the existing connector. */

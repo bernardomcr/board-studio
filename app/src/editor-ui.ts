@@ -8,6 +8,7 @@ import { groupSelection, ungroupSelection, selectionRoots, captureSelection, dup
 import { shapeIconSvg } from './core/shapes';
 import { widgetAABB } from './core/geometry';
 import { icon } from './icons';
+import { relativeBorderScale } from './core/style-scale';
 
 interface EditorUIApi {
   state: BoardState; bus: CommandBus; camera: Camera;
@@ -68,7 +69,8 @@ export function installEditorUI(api: EditorUIApi) {
   window.addEventListener('pointerup',()=>{if(pointerInteraction)pointerRelease=setTimeout(releasePointer,120);},true);
   window.addEventListener('pointercancel',releasePointer,true);
   let expandedShapes = false, shapeTargetSelection = false;
-  let connectorDefault = { shape: 'straight' as ConnectorShape, arrow: true };
+  let preserveAspect=true,borderGesture=false;
+  let connectorDefault = { shape: 'curved' as ConnectorShape, arrow: true };
   const connectorChoices: Array<{label:string;shape:ConnectorShape;arrow:boolean;path:string}> = [
     {label:'Linha reta sem seta',shape:'straight',arrow:false,path:'M3 22L34 3'},
     {label:'Seta reta',shape:'straight',arrow:true,path:'M3 22L34 3 M25 3H34V12'},
@@ -91,8 +93,15 @@ export function installEditorUI(api: EditorUIApi) {
     const options=SHAPE_OPTIONS.filter(o => (!category || (o.category??'basic')===category) && normalize(`${o.label} ${o.id} ${o.keywords??''}`).includes(q));
     picker.querySelector('.shape-grid')!.innerHTML=shapeButtons(options)||'<p class="empty-message">Nenhuma forma encontrada.</p>';
   }
-  function closeMenus() { delete properties.dataset.openMenu; for(const menu of properties.querySelectorAll<HTMLDetailsElement>('details'))menu.open=false; }
-  function closePanels() { picker.hidden=true; connectorPicker.hidden=true; context.hidden=true; closeMenus(); }
+  function closeMenus() {
+    const focused=document.activeElement as HTMLElement|null;
+    if(focused&&properties.contains(focused)&&focused.matches('input,select,textarea'))focused.closest('details')?.querySelector<HTMLElement>('summary')?.focus({preventScroll:true});
+    delete properties.dataset.openMenu;for(const menu of properties.querySelectorAll<HTMLDetailsElement>('details'))menu.open=false;
+  }
+  function closePanels() {
+    if(picker.contains(document.activeElement)||connectorPicker.contains(document.activeElement))document.querySelector<HTMLButtonElement>('[data-tool="select"]')?.focus({preventScroll:true});
+    picker.hidden=true;connectorPicker.hidden=true;context.hidden=true;closeMenus();
+  }
   function openShapes() {
     const open=picker.hidden; closePanels(); picker.hidden=!open; shapeTargetSelection=false; expandedShapes=false; renderShapes();
   }
@@ -127,6 +136,17 @@ export function installEditorUI(api: EditorUIApi) {
   function applyStyle(patch: Partial<Style>) {
     const source=selected().find(w=>!w.locked);if(source)api.onStyleDefaults?.(source.type,patch);
     bus.beginTransaction('Formatar seleção');for(const w of selected().filter(w=>!w.locked))bus.exec({op:'WIDGET_UPDATE',payload:{id:w.id,patch:{style:{...w.style,...patch}}}});bus.endTransaction();
+  }
+  function setBorderScale(ratio:number,live=false) {
+    ratio=Math.max(0,Math.min(.5,ratio));
+    const items=selected().filter(w=>!w.locked);
+    if(live&&!borderGesture){bus.beginTransaction('Espessura da borda');borderGesture=true;}
+    else if(!live)bus.beginTransaction('Espessura da borda');
+    for(const w of items){const patch={borderScale:ratio,borderWidth:ratio*Math.min(w.width,w.height)};api.onStyleDefaults?.(w.type,patch);bus.exec({op:'WIDGET_UPDATE',payload:{id:w.id,patch:{style:{...w.style,...patch}}}});}
+    if(!live)bus.endTransaction();
+    const output=properties.querySelector<HTMLOutputElement>('[data-border-output]');if(output)output.textContent=`${Math.round(ratio*10000)/100}%`;
+    const slider=properties.querySelector<HTMLInputElement>('[data-border-scale]');slider?.setAttribute('aria-valuetext',`${Math.round(ratio*10000)/100}% do tamanho do objeto`);
+    for(const button of properties.querySelectorAll<HTMLButtonElement>('[data-border-preset]'))button.setAttribute('aria-pressed',String(Math.abs(Number(button.dataset.borderPreset)-ratio)<.0001));
   }
   function applyConnector(field:string,value:string|number) {
     bus.beginTransaction('Formatar conector');for(const c of connectors().filter(c=>!c.locked)){
@@ -179,26 +199,29 @@ export function installEditorUI(api: EditorUIApi) {
     return `<div class="color-grid" aria-label="${label}">${COLORS.map(([c,name])=>`<button class="color-swatch${c==='transparent'?' transparent':''}" data-color-domain="${domain}" data-color-field="${field}" data-color="${c}" style="background:${c}" title="${name}" aria-label="${label}: ${name.toLowerCase()}" aria-pressed="${c.toLowerCase()===value.toLowerCase()}">${c===value?icon('check',15):''}</button>`).join('')}</div><label>Cor personalizada<input type="color" aria-label="${label}" data-${domain}="${field}" value="${validColor(value,field==='borderColor'||field==='color'||field==='strokeColor'?'#1a1a1a':'#ffffff')}"></label>`;
   }
   function fillMenu(style:Style) {return menu('fill','Preenchimento',colorSymbol(style.fillColor),palette('field','fillColor','Cor de preenchimento',style.fillColor)+number('field','fillOpacity','Opacidade do preenchimento',style.fillOpacity,0,1,.05));}
-  function borderMenu(style:Style,corners=false) {
-    return menu('border','Borda',icon('stroke'),palette('field','borderColor','Cor da borda',style.borderColor)+number('field','borderWidth','Espessura da borda',style.borderWidth,0,30,.5)+select('field','borderStyle','Estilo da borda',LINE_STYLES,style.borderStyle)+number('field','borderOpacity','Opacidade da borda',style.borderOpacity??1,0,1,.05)+(corners?number('field','cornerRadius','Cantos arredondados',style.cornerRadius??16,0,1000):''));
+  function borderMenu(w:Widget,corners=false) {
+    const style=w.style,ratio=relativeBorderScale(w),percent=Math.round(ratio*10000)/100;
+    const presets=[['Sem',0],['Fina',.005],['Média',.02],['Grossa',.05]] as const;
+    const scale=`<div class="range-control"><label for="border-scale">Espessura<output data-border-output for="border-scale">${percent}%</output></label><input id="border-scale" type="range" min="0" max="50" step="0.05" aria-label="Espessura proporcional da borda" data-border-scale value="${percent}"><div class="border-presets">${presets.map(([name,value])=>`<button data-border-preset="${value}" aria-label="Borda ${name.toLowerCase()}" aria-pressed="${Math.abs(ratio-value)<.0001}"><span class="border-sample" style="--border-preview:${value===0?0:value<.01?1:value<.04?3:5}px"></span>${name}</button>`).join('')}</div><p class="control-note">A espessura acompanha o tamanho do objeto.</p></div>`;
+    return menu('border','Borda',icon('stroke'),palette('field','borderColor','Cor da borda',style.borderColor)+'<hr>'+scale+'<hr>'+select('field','borderStyle','Estilo da borda',LINE_STYLES,style.borderStyle)+number('field','borderOpacity','Opacidade da borda',style.borderOpacity??1,0,1,.05)+(corners?number('field','cornerRadius','Cantos arredondados',style.cornerRadius??16,0,1000):''));
   }
   function textMenus(w:Widget) {
     const s=w.style;
     const fontOptions=FONT_OPTIONS.map(f=>[f.family,f.label]);if(!fontOptions.some(([family])=>family===s.fontFamily))fontOptions.push([s.fontFamily,s.fontFamily.split(',')[0]!]);
     const toggle=(field:string,value:string,label:string,symbol:string)=>`<button class="toolbar-button" data-style-toggle="${field}" data-value="${value}" aria-label="${label}" title="${label}" aria-pressed="${String(s[field as keyof Style]===value)}">${icon(symbol)}</button>`;
-    const textBody=select('field','textAlign','Alinhamento do texto',[['left','Esquerda'],['center','Centro'],['right','Direita']],s.textAlign)+select('field','textAlignVertical','Alinhamento vertical do texto',[['top','Topo'],['middle','Meio'],['bottom','Base']],s.textAlignVertical)+select('field','textDecoration','Decoração do texto',[['none','Sem decoração'],['underline','Sublinhado'],['line-through','Riscado']],s.textDecoration??'none')+'<hr><p class="popover-title">Realce do texto</p>'+palette('field','highlightColor','Realce do texto',s.highlightColor??'transparent');
-    return `<select class="toolbar-font" aria-label="Fonte do texto" data-field="fontFamily">${options(fontOptions,s.fontFamily)}</select><input class="toolbar-fontsize" type="number" data-field="fontSize" aria-label="Texto" title="Tamanho do texto" min="8" max="200" value="${s.fontSize}">${separator}${toggle('fontWeight','bold','Negrito','bold')}${toggle('fontStyle','italic','Itálico','italic')}${menu('text-color','Cor do texto',icon('text-color'),palette('field','color','Cor do texto',s.color))}${menu('text','Texto',icon('align-left'),textBody)}`;
+    const textBody=`<div class="compact-type-controls">${select('field','fontFamily','Família tipográfica',fontOptions,s.fontFamily)}${number('field','fontSize','Tamanho tipográfico',s.fontSize,1,10000)}</div>`+select('field','textAlign','Alinhamento do texto',[['left','Esquerda'],['center','Centro'],['right','Direita']],s.textAlign)+(w.type==='text'?'':select('field','textAlignVertical','Alinhamento vertical do texto',[['top','Topo'],['middle','Meio'],['bottom','Base']],s.textAlignVertical))+select('field','textDecoration','Decoração do texto',[['none','Sem decoração'],['underline','Sublinhado'],['line-through','Riscado']],s.textDecoration??'none')+'<hr><p class="popover-title">Realce do texto</p>'+palette('field','highlightColor','Realce do texto',s.highlightColor??'transparent');
+    return `<select class="toolbar-font" aria-label="Fonte do texto" data-field="fontFamily">${options(fontOptions,s.fontFamily)}</select><input class="toolbar-fontsize" type="number" data-field="fontSize" aria-label="Texto" title="Tamanho do texto" min="1" max="10000" value="${s.fontSize}">${separator}${toggle('fontWeight','bold','Negrito','bold')}${toggle('fontStyle','italic','Itálico','italic')}${menu('text-color','Cor do texto',icon('text-color'),palette('field','color','Cor do texto',s.color))}${menu('text','Texto',icon('align-left'),textBody)}`;
   }
   function shapeMenu(w:ShapeWidget) {
     return menu('shape','Tipo de forma',shapeIconSvg(w.shape),`<div class="compact-shapes">${MAIN_SHAPES.map(id=>`<button data-replace-shape="${id}" aria-label="${SHAPE_OPTIONS.find(s=>s.id===id)!.label}" title="${SHAPE_OPTIONS.find(s=>s.id===id)!.label}">${shapeIconSvg(id)}</button>`).join('')}</div>${select('field','shape','Tipo de forma',SHAPE_OPTIONS.map(s=>[s.id,s.label]),w.shape)}${menuAction('more-shapes','Mais formas','plus')}`);
   }
   function sizeMenu(w:Widget) {
-    return menu('size','Tamanho e rotação',icon('size'),number('field','width','Largura',w.width,16)+number('field','height','Altura',w.height,16)+number('field','rotation','Rotação',w.rotation*180/Math.PI,-360,360));
+    return menu('size','Tamanho e rotação',icon('size'),`<div class="transform-grid">${number('field','x','Posição X',w.x,-1e7,1e7)}${number('field','y','Posição Y',w.y,-1e7,1e7)}${number('field','width','Largura',w.width,1,1e7)}${number('field','height','Altura',w.height,1,1e7)}</div><label class="aspect-control"><span>${icon(preserveAspect?'lock':'unlock',16)}Manter proporção</span><input type="checkbox" aria-label="Manter proporção" data-aspect-lock ${preserveAspect?'checked':''}></label><hr>${number('field','rotation','Rotação',w.rotation*180/Math.PI,-360,360)}${w.type==='text'?'<p class="control-note">Arraste as alças no board para aumentar ou reduzir o texto.</p>':''}`);
   }
   function arrangeMenu(widgets:Widget[],locked:boolean) {
-    const alignments=[['left','Alinhar à esquerda'],['hcenter','Centralizar horizontalmente'],['right','Alinhar à direita'],['top','Alinhar ao topo'],['vcenter','Centralizar verticalmente'],['bottom','Alinhar à base'],['dist-x','Distribuir horizontalmente'],['dist-y','Distribuir verticalmente']];
+    const alignments=[['left','Alinhar à esquerda','align-left-edge'],['hcenter','Centralizar horizontalmente','align-center-x'],['right','Alinhar à direita','align-right-edge'],['top','Alinhar ao topo','align-top'],['vcenter','Centralizar verticalmente','align-center-y'],['bottom','Alinhar à base','align-bottom'],['dist-x','Distribuir horizontalmente','distribute-x'],['dist-y','Distribuir verticalmente','distribute-y']];
     const count=arrangementRoots(state,api.getGroupScope?.()).length,allWidgets=widgets.length===state.selection.size;
-    return menu('arrange','Organizar',icon('arrange'),(allWidgets?menuAction('front','Trazer para frente','front','',locked)+menuAction('back','Enviar para trás','back','',locked)+'<hr>':'')+(count>1?alignments.map(([mode,label])=>`<button class="menu-action" data-align="${mode}" ${locked||mode!.startsWith('dist')&&count<3?'disabled':''}>${icon('align',17)}${label}</button>`).join('')+'<hr>':'')+menuAction('frame','Criar quadro','frame','',locked));
+    return menu('arrange','Organizar',icon('arrange'),(allWidgets?menuAction('front','Trazer para frente','front','',locked)+menuAction('back','Enviar para trás','back','',locked)+'<hr>':'')+(count>1?alignments.map(([mode,label,symbol])=>`<button class="menu-action" data-align="${mode}" ${locked||mode!.startsWith('dist')&&count<3?'disabled':''}>${icon(symbol!,17)}${label}</button>`).join('')+'<hr>':'')+menuAction('frame','Criar quadro','frame','',locked));
   }
   function commonMenus(widgets:Widget[]) {
     const ids=[...state.selection],locked=ids.some(id=>itemLocked(state,id)),allLocked=ids.every(id=>itemLocked(state,id)),w=widgets[0];
@@ -221,15 +244,19 @@ export function installEditorUI(api: EditorUIApi) {
   properties.addEventListener('click',event=>{
     const b=(event.target as Element).closest<HTMLButtonElement>('button');if(!b||b.disabled)return;
     if(b.dataset.action)action(b.dataset.action);
+    if(b.dataset.borderPreset!==undefined){setBorderScale(Number(b.dataset.borderPreset));renderKey='';refresh();}
     if(b.dataset.color){const domain=b.dataset.colorDomain!,field=b.dataset.colorField!;if(domain==='field')applyStyle({[field]:b.dataset.color});else if(domain==='connector')applyConnector(field,b.dataset.color);else applyStroke(field,b.dataset.color);renderKey='';refresh();}
     if(b.dataset.styleToggle){const field=b.dataset.styleToggle as keyof Style;applyStyle({[field]:selected()[0]?.style[field]===b.dataset.value?'normal':b.dataset.value});renderKey='';refresh();}
     if(b.dataset.replaceShape){api.setShape(b.dataset.replaceShape as ShapeWidget['shape']);bus.beginTransaction('Mudar forma');for(const w of selected())if(w.type==='shape'&&!w.locked)bus.exec({op:'WIDGET_UPDATE',payload:{id:w.id,patch:{shape:b.dataset.replaceShape}}});bus.endTransaction();renderKey='';refresh();}
     if(b.dataset.align)arrangeSelection(state,bus,b.dataset.align as ArrangeMode,api.getGroupScope?.());
     if(b.dataset.removeCaption!==undefined){const c=connectors()[0];if(c&&!c.locked){const i=Number(b.dataset.removeCaption),captions=c.captions??[];bus.exec({op:'CONNECTOR_UPDATE',payload:{id:c.id,patch:{captions:captions.filter((_,n)=>n!==i),captionPositions:captions.flatMap((_,n)=>n===i?[]:[c.captionPositions?.[n]??(n+1)/(captions.length+1)])}}});renderKey='';refresh();}}
   });
+  properties.addEventListener('input',event=>{const input=event.target as HTMLInputElement;if(input.hasAttribute('data-border-scale'))setBorderScale(Number(input.value)/100,true);});
   properties.addEventListener('change',async event=>{
     const input=event.target as HTMLInputElement;
     if(input.disabled)return;
+    if(input.hasAttribute('data-border-scale')){if(!borderGesture)setBorderScale(Number(input.value)/100);else{bus.endTransaction();borderGesture=false;}renderKey='';refresh();return;}
+    if(input.hasAttribute('data-aspect-lock')){preserveAspect=input.checked;renderKey='';return;}
     if(input.dataset.image){bus.beginTransaction('Formatar imagem');for(const w of selected())if(w.type==='image'&&!w.locked)bus.exec({op:'WIDGET_UPDATE',payload:{id:w.id,patch:{[input.dataset.image]:input.dataset.image==='opacity'?Math.max(0,Math.min(100,Number(input.value)))/100:input.value}}});bus.endTransaction();}
     else if(input.dataset.captionIndex!==undefined||input.dataset.captionPosition!==undefined){const c=connectors()[0];if(!c||c.locked)return;const i=Number(input.dataset.captionIndex??input.dataset.captionPosition),captions=[...(c.captions??[])],captionPositions=captions.map((_,n)=>c.captionPositions?.[n]??(n+1)/(captions.length+1));if(input.dataset.captionIndex!==undefined)captions[i]=input.value;else captionPositions[i]=Math.max(.02,Math.min(.98,Number(input.value)/100));bus.exec({op:'CONNECTOR_UPDATE',payload:{id:c.id,patch:{captions,captionPositions}}});}
     else if(input.dataset.connector)applyConnector(input.dataset.connector,input.dataset.connector==='strokeWidth'?Math.max(1,Math.min(30,Number(input.value)||1)):input.value);
@@ -239,8 +266,16 @@ export function installEditorUI(api: EditorUIApi) {
       if(field==='fontFamily'){const target=[...state.selection].join('|');await loadBoardFont(input.value);if(target!==[...state.selection].join('|'))return;}
       if(field==='link'){for(const w of selected().filter(w=>!w.locked))bus.exec({op:'WIDGET_UPDATE',payload:{id:w.id,patch:{link:input.value}}});}
       else if(field==='shape'){api.setShape(input.value as ShapeWidget['shape']);for(const w of selected())if(w.type==='shape'&&!w.locked)bus.exec({op:'WIDGET_UPDATE',payload:{id:w.id,patch:{shape:input.value}}});}
-      else if(['width','height','rotation'].includes(field)){const value=Number(input.value);if(Number.isFinite(value))for(const w of selected().filter(w=>!w.locked))bus.exec({op:'WIDGET_UPDATE',payload:{id:w.id,patch:{[field]:field==='rotation'?value*Math.PI/180:Math.max(16,value)}}});}
-      else{let value:string|number=['fontSize','borderWidth','fillOpacity','borderOpacity','cornerRadius'].includes(field)?Number(input.value):input.value;if(typeof value==='number'){if(!Number.isFinite(value))return;if(field==='fillOpacity'||field==='borderOpacity')value=Math.max(0,Math.min(1,value));if(field==='fontSize')value=Math.max(8,Math.min(200,value));if(field==='borderWidth')value=Math.max(0,Math.min(30,value));if(field==='cornerRadius')value=Math.max(0,value);}applyStyle({[field]:value});}
+      else if(['x','y','width','height','rotation'].includes(field)){
+        const value=Number(input.value);if(!Number.isFinite(value))return;
+        bus.beginTransaction('Transformar seleção');
+        for(const w of selected().filter(w=>!w.locked)){
+          const patch:Partial<Widget>={[field]:field==='rotation'?value*Math.PI/180:field==='width'||field==='height'?Math.max(1,value):value};
+          if(preserveAspect&&(field==='width'||field==='height')){const ratio=w.width/w.height;if(field==='width')patch.height=Math.max(1,value)/ratio;else patch.width=Math.max(1,value)*ratio;}
+          bus.exec({op:'WIDGET_UPDATE',payload:{id:w.id,patch}});
+        }bus.endTransaction();
+      }
+      else{let value:string|number=['fontSize','fillOpacity','borderOpacity','cornerRadius'].includes(field)?Number(input.value):input.value;if(typeof value==='number'){if(!Number.isFinite(value))return;if(field==='fillOpacity'||field==='borderOpacity')value=Math.max(0,Math.min(1,value));if(field==='fontSize')value=Math.max(1,Math.min(10000,value));if(field==='cornerRadius')value=Math.max(0,value);}applyStyle({[field]:value});}
     }
     renderKey='';refresh();
   });
@@ -287,10 +322,10 @@ export function installEditorUI(api: EditorUIApi) {
       if(allText){
         html+=textMenus(w)+separator;
         if(widgets.every(w=>w.type!=='text'))html+=fillMenu(w.style);
-        if(widgets.every(w=>w.type==='shape'||w.type==='frame'))html+=borderMenu(w.style,widgets.every(w=>w.type==='shape'&&w.shape==='round_rectangle'));
+        if(widgets.every(w=>w.type==='shape'||w.type==='frame'))html+=borderMenu(w,widgets.every(w=>w.type==='shape'&&w.shape==='round_rectangle'));
       }
       if(single&&w.type==='image'){
-        html+=button('crop','Recortar','crop')+menu('image','Imagem',icon('image'),menuAction('circle-crop','Recortar em círculo','crop-circle')+select('image','maskShape','Máscara da imagem',[['rectangle','Retângulo'],['ellipse','Elipse / círculo'],['round_rectangle','Cantos arredondados']],w.maskShape??'rectangle')+number('image','opacity','Opacidade da imagem',(w.opacity??1)*100,0,100)+'<hr>'+menuAction('replace-image','Substituir imagem','image')+menuAction('flip-x','Espelhar ↔','flip')+menuAction('flip-y','Espelhar ↕','flip')+menuAction('image-actual-size','Tamanho original','size')+menuAction('reset-crop','Restaurar imagem','undo')+menuAction('download-image','Baixar original','download'))+separator+borderMenu(w.style,w.maskShape==='round_rectangle');
+        html+=button('crop','Recortar','crop')+menu('image','Imagem',icon('image'),menuAction('circle-crop','Recortar em círculo','crop-circle')+select('image','maskShape','Máscara da imagem',[['rectangle','Retângulo'],['ellipse','Elipse / círculo'],['round_rectangle','Cantos arredondados']],w.maskShape??'rectangle')+number('image','opacity','Opacidade da imagem',(w.opacity??1)*100,0,100)+'<hr>'+menuAction('replace-image','Substituir imagem','image')+menuAction('flip-x','Espelhar ↔','flip')+menuAction('flip-y','Espelhar ↕','flip')+menuAction('image-actual-size','Tamanho original','size')+menuAction('reset-crop','Restaurar imagem','undo')+menuAction('download-image','Baixar original','download'))+separator+borderMenu(w,w.maskShape==='round_rectangle');
       }
       if(single)html+=sizeMenu(w);
     }

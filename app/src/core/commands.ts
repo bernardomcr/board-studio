@@ -14,6 +14,8 @@ import {
 } from "./connectors";
 import type { Stroke } from "./strokes";
 import { DEFAULT_BACKGROUND, validateBoardBackground, type BoardBackground, type BackgroundPatch } from "./background";
+import { naturalText } from './text-layout';
+import { relativeBorderScale } from './style-scale';
 
 export type CommandOp =
   | "BATCH"
@@ -85,10 +87,12 @@ export class CommandBus {
       const w = this.state.widgets.get(id);
       if (w) max = Math.max(max, w.z);
     }
+    for(const item of [...this.state.connectors.values(),...this.state.strokes.values()])max=Math.max(max,item.z);
     return max;
   }
 
   exec(command: Command): void {
+    command=structuredClone(command);
     const executed = this.execute(command);
     if (!executed) return;
     executed.redo();
@@ -155,8 +159,11 @@ export class CommandBus {
         };
       }
       case "WIDGET_CREATE": {
-        const widget = command.payload as Widget;
-        const placed: Widget = { ...widget, z: this.topZ() + 1 };
+        let widget = command.payload as Widget;
+        if(widget.type==='text'&&widget.textSizing!=='natural')widget=naturalText(widget);
+        command.payload=widget;
+        const bottom=Math.min(0,...[...s.widgets.values(),...s.connectors.values(),...s.strokes.values()].map(item=>item.z));
+        const placed: Widget = { ...widget, z: widget.type==='frame'?bottom-1:this.topZ() + 1 };
         const index = s.order.length;
         return {
           command,
@@ -351,9 +358,25 @@ export class CommandBus {
       }
 
       case "WIDGET_UPDATE": {
-        const { id, patch } = command.payload as { id: string; patch: Partial<Widget> };
+        const { id, patch:incoming } = command.payload as { id: string; patch: Partial<Widget>&{textSizing?:'natural'} };
         const widget = s.widgets.get(id);
         if (!widget) return null;
+        let patch={...incoming};
+        if(incoming.style)patch.style={...widget.style,...incoming.style};
+        const sized=incoming.width!==undefined||incoming.height!==undefined;
+        if(sized){
+          const style={...(patch.style??widget.style)};
+          if(incoming.style?.borderScale===undefined&&incoming.style?.borderWidth===undefined)style.borderScale=relativeBorderScale(widget);
+          if(style.borderScale!==undefined)style.borderWidth=style.borderScale*Math.min(patch.width??widget.width,patch.height??widget.height);
+          patch.style=style;
+        }
+        if(widget.type==='text'&&!(incoming.textSizing==='natural'&&incoming.width!==undefined&&incoming.height!==undefined)){
+          const style={...(patch.style??widget.style)};
+          if(sized&&incoming.style?.fontSize===undefined){const ratio=incoming.width!==undefined?incoming.width/widget.width:(incoming.height??widget.height)/widget.height;style.fontSize=Math.max(1,Math.min(10000,widget.style.fontSize*ratio));}
+          const text=naturalText({...widget,...patch,style} as typeof widget);
+          patch={...patch,style,width:text.width,height:text.height,textSizing:'natural'};
+        }
+        command.payload={id,patch};
         const before = { ...widget } as Widget;
         const after = { ...widget, ...patch } as Widget;
         return {
@@ -389,14 +412,14 @@ export class CommandBus {
           ids: string[];
           direction: "front" | "back" | "forward" | "backward";
         };
-        const before = [...s.order];
+        const before = [...s.widgets.values(),...s.connectors.values(),...s.strokes.values()].sort((a,b)=>a.z-b.z).map(item=>item.id);
         const after = reorder(before, ids, direction);
-        const beforeZ = new Map(before.map(id => [id, s.widgets.get(id)?.z ?? 0]));
+        const entity=(id:string)=>s.widgets.get(id)??s.connectors.get(id)??s.strokes.get(id);
+        const beforeZ = new Map(before.map(id => [id, entity(id)?.z ?? 0]));
         const apply = (order: string[], restoreZ = false): void => {
-          s.order = [...order];
+          s.order = order.filter(id=>s.widgets.has(id));
           order.forEach((id, index) => {
-            const widget = s.widgets.get(id);
-            if (widget) s.widgets.set(id, { ...widget, z: restoreZ ? beforeZ.get(id)! : index + 1 });
+            const item=entity(id);if(item)item.z=restoreZ?beforeZ.get(id)!:index+1;
           });
         };
         return {

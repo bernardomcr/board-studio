@@ -21,6 +21,8 @@ export interface StrokePoint {
 export type StrokeTool = "pen" | "highlighter" | "eraser";
 
 export interface Stroke {
+  name?: string;
+  hidden?: boolean;
   locked?: boolean;
   id: string;
   type: "stroke";

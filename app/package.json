@@ -11,6 +11,7 @@
     "test:headed": "playwright test --headed"
   },
   "dependencies": {
+    "lucide": "1.65.0",
     "pixi.js": "^8.6.0"
   },
   "devDependencies": {

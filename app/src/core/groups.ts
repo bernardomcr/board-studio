@@ -3,6 +3,7 @@ import { nextId, type Widget, createWidget } from './model';
 import { widgetAABB, unionRect, rotate, type Vec } from './geometry';
 import { connectorBounds, connectorGeometry, resolveEndpoint, type Connector } from './connectors';
 import { strokeBounds, type Stroke } from './strokes';
+import {scaledWidgetStyle} from './style-scale';
 
 export function groupLeaves(s:BoardState,id:string,seen=new Set<string>()):string[] {
   if(seen.has(id))return [];seen.add(id);
@@ -28,7 +29,7 @@ export function enclosingGroup(s:BoardState,id:string,scope:string|null=null):st
 export function groupSelection(s:BoardState,bus:CommandBus){const roots=selectionRoots(s);if(roots.length<2)return;bus.exec({op:'GROUP_CREATE',payload:{id:nextId('group'),items:roots}});}
 export function ungroupSelection(s:BoardState,bus:CommandBus){bus.beginTransaction('Desagrupar');for(const id of selectionRoots(s))if(s.groups.has(id))bus.exec({op:'GROUP_REMOVE',payload:id});bus.endTransaction();}
 export function itemLocked(s:BoardState,id:string):boolean {return !!(s.widgets.get(id)??s.connectors.get(id)??s.strokes.get(id))?.locked;}
-export function entityRect(s:BoardState,id:string){const w=s.widgets.get(id);if(w)return widgetAABB(w);const c=s.connectors.get(id);if(c){const g=connectorGeometry(c,s.widgets);if(g)return connectorBounds(g);}const st=s.strokes.get(id);return st?strokeBounds(st):null;}
+export function entityRect(s:BoardState,id:string){const item=s.widgets.get(id)??s.connectors.get(id)??s.strokes.get(id);if(item?.hidden)return null;const w=s.widgets.get(id);if(w)return widgetAABB(w);const c=s.connectors.get(id);if(c){const g=connectorGeometry(c,s.widgets);if(g)return connectorBounds(g);}const st=s.strokes.get(id);return st?strokeBounds(st):null;}
 export function selectedBounds(s:BoardState,ids=[...s.selection]){return unionRect(ids.map(id=>entityRect(s,id)).filter((r):r is NonNullable<typeof r>=>!!r));}
 export type EntitySnapshot={widgets:Widget[];connectors:Connector[];strokes:Stroke[];groups:Array<[string,string[]]>};
 export function captureSelection(s:BoardState,ids=[...s.selection],includeInternal=true):EntitySnapshot {
@@ -41,7 +42,7 @@ export function captureSelection(s:BoardState,ids=[...s.selection],includeIntern
 export function transformSnapshot(s:BoardState,snapshot:EntitySnapshot,dx:number,dy:number,sx=1,sy=1,origin:Vec={x:0,y:0},angle=0):Command[] {
   const point=(p:Vec)=>{const v=rotate({x:(p.x-origin.x)*sx,y:(p.y-origin.y)*sy},angle);return {x:origin.x+v.x+dx,y:origin.y+v.y+dy};};
   const cmds:Command[]=[];
-  for(const w of snapshot.widgets){if(w.locked)continue;const c=point({x:w.x+w.width/2,y:w.y+w.height/2}),width=w.width*sx,height=w.height*sy;cmds.push({op:'WIDGET_UPDATE',payload:{id:w.id,patch:{x:c.x-width/2,y:c.y-height/2,width,height,rotation:w.rotation+angle}}});}
+  for(const w of snapshot.widgets){if(w.locked)continue;const c=point({x:w.x+w.width/2,y:w.y+w.height/2}),uniform=Math.sqrt(Math.abs(sx*sy)),width=w.width*(w.type==='text'?uniform:sx),height=w.height*(w.type==='text'?uniform:sy);cmds.push({op:'WIDGET_UPDATE',payload:{id:w.id,patch:{x:c.x-width/2,y:c.y-height/2,width,height,rotation:w.rotation+angle,style:scaledWidgetStyle(w,sx,sy),...(w.type==='text'?{textSizing:'natural'}:{})}}});}
   for(const c of snapshot.connectors){if(c.locked)continue;const endpoint=(e:Connector['start'])=>e.kind==='anchor'?e:{...e,...point(e)};cmds.push({op:'CONNECTOR_UPDATE',payload:{id:c.id,patch:{start:endpoint(c.start),end:endpoint(c.end),controlPoint:c.controlPoint?point(c.controlPoint):null,waypoints:c.waypoints?.map(point)??null}}});}
   for(const st of snapshot.strokes){if(st.locked)continue;cmds.push({op:'STROKE_UPDATE',payload:{id:st.id,patch:{points:st.points.map(p=>({...point(p),r:p.r*Math.sqrt(Math.abs(sx*sy))}))}}});}
   return cmds;

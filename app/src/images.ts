@@ -4,6 +4,7 @@ import type { Camera } from "./core/camera";
 import { SHAPE_STYLE, nextId, type Widget } from "./core/model";
 import type { Vec } from "./core/geometry";
 import { borderPattern, patternedContour, shapeContours } from "./core/shapes";
+import {resolvedWidgetStyle} from './core/style-scale';
 
 type Crop = { x: number; y: number; width: number; height: number };
 type MaskShape = "rectangle" | "ellipse" | "round_rectangle";
@@ -80,7 +81,7 @@ export function installImages(api: ImageAPI) {
       else node.mask.rect(0, 0, w.width, w.height);
       node.mask.fill(0xffffff);
       node.border.clear();
-      const { borderWidth, borderColor, borderStyle, borderOpacity = 1 } = w.style;
+      const { borderWidth, borderColor, borderStyle, borderOpacity = 1 } = resolvedWidgetStyle(w);
       if (borderWidth > 0 && borderColor !== "transparent" && borderOpacity > 0) {
         const shape = w.maskShape === "ellipse" ? "circle" : w.maskShape ?? "rectangle";
         const radius = cornerRadius;

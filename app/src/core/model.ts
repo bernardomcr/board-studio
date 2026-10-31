@@ -10,6 +10,8 @@ export interface Style {
   fillOpacity: number;
   borderColor: string;
   borderWidth: number;
+  /** Outline thickness relative to the shorter dimension of this object. */
+  borderScale?: number;
   borderStyle: "normal" | "dotted" | "dashed";
   borderOpacity?: number;
   /** Corner radius in board units; omitted retains each shape's default. */
@@ -26,6 +28,8 @@ export interface Style {
 }
 
 export interface BaseWidget {
+  name?: string;
+  hidden?: boolean;
   locked?: boolean;
   link?: string;
   id: string;
@@ -135,6 +139,7 @@ export const SHAPE_OPTIONS: ReadonlyArray<{ id: ShapeWidget["shape"]; label: str
 ];
 
 export interface TextWidget extends BaseWidget {
+  textSizing?: 'natural';
   type: "text";
   content: string;
 }

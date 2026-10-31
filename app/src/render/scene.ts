@@ -1,20 +1,21 @@
 /**
  * Render do board: sincroniza o modelo com o grafo de cena do PixiJS.
  *
- * Camadas (de trás para frente): traços → conectores → objetos.
+ * A ordem global de camadas vale para objetos, traços e conectores.
  * Quadros são containers mascarados: filhos são reparentados e cortados na borda.
  * Texto é renderizado como texto rico (runs de negrito/itálico/riscado/link).
  */
 
 import { Container, Graphics, Text } from "pixi.js";
 import type { BoardState } from "../core/commands";
-import { widgetAABB, rectsIntersect, type Rect } from "../core/geometry";
+import { widgetAABB, rectsIntersect, pointInWidget, widgetCorners, type Rect } from "../core/geometry";
 import { connectorGeometry, connectorBounds, connectorCaptionPoints } from "../core/connectors";
 import { strokeBounds, strokeOutline } from "../core/strokes";
 import { parseRich, type Run } from "../core/richtext";
 import { paintConnector } from "./connector-paint";
 import type { Widget } from "../core/model";
 import { borderPattern, canonicalShape, patternedContour, shapeContours, shapePolygon, shapeDetails } from "../core/shapes";
+import {resolvedWidgetStyle} from '../core/style-scale';
 
 interface Node {
   container: Container;
@@ -68,7 +69,7 @@ export class BoardScene {
       if (!node) {
         node = new Graphics();
         this.strokeNodes.set(id, node);
-        this.strokeLayer.addChild(node);
+        node.label=id;this.layer.addChild(node);
       }
       node.clear();
 
@@ -80,7 +81,7 @@ export class BoardScene {
         });
       }
 
-      if (visible) node.visible = rectsIntersect(visible, strokeBounds(stroke));
+      node.visible=!stroke.hidden&&(!visible||rectsIntersect(visible,strokeBounds(stroke)));
       node.zIndex = stroke.z;
     }
   }
@@ -107,11 +108,11 @@ export class BoardScene {
       if (!node) {
         node = new Graphics();
         this.connectorNodes.set(id, node);
-        this.connectorLayer.addChild(node);
+        node.label=id;this.layer.addChild(node);
       }
       paintConnector(node, connector, geometry);
 
-      if (visible) node.visible = rectsIntersect(visible, connectorBounds(geometry));
+      node.visible=!connector.hidden&&(!visible||rectsIntersect(visible,connectorBounds(geometry)));
       node.zIndex = connector.z;
 
       const captions = connectorCaptionPoints(connector, geometry);
@@ -128,7 +129,7 @@ export class BoardScene {
           });
           label.anchor.set(0.5);
           labels.push(label);
-          this.connectorLayer.addChild(label);
+          this.layer.addChild(label);
         }
         label.text = caption.text;
         if (label.resolution !== this.textResolution) label.resolution = this.textResolution;
@@ -167,10 +168,10 @@ export class BoardScene {
     let best: Widget | undefined;
     let bestArea = Infinity;
     for (const frame of state.widgets.values()) {
-      if (frame.type !== "frame" || frame.id === w.id) continue;
+      if (frame.type !== "frame" || frame.id === w.id || frame.hidden) continue;
       const cx = w.x + w.width / 2;
       const cy = w.y + w.height / 2;
-      if (cx >= frame.x && cx <= frame.x + frame.width && cy >= frame.y && cy <= frame.y + frame.height) {
+      if (pointInWidget(frame,{x:cx,y:cy})) {
         const area = frame.width * frame.height;
         if (area < bestArea) {
           bestArea = area;
@@ -194,7 +195,7 @@ export class BoardScene {
     }
     const { container, mask } = entry;
     mask.clear();
-    mask.rect(frame.x, frame.y, frame.width, frame.height).fill({ color: 0xffffff });
+    mask.poly(widgetCorners(frame).flatMap(p=>[p.x,p.y])).fill({ color: 0xffffff });
     container.zIndex = -1000 + frame.z;
     container.visible = true;
     return entry;
@@ -245,11 +246,11 @@ export class BoardScene {
       node.container.zIndex = widget.z;
 
       const frame = widget.type === "frame" ? undefined : this.frameOf(state, widget);
-      const target =
-        widget.type === "frame" ? this.frameLayer : frame ? this.clipFor(frame).container : this.layer;
+      const target = this.layer;
       if (node.container.parent !== target) target.addChild(node.container);
+      node.container.mask=frame?this.clipFor(frame).mask:null;
 
-      node.container.visible = visible ? rectsIntersect(visible, widgetAABB(widget)) : true;
+      node.container.visible = !widget.hidden&&(!visible||rectsIntersect(visible,widgetAABB(widget)));
     }
   }
 
@@ -260,6 +261,7 @@ export class BoardScene {
 
   private createNode(widget: Widget): Node {
     const container = new Container();
+    container.label=widget.id;
     const graphics = new Graphics();
     const text = new Container();
     container.addChild(graphics, text);
@@ -285,8 +287,8 @@ export class BoardScene {
   private layoutText(node: Node, w: Widget): void {
     if (w.type === "image") return;
     for (const child of node.text.children) if (child instanceof Text && child.resolution !== this.textResolution) child.resolution = this.textResolution;
-    const pad = 10;
-    const maxWidth = Math.max(10, w.width - pad * 2);
+    const pad = w.type==='text'?0:10;
+    const maxWidth = Math.max(1, w.width - pad * 2);
     const content = w.type === "frame" ? w.title : w.content;
 
     const sig = [
@@ -300,7 +302,7 @@ export class BoardScene {
       w.style.color,
       w.style.textAlign,
       w.style.textAlignVertical,
-      Math.round(maxWidth),
+      w.type==='text'?w.width:Math.round(maxWidth),
       w.type,
     ].join("|");
 
@@ -377,7 +379,7 @@ export class BoardScene {
           const node = makeRunText(token, run, w, this.textResolution);
           const width = node.width;
 
-          if (lineWidth > 0 && lineWidth + width > maxWidth && token.trim() !== "") flush();
+          if (w.type!=='text' && lineWidth > 0 && lineWidth + width > maxWidth && token.trim() !== "") flush();
 
           items.push({ node, width, strike: Boolean(run.strike)||w.style.textDecoration==='line-through',underline:Boolean(run.underline)||w.style.textDecoration==='underline',highlight:w.style.highlightColor, link: run.link });
           lineWidth += width;
@@ -451,6 +453,7 @@ function placeLine(
 }
 
 function drawBackground(g: Graphics, w: Widget, zoom: number): void {
+  w={...w,style:resolvedWidgetStyle(w)};
   const { style } = w;
 
   if (w.type === "image") return;

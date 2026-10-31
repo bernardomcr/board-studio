@@ -12,12 +12,13 @@ import {
   connectorGeometry,
   type Connector,
 } from "./connectors";
-import { unionRect, widgetAABB, type Rect } from "./geometry";
+import { unionRect, widgetAABB, pointInWidget, widgetCorners, type Rect } from "./geometry";
 import type { Style, Widget } from "./model";
 import { parseRich } from "./richtext";
 import { strokeBounds, strokeOutline, type Stroke } from "./strokes";
 import { borderPattern, canonicalShape, shapeDetails, shapePolygon } from "./shapes";
 import { DEFAULT_BACKGROUND } from "./background";
+import {resolvedWidgetStyle} from './style-scale';
 
 const escapeXml = (value: string): string =>
   value
@@ -39,12 +40,13 @@ export function boardToSvg(state: BoardState, options: Options = {}): string {
   const scenery = options.background === undefined ? background.image : undefined;
   if (scenery) rects.push({ minX: scenery.x, minY: scenery.y, maxX: scenery.x + scenery.width, maxY: scenery.y + scenery.height });
 
-  for (const w of state.widgets.values()) rects.push(widgetAABB(w));
+  for (const w of state.widgets.values()) if(!w.hidden){const r=widgetAABB(w),pad=resolvedWidgetStyle(w).borderWidth/2;rects.push({minX:r.minX-pad,minY:r.minY-pad,maxX:r.maxX+pad,maxY:r.maxY+pad});}
   for (const c of state.connectors.values()) {
+    if(c.hidden)continue;
     const geometry = connectorGeometry(c, state.widgets);
     if (geometry) rects.push(connectorBounds(geometry));
   }
-  for (const s of state.strokes.values()) rects.push(strokeBounds(s));
+  for (const s of state.strokes.values()) if(!s.hidden)rects.push(strokeBounds(s));
 
   const bounds = unionRect(rects) ?? { minX: 0, minY: 0, maxX: 800, maxY: 600 };
   const minX = bounds.minX - padding;
@@ -62,27 +64,15 @@ export function boardToSvg(state: BoardState, options: Options = {}): string {
     if (scenery) parts.push(`<image data-board-background="true" href="${escapeXml(scenery.src)}" x="${scenery.x}" y="${scenery.y}" width="${scenery.width}" height="${scenery.height}" opacity="${scenery.opacity}" preserveAspectRatio="none"/>`);
   }
 
-  // Frame backgrounds precede ink and connections, as in the Pixi scene.
-  const frames=[...state.widgets.values()].filter(w=>w.type==='frame').sort((a,b)=>a.z-b.z);
-  for(const frame of frames)parts.push(widgetSvg(frame));
-  for (const id of state.strokeOrder) {
-    const stroke = state.strokes.get(id);
-    if (stroke) parts.push(strokeSvg(stroke));
-  }
-  for (const id of state.connectorOrder) {
-    const connector = state.connectors.get(id);
-    if (connector) parts.push(connectorSvg(connector, state));
-  }
-
-  const ordered = [...state.order]
-    .map((id) => state.widgets.get(id))
-    .filter((w): w is Widget => Boolean(w)&&w!.type!=='frame')
-    .sort((a, b) => (a.type === "frame" ? -1 : 0) - (b.type === "frame" ? -1 : 0) || a.z - b.z);
+  const frames=[...state.widgets.values()].filter(w=>w.type==='frame'&&!w.hidden);
+  const ordered=[...state.widgets.values(),...state.connectors.values(),...state.strokes.values()].filter(w=>!w.hidden).sort((a,b)=>a.z-b.z);
 
   for (const widget of ordered) {
+    if(widget.type==='connector'){parts.push(connectorSvg(widget,state));continue;}
+    if(widget.type==='stroke'){parts.push(strokeSvg(widget));continue;}
     const cx=widget.x+widget.width/2,cy=widget.y+widget.height/2;
-    const frame=frames.filter(f=>cx>=f.x&&cx<=f.x+f.width&&cy>=f.y&&cy<=f.y+f.height).sort((a,b)=>a.width*a.height-b.width*b.height)[0];
-    if(frame){const clip='frame-clip-'+widget.id.replace(/[^a-zA-Z0-9_-]/g,'');parts.push(`<defs><clipPath id="${clip}"><rect x="${frame.x}" y="${frame.y}" width="${frame.width}" height="${frame.height}"/></clipPath></defs><g clip-path="url(#${clip})">${widgetSvg(widget)}</g>`);}else parts.push(widgetSvg(widget));
+    const frame=widget.type==='frame'?undefined:frames.filter(f=>pointInWidget(f,{x:cx,y:cy})).sort((a,b)=>a.width*a.height-b.width*b.height)[0];
+    if(frame){const clip='frame-clip-'+widget.id.replace(/[^a-zA-Z0-9_-]/g,'');parts.push(`<defs><clipPath id="${clip}"><polygon points="${widgetCorners(frame).map(p=>`${p.x},${p.y}`).join(' ')}"/></clipPath></defs><g clip-path="url(#${clip})">${widgetSvg(widget)}</g>`);}else parts.push(widgetSvg(widget));
   }
 
   parts.push("</svg>");
@@ -90,6 +80,7 @@ export function boardToSvg(state: BoardState, options: Options = {}): string {
 }
 
 function widgetSvg(w: Widget): string {
+  w={...w,style:resolvedWidgetStyle(w)};
   const transform = `translate(${round(w.x)},${round(w.y)}) rotate(${round((w.rotation * 180) / Math.PI)},${round(w.width / 2)},${round(w.height / 2)})`;
 
   if (w.type === "image") {
@@ -174,7 +165,7 @@ function borderSvg(style: Style): string {
 
 function textSvg(w: Widget): string {
   const content=w.type==='frame'?'':w.content;if(!content.trim())return '';
-  const pad=10,maxWidth=Math.max(10,w.width-pad*2),lineHeight=w.style.fontSize*1.35;
+  const pad=w.type==='text'?0:10,maxWidth=w.type==='text'?Infinity:Math.max(10,w.width-pad*2),lineHeight=w.style.fontSize*1.35;
   const anchor=w.style.textAlign==='center'?'middle':w.style.textAlign==='right'?'end':'start';
   const x=w.style.textAlign==='center'?w.width/2:w.style.textAlign==='right'?w.width-pad:pad;
   const lines=wrapRich(content,maxWidth,w.style),blockHeight=lines.length*lineHeight;
