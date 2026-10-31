@@ -156,7 +156,7 @@ body.home-visible #layers-controls{display:none!important}
     const item=layerEntity(state,id);
     if(!item)return icon('group',17);
     if(item.type==='image')return `<img src="${escape(item.src)}" alt="" draggable="false">`;
-    const name=item.type==='sticky_note'?'sticky':item.type==='stroke'?'pen':item.type==='frame'?'frame':item.type==='connector'?'connector':item.type==='text'?'text':'shape';
+    const name=item.type==='sticky_note'?'sticky':item.type==='stroke'?'brush':item.type==='frame'?'frame':item.type==='connector'?'connector':item.type==='text'?'text':'shape';
     return icon(name,17);
   }
   function kind(id:string){const item=layerEntity(state,id);return state.groups.has(id)?`${leaves(id).length} objetos`:item?.type==='image'?'Imagem':item?.type==='text'?'Texto':item?.type==='connector'?'Conector':item?.type==='stroke'?'Desenho':item?.type==='frame'?'Quadro':item?.type==='sticky_note'?'Nota':'Forma';}

@@ -15,7 +15,8 @@ import {
 import { unionRect, widgetAABB, pointInWidget, widgetCorners, type Rect } from "./geometry";
 import type { Style, Widget } from "./model";
 import { parseRich } from "./richtext";
-import { strokeBounds, strokeOutline, type Stroke } from "./strokes";
+import { strokeBounds, type Stroke } from "./strokes";
+import {strokeSvgContent} from '../render/stroke-paint';
 import { borderPattern, canonicalShape, shapeDetails, shapePolygon } from "./shapes";
 import { DEFAULT_BACKGROUND } from "./background";
 import {resolvedWidgetStyle} from './style-scale';
@@ -212,11 +213,7 @@ function connectorSvg(connector: Connector, state: BoardState): string {
 }
 
 function strokeSvg(stroke: Stroke): string {
-  const points = strokeOutline(stroke.points);
-  if (points.length < 6) return "";
-  const pairs: string[] = [];
-  for (let i = 0; i < points.length; i += 2) pairs.push(`${round(points[i]!)},${round(points[i + 1]!)}`);
-  return `<polygon points="${pairs.join(" ")}" fill="${stroke.color}" opacity="${stroke.tool === "highlighter" ? 0.35 : 1}"/>`;
+  return strokeSvgContent(stroke);
 }
 
 function round(value: number): number {

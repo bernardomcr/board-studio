@@ -5,6 +5,7 @@ import { SHAPE_STYLE, nextId, type Widget } from "./core/model";
 import type { Vec } from "./core/geometry";
 import { borderPattern, patternedContour, shapeContours } from "./core/shapes";
 import {resolvedWidgetStyle} from './core/style-scale';
+import {configureRasterSampling} from './render/raster-quality';
 
 type Crop = { x: number; y: number; width: number; height: number };
 type MaskShape = "rectangle" | "ellipse" | "round_rectangle";
@@ -32,7 +33,7 @@ export function installImages(api: ImageAPI) {
   const layer = new Container();
   layer.sortableChildren = true;
   if (!api.nodeAt) world.addChild(layer);
-  const nodes = new Map<string, { container: Container; sprite: Sprite; mask: Graphics; border: Graphics; src: string }>();
+  const nodes = new Map<string, { container: Container; sprite: Sprite; mask: Graphics; border: Graphics; src: string; sig:string }>();
   const textures = new Map<string, Promise<Texture>>();
   let modal: HTMLElement | null = null;
   const selected = () => state.selection.size === 1 ? asImage(state.widgets.get([...state.selection][0]!)) : undefined;
@@ -61,7 +62,7 @@ export function installImages(api: ImageAPI) {
         const border = new Graphics();
         container.addChild(sprite, mask, border); sprite.mask = mask;
         parent.addChild(container);
-        node = { container, sprite, mask, border, src: "" }; nodes.set(w.id, node);
+        node = { container, sprite, mask, border, src: "", sig:'' }; nodes.set(w.id, node);
       }
       if (node.container.parent !== parent) parent.addChild(node.container);
       if (!api.nodeAt) {
@@ -71,6 +72,10 @@ export function installImages(api: ImageAPI) {
         node.container.zIndex = w.z;
       }
       const crop = w.crop ?? FULL;
+      if(node.src!==w.src)node.sig='';
+      const sig=[w.width,w.height,crop.x,crop.y,crop.width,crop.height,w.maskShape,w.flipX,w.flipY,w.opacity,w.style.borderWidth,w.style.borderScale,w.style.borderColor,w.style.borderStyle,w.style.borderOpacity,w.style.cornerRadius,Math.round(Math.log2(Math.max(.02,camera.scale))*2)].join('|');
+      if(node.sig!==sig){
+      node.sig=sig;
       // The picture and its outline have independent opacity controls.
       node.container.alpha = 1;
       node.sprite.alpha = Math.max(0, Math.min(1, w.opacity ?? 1));
@@ -112,6 +117,7 @@ export function installImages(api: ImageAPI) {
       node.sprite.scale.x = Math.abs(node.sprite.scale.x) * (w.flipX ? -1 : 1);
       node.sprite.scale.y = Math.abs(node.sprite.scale.y) * (w.flipY ? -1 : 1);
       node.sprite.position.set(w.flipX ? w.width + crop.x*imageWidth : -crop.x*imageWidth, w.flipY ? w.height + crop.y*imageHeight : -crop.y*imageHeight);
+      }
       if (node.src !== w.src) {
         node.src = w.src;
         let pending = textures.get(w.src);
@@ -119,7 +125,8 @@ export function installImages(api: ImageAPI) {
         const current = node, source = w.src;
         pending.then(texture => {
           if (current.container.destroyed || nodes.get(w.id) !== current || current.src !== source) return;
-          current.sprite.texture = texture; current.sprite.tint = 0xffffff;
+          configureRasterSampling(texture);
+          current.sprite.texture = texture; current.sprite.tint = 0xffffff; current.sig='';
           sync(); api.onChange?.();
         }).catch(() => notice("Não foi possível abrir esta imagem."));
       }

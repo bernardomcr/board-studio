@@ -32,7 +32,7 @@ import {
   type ConnectorShape,
   type Endpoint,
 } from "./core/connectors";
-import { distanceToStroke, simplify, strokeOutline, strokeBounds, type Stroke, type StrokePoint } from "./core/strokes";
+import { distanceToStroke, strokeBounds, type Stroke, type StrokePoint } from "./core/strokes";
 import { fromHtml, toHtml } from "./core/richtext";
 import { boardToSvg } from "./core/exportSvg";
 import { BoardScene } from "./render/scene";
@@ -50,7 +50,9 @@ import { installProjectFiles } from "./project-files";
 import {groupLeaves,memberSelection,enclosingGroup,groupSelection,ungroupSelection,captureSelection,duplicateSnapshot,transformSnapshot,selectedBounds,itemLocked,type EntitySnapshot} from "./core/groups";
 import {eraseStrokePoints} from "./core/eraser";
 import {lassoHits} from "./core/lasso";
-import { installDrawingUI } from "./drawing-ui";
+import { installDrawingUI, type DrawingSettings } from "./drawing-ui";
+import {installBrushPreview,installBrushCursor} from './brush-preview';
+import {installZoomUI} from './zoom-ui';
 import { installBackground } from "./background";
 import { DEFAULT_BACKGROUND, validateBoardBackground, type BoardBackground } from "./core/background";
 import {naturalText,resizeFreeText} from './core/text-layout';
@@ -67,7 +69,7 @@ await app.init({
   resizeTo: host,
   antialias: true,
   background: "#fbfaf7",
-  resolution: Math.min(window.devicePixelRatio || 1, 2),
+  resolution: Math.min(window.devicePixelRatio || 1, 3),
   autoDensity: true,
 });
 host.appendChild(app.canvas);
@@ -78,6 +80,7 @@ const gridLayer = new Graphics();
 const overlay = new Graphics();
 
 app.stage.addChild(gridLayer, world, overlay);
+const brushPreview=installBrushPreview(app.stage,camera);
 
 const STORAGE_KEY = "board-app:v1";
 let home:ReturnType<typeof installBoardHome>|undefined;
@@ -143,7 +146,7 @@ function loadBoard(stored?:SavedBoard): boolean {
 let saveTimer:ReturnType<typeof setTimeout>|null=null;
 function savedBoard():SavedBoard{return structuredClone({layerOrderVersion:1 as const,savedAt:Date.now(),title:document.getElementById("board-title")!.textContent??"Board",background:state.background??{...DEFAULT_BACKGROUND},widgets:[...state.widgets.values()],order:state.order,connectors:[...state.connectors.values()],connectorOrder:state.connectorOrder,strokes:[...state.strokes.values()],strokeOrder:state.strokeOrder,groups:[...state.groups.entries()],journal:bus.snapshot(),camera:{x:camera.x,y:camera.y,scale:camera.scale}});}
 async function persistBoard(){if(home&&!home.currentId())return;try{await writeStoredBoard(storageKey(),savedBoard());document.getElementById("save-warning")?.remove();}catch{let notice=document.getElementById("save-warning");if(!notice){notice=document.createElement("div");notice.id="save-warning";notice.style.cssText="position:fixed;bottom:60px;left:50%;transform:translateX(-50%);z-index:80;background:#fff9b1;padding:12px 18px;border-radius:8px;font:13px Segoe UI";document.body.append(notice);}notice.textContent="Não foi possível salvar automaticamente. Use Salvar arquivo para guardar seu trabalho.";}}
-function scheduleSave(){if(home&&!home.currentId())return;if(saveTimer)clearTimeout(saveTimer);saveTimer=setTimeout(()=>{void persistBoard();},400);}
+function scheduleSave(){if(home&&!home.currentId())return;if(saveTimer)clearTimeout(saveTimer);saveTimer=setTimeout(()=>{saveTimer=null;if(gesture.kind!=='none'){scheduleSave();return;}void persistBoard();},400);}
 window.addEventListener("pagehide",()=>{void persistBoard();});
 
 const state: BoardState = {
@@ -169,6 +172,7 @@ let images: ReturnType<typeof installImages> | undefined;
 let editorUI: ReturnType<typeof installEditorUI> | undefined;
 let connectorCompletion: ReturnType<typeof installConnectorCompletion> | undefined;
 let drawingUI: ReturnType<typeof installDrawingUI> | undefined;
+let brushCursor: ReturnType<typeof installBrushCursor> | undefined;
 let backgroundUI: ReturnType<typeof installBackground> | undefined;
 let layersUI: ReturnType<typeof installLayers> | undefined;
 let lastBackground:BoardBackground|undefined;
@@ -289,17 +293,18 @@ function rotateHandleScreen(): Vec | null {
 
 let activeGuides: Guide[] = [];
 let connectPreview: { from: Vec; to: Vec } | null = null;
+let connectionMagnet:Extract<Endpoint,{kind:'anchor'}>|null=null;
 
 function drawConnectPreview(): void {
   if (!connectPreview) return;
   const active=gesture.kind==="connect" ? gesture : pendingConnection;
   const source=active ? state.widgets.get(active.fromWidget) : undefined;
   const cursor=active?.current??connectPreview.to;
-  const candidate=connectionTarget(cursor),target=candidate?.id!==source?.id?candidate:undefined;
+  const picked=connectionPick(cursor,resolveEndpoint(active?.fromAnchor??{kind:'point',...connectPreview.from},state.widgets)??undefined,source?.id,active?.snapDisabled),target=picked?.widget;
   const fromAnchor=source ? (active?.fixed ? active.fromAnchor : {kind:"anchor" as const,widgetId:source.id,...facingAnchor(source,target?widgetCenter(target):cursor)}) : {kind:"point" as const,...connectPreview.from};
   const from=resolveEndpoint(fromAnchor!,state.widgets)??connectPreview.from;
-  const toAnchor=target ? {kind:"anchor" as const,widgetId:target.id,...connectionAttachment(target,cursor,from)} : {kind:"point" as const,...cursor};
-  const preview:Connector={id:"preview",type:"connector",start:fromAnchor!,end:toAnchor,shape:connectorDefault.shape,style:{strokeColor:"#3859ff",strokeWidth:2,endCap:connectorDefault.arrow?"arrow":"none"},z:0};
+  const toAnchor=target&&picked ? {kind:"anchor" as const,widgetId:target.id,...picked.anchor} : {kind:"point" as const,...cursor};
+  const preview:Connector={id:"preview",type:"connector",start:fromAnchor!,end:toAnchor,shape:active?.shape??connectorDefault.shape,style:{strokeColor:"#3859ff",strokeWidth:2,endCap:(active?.arrow??connectorDefault.arrow)?"arrow":"none"},z:0};
   const geometry=connectorGeometry(preview,state.widgets);
   const path=(geometry?.points ?? [connectPreview.from,connectPreview.to]).map(p=>camera.worldToScreen(p));
   const a=path[0]!,b=path[path.length-1]!;
@@ -309,6 +314,7 @@ function drawConnectPreview(): void {
   overlay.circle(b.x, b.y, 4).stroke({ width: 1.5, color: 0x3859ff });
   const hit = target;
   if(hit) overlay.poly(widgetCorners(hit).flatMap(p=>{const s=camera.worldToScreen(p);return [s.x,s.y]})).stroke({width:2,color:0x3859ff,alpha:.6});
+  drawConnectionTargets(cursor,source?.id);
 }
 
 function drawConnectionDots(w:Widget):void {
@@ -461,10 +467,11 @@ function endEdit(commit: boolean): void {
 
 function drawSelection(): void {
   overlay.clear();
-  if(tool==="hand")return;
+  if(['hand','brush','highlighter','eraser'].includes(tool))return;
   if(state.selection.size&&[...state.selection].every(id=>(state.widgets.get(id)??state.connectors.get(id)??state.strokes.get(id))?.hidden))return;
   const hover=hoveredConnectionWidget?state.widgets.get(hoveredConnectionWidget):undefined;
   if(hover&&(!state.selection.has(hover.id)||state.selection.size!==1)&&(tool==="select"||tool==="connector"))drawConnectionDots(hover);
+  if(gesture.kind==='reconnect'){const c=state.connectors.get(gesture.id),other=c?.[gesture.which==='start'?'end':'start'];drawConnectionTargets(gesture.current,other?.kind==='anchor'?other.widgetId:undefined);}
   if (state.selection.size === 0) {
     drawGuides();
     drawConnectPreview();
@@ -535,7 +542,7 @@ function drawSelection(): void {
 
 // ---------------------------------------------------------------- tools
 
-type Tool = "lasso" | "select" | "hand" | "connector" | "pen" | "highlighter" | "eraser" | WidgetType;
+type Tool = "lasso" | "select" | "hand" | "connector" | "brush" | "highlighter" | "eraser" | WidgetType;
 let pendingConnection: Extract<Gesture,{kind:"connect"}> | null = null;
 let connectorDefault: {shape:ConnectorShape; arrow:boolean} = {shape:"curved",arrow:true};
 let tool: Tool = "select";
@@ -545,7 +552,7 @@ let selectedShape: ShapeWidget["shape"] = "rectangle";
 function setTool(next: Tool): void {
   connectorCompletion?.close();
   tool = next;
-  if(next !== "connector") { pendingConnection=null; connectPreview=null; }
+  if(next !== "connector") { pendingConnection=null; connectPreview=null; connectionMagnet=null; }
   if (next !== "shape") editorUI?.closePanels();
   for (const btn of toolbar.querySelectorAll<HTMLButtonElement>("button[data-tool]")) {
     btn.classList.toggle("active", btn.dataset.tool === next);
@@ -555,10 +562,14 @@ function setTool(next: Tool): void {
   updateCursor();
   editorUI?.refresh();
   drawingUI?.refresh();
+  brushCursor?.update();
   drawSelection();
 }
 
 function updateCursor(): void {
+  if(tool==='connector'||gesture.kind==='connect'||gesture.kind==='reconnect'||pendingConnection){app.canvas.style.cursor='default';return;}
+  connectionMagnet=null;
+  if(tool==='brush'||tool==='highlighter'){app.canvas.style.cursor=spaceDown?'grab':'none';return;}
   app.canvas.style.cursor =
     tool === "hand" ? "grab" : tool === "select" ? "default" : "crosshair";
 }
@@ -568,7 +579,7 @@ toolbar.addEventListener("click", (e) => {
   if (!btn || btn.disabled || !btn.dataset.tool) return;
   if (btn.dataset.tool === "image") { imagePicker.click(); return; }
   if (btn.dataset.tool === "shape") { editorUI?.openShapes(); return; }
-  if (btn.dataset.tool === "connector") { editorUI?.openConnectors(); return; }
+  if (btn.dataset.tool === "connector") { if(tool==='connector')editorUI?.openConnectors();else setTool('connector');return; }
   if (btn.dataset.tool === "select") {setTool(tool==="select"?"hand":"select");return;}
   setTool(btn.dataset.tool as Tool);
 });
@@ -576,6 +587,7 @@ toolbar.addEventListener("click", (e) => {
 // ------------------------------------------------------------ chrome (UI)
 
 const zoomValue = document.getElementById("zoom-value")!;
+const zoomUI=installZoomUI({camera,onChange:()=>{gridDirty=true;refreshChrome();},fit:fitToContent});
 hud.hidden = true;
 
 document.getElementById("zoombar")!.addEventListener("click", (e) => {
@@ -679,14 +691,11 @@ function refreshChrome(): void {
   (document.getElementById("undo") as HTMLButtonElement).disabled = !bus.canUndo;
   (document.getElementById("redo") as HTMLButtonElement).disabled = !bus.canRedo;
   zoomValue.textContent = `${Math.round(camera.scale * 100)}%`;
+  zoomUI?.refresh();
 }
 
 function fitToContent(): void {
-  const rects = state.order
-    .map((id) => state.widgets.get(id))
-    .filter((w): w is Widget => Boolean(w)&&!w!.hidden)
-    .map(widgetAABB);
-  const all = unionRect(rects);
+  const all = selectedBounds(state,[...state.order,...state.connectorOrder,...state.strokeOrder]);
   if (!all) {
     camera.scale = 1;
     camera.x = 0;
@@ -708,11 +717,12 @@ type Gesture =
   | { kind: "marquee"; start: Vec; current: Vec }
   | { kind: "resize"; id: string; handle: HandleId; startWidget: Widget; moved: boolean }
   | { kind: "rotate"; id: string; startWidget: Widget; grabAngle: number; moved: boolean }
-  | { kind: "connect"; fromWidget: string; fromAnchor: Endpoint; current: Vec; fixed?: boolean; startedAt?:Vec }
+  | { kind: "connect"; fromWidget: string; fromAnchor: Endpoint; current: Vec; fixed?: boolean; startedAt?:Vec;shape?:ConnectorShape;arrow?:boolean;snapDisabled?:boolean }
   | { kind: "bend"; id:string; index:number; points:Vec[] }
   | {kind:"multi-rotate";initial:EntitySnapshot;center:Vec;angle:number}
-  | { kind: "reconnect"; id: string; which: "start" | "end"; current: Vec }
-  | { kind: "draw"; points: StrokePoint[]; tool: "pen" | "highlighter"; color:string; width:number; pressure:boolean }
+  | { kind: "reconnect"; id: string; which: "start" | "end"; current: Vec;snapDisabled?:boolean }
+  | { kind: "draw"; points: StrokePoint[]; tool: "brush" | "highlighter"; color:string; width:number; opacity:number;precision:boolean }
+  | {kind:'brush-adjust';start:Vec;tool:'brush'|'highlighter';initial:DrawingSettings}
   | {kind:"lasso";points:Vec[]}
   | { kind: "erase"; radius: number;partial:boolean };
 
@@ -764,8 +774,42 @@ function linkUnder(p: Vec): string | null {
 }
 
 function connectionTarget(p:Vec):Widget|undefined {
-  const direct = topmostAt(p); if(direct && direct.type!=="frame"&&!direct.hidden) return direct;
-  return [...state.order].reverse().map(id=>state.widgets.get(id)).find(w=>{if(!w||w.type==="frame"||w.hidden)return false;const anchor=anchorWorldOf(w,nearestAnchor(w,p));return !!anchor && Math.hypot(anchor.x-p.x,anchor.y-p.y)*camera.scale<14;});
+  const direct = topmostAt(p); if(direct && direct.type!=="frame"&&!direct.hidden&&!direct.locked) return direct;
+  return [...state.widgets.values()].sort((a,b)=>b.z-a.z).find(w=>{if(w.type==="frame"||w.hidden||w.locked)return false;const anchor=anchorWorldOf(w,nearestAnchor(w,p));return !!anchor && Math.hypot(anchor.x-p.x,anchor.y-p.y)*camera.scale<14;});
+}
+function nearbyConnectionTargets(p:Vec,excludeId?:string):Widget[]{
+  const view=camera.visibleWorldRect(),distance=(w:Widget)=>{const b=widgetAABB(w);return Math.hypot(Math.max(b.minX-p.x,0,p.x-b.maxX),Math.max(b.minY-p.y,0,p.y-b.maxY))*camera.scale;};
+  return [...state.widgets.values()].filter(w=>!w.hidden&&!w.locked&&w.type!=='frame'&&w.id!==excludeId&&rectIntersectsWidget(view,w)&&distance(w)<=320).sort((a,b)=>distance(a)-distance(b)||b.z-a.z).slice(0,8);
+}
+function visibleConnectionPort(w:Widget,anchor:Endpoint):boolean {
+  const point=resolveEndpoint(anchor,state.widgets);if(!point)return false;
+  const frame=[...state.widgets.values()].filter(f=>f.type==='frame'&&!f.hidden&&pointInWidget(f,widgetCenter(w))).sort((a,b)=>a.width*a.height-b.width*b.height)[0];
+  if(frame&&!pointInWidget(frame,point))return false;
+  const cover=topmostAt(point);return !cover||cover.id===w.id;
+}
+/** Enter/hold radii make magnetic ports stable instead of flickering at one threshold. */
+function connectionPick(p:Vec,from?:Vec,excludeId?:string,snapDisabled=false):{widget:Widget;anchor:Vec}|undefined {
+  if(snapDisabled){connectionMagnet=null;return;}
+  if(connectionMagnet){const w=state.widgets.get(connectionMagnet.widgetId),point=resolveEndpoint(connectionMagnet,state.widgets);if(w&&!w.hidden&&!w.locked&&w.id!==excludeId&&point&&visibleConnectionPort(w,connectionMagnet)&&Math.hypot(point.x-p.x,point.y-p.y)*camera.scale<=22)return {widget:w,anchor:{x:connectionMagnet.x,y:connectionMagnet.y}};}
+  connectionMagnet=null;
+  let best:{widget:Widget;anchor:Vec;distance:number}|undefined;
+  for(const w of nearbyConnectionTargets(p,excludeId))for(const port of connectionHandles(w)){const point=resolveEndpoint(port.anchor,state.widgets)!;const distance=Math.hypot(point.x-p.x,point.y-p.y)*camera.scale;if(distance<=14&&visibleConnectionPort(w,port.anchor)&&(!best||distance<best.distance))best={widget:w,anchor:{x:port.anchor.x,y:port.anchor.y},distance};}
+  if(best){connectionMagnet={kind:'anchor',widgetId:best.widget.id,...best.anchor};return best;}
+  const widget=connectionTarget(p);if(!widget||widget.id===excludeId)return;
+  return {widget,anchor:connectionAttachment(widget,p,from)};
+}
+function connectionPointer(p:Vec,from:Endpoint,constrain:boolean):Vec {
+  const origin=resolveEndpoint(from,state.widgets);if(!constrain||!origin)return p;
+  const dx=p.x-origin.x,dy=p.y-origin.y,angle=Math.round(Math.atan2(dy,dx)/(Math.PI/4))*Math.PI/4,distance=Math.hypot(dx,dy);
+  return {x:origin.x+Math.cos(angle)*distance,y:origin.y+Math.sin(angle)*distance};
+}
+function drawConnectionTargets(p:Vec,excludeId?:string):void {
+  for(const w of nearbyConnectionTargets(p,excludeId))for(const port of connectionHandles(w)){
+    if(!visibleConnectionPort(w,port.anchor))continue;const worldPoint=resolveEndpoint(port.anchor,state.widgets)!,s=camera.worldToScreen(worldPoint);
+    const active=connectionMagnet?.widgetId===w.id&&Math.hypot(connectionMagnet.x-port.anchor.x,connectionMagnet.y-port.anchor.y)<.001;
+    if(active)overlay.circle(s.x,s.y,11).fill({color:0x3859ff,alpha:.17});
+    overlay.circle(s.x,s.y,active?5:4).fill(active?0x3859ff:0xffffff).stroke({width:active?2:1.5,color:0x3859ff});
+  }
 }
 function connectionAttachment(w:Widget,p:Vec,from?:Vec):Vec {
   const nearest=nearestAnchor(w,p),edge=anchorWorldOf(w,nearest)!;
@@ -778,7 +822,7 @@ function connectionAttachment(w:Widget,p:Vec,from?:Vec):Vec {
 function hoverConnectionTarget(p:Vec):Widget|undefined {
   const direct=connectionTarget(p);if(direct&&!direct.locked)return direct;
   const margin=36/camera.scale;
-  return [...state.order].reverse().map(id=>state.widgets.get(id)).find(w=>{if(!w||w.locked||w.hidden||w.type==='frame')return false;const b=widgetAABB(w);return p.x>=b.minX-margin&&p.x<=b.maxX+margin&&p.y>=b.minY-margin&&p.y<=b.maxY+margin;});
+  return [...state.widgets.values()].sort((a,b)=>b.z-a.z).find(w=>{if(w.locked||w.hidden||w.type==='frame')return false;const b=widgetAABB(w);return p.x>=b.minX-margin&&p.x<=b.maxX+margin&&p.y>=b.minY-margin&&p.y<=b.maxY+margin;});
 }
 function connectionHandles(w:Widget):Array<{point:Vec;anchor:Endpoint}> {
   if(w.type==="frame")return [];
@@ -808,7 +852,8 @@ function topmostAt(p: Vec): Widget | undefined {
 /** Canvas picking follows the same cross-type stack as the layers panel. */
 function frontmostEntityAt(p:Vec){
   const widget=topmostAt(p),connector=connectorAt(p,6/camera.scale);
-  const stroke=[...state.strokes.values()].filter(st=>!st.hidden&&distanceToStroke(p,st)<6/camera.scale).sort((a,b)=>b.z-a.z)[0];
+  const tolerance=6/camera.scale;
+  const stroke=[...state.strokes.values()].filter(st=>{if(st.hidden)return false;const bounds=strokeBounds(st);return p.x>=bounds.minX-tolerance&&p.x<=bounds.maxX+tolerance&&p.y>=bounds.minY-tolerance&&p.y<=bounds.maxY+tolerance&&distanceToStroke(p,st)<tolerance;}).sort((a,b)=>b.z-a.z)[0];
   return [widget,connector,stroke].filter(item=>!!item).sort((a,b)=>b!.z-a!.z)[0];
 }
 
@@ -885,7 +930,7 @@ app.canvas.addEventListener("pointerdown", (e) => {
   }
 
   // rejeição de palma: toque não desenha com caneta/marca-texto/borracha
-  if (e.pointerType === "touch" && (tool === "pen" || tool === "highlighter" || tool === "eraser")) {
+  if (e.pointerType === "touch" && (tool === "brush" || tool === "highlighter" || tool === "eraser")) {
     return;
   }
 
@@ -898,12 +943,13 @@ app.canvas.addEventListener("pointerdown", (e) => {
     }
   }
 
-  if (tool === "pen" || tool === "highlighter") {
-    const settings=drawingUI?.settings(tool) ?? {width:tool==="highlighter"?18:3,color:tool==="highlighter"?"#f5d128":"#191812",pressure:false};
-    const pressure = settings.pressure && e.pointerType === "pen" && e.pressure > 0 ? e.pressure : 0.5;
-    const base = settings.width/2;
-    const r = Math.max(0.6, base * (0.4 + 1.2 * pressure));
+  if (tool === "brush" || tool === "highlighter") {
+    const settings=drawingUI?.settings(tool) ?? {width:tool==="highlighter"?18:6,color:tool==="highlighter"?"#f5d128":"#191812",opacity:tool==='highlighter'?.35:1,precision:false};
+    brushCursor?.move(e.clientX,e.clientY);
+    if(e.altKey&&e.button===0){e.preventDefault();gesture={kind:'brush-adjust',start:{x:e.clientX,y:e.clientY},initial:settings,tool};brushCursor?.adjusting(true);return;}
+    const r = settings.width/2;
     gesture = { kind: "draw", points: [{ x: p.x, y: p.y, r }], tool,...settings };
+    brushPreview.update(gesture.points,settings);
     return;
   }
 
@@ -919,15 +965,15 @@ app.canvas.addEventListener("pointerdown", (e) => {
   if(tool === "select" || tool === "connector") {
     const candidates=[...new Set([...(state.selection.size===1?state.selection:[]),hoveredConnectionWidget,hoverConnectionTarget(p)?.id])].flatMap(id=>{const w=id?state.widgets.get(id):undefined;return w&&!w.hidden&&!w.locked?[w]:[];});
     for(const w of candidates)for(const h of connectionHandles(w)) if(Math.hypot(h.point.x-screen.x,h.point.y-screen.y)<10){
-      gesture={kind:"connect",fromWidget:w.id,fromAnchor:h.anchor,current:p,fixed:true,startedAt:p};
+      connectionMagnet=null;gesture={kind:"connect",fromWidget:w.id,fromAnchor:h.anchor,current:p,fixed:true,startedAt:p,shape:'curved',arrow:true,snapDisabled:e.ctrlKey||e.metaKey};app.canvas.style.cursor='default';
       connectPreview={from:resolveEndpoint(h.anchor,state.widgets)!,to:p};drawSelection();return;
     }
   }
   if (tool === "connector") {
-    if(pendingConnection){gesture={...pendingConnection,current:p};pendingConnection=null;return;}
-    const hit = connectionTarget(p);
+    if(pendingConnection){gesture={...pendingConnection,current:connectionPointer(p,pendingConnection.fromAnchor,e.shiftKey),snapDisabled:e.ctrlKey||e.metaKey};pendingConnection=null;return;}
+    connectionMagnet=null;const hit = e.ctrlKey||e.metaKey?undefined:connectionTarget(p);
     const anchor = hit ? nearestAnchor(hit,p) : null;
-    gesture = {kind:"connect", fromWidget:hit?.id ?? "", fromAnchor:hit && anchor ? {kind:"anchor",widgetId:hit.id,...anchor} : {kind:"point",x:p.x,y:p.y},current:p,startedAt:p};
+    gesture = {kind:"connect", fromWidget:hit?.id ?? "", fromAnchor:hit && anchor ? {kind:"anchor",widgetId:hit.id,...anchor} : {kind:"point",x:p.x,y:p.y},current:p,startedAt:p,snapDisabled:e.ctrlKey||e.metaKey};
     connectPreview = {from:resolveEndpoint(gesture.fromAnchor,state.widgets)!,to:p};
     drawSelection();return;
   }
@@ -955,6 +1001,7 @@ app.canvas.addEventListener("pointerdown", (e) => {
         if (Math.hypot(es.x - screen.x, es.y - screen.y) <= 9) {
           bus.beginTransaction("Reconectar");
           gesture = { kind: "reconnect", id: selectedConn.id, which, current: p };
+          connectionMagnet=null;app.canvas.style.cursor='default';
           return;
         }
       }
@@ -1043,6 +1090,7 @@ if (state.selection.size > 1) {
 });
 
 app.canvas.addEventListener("pointermove", (e) => {
+  if(tool==='brush'||tool==='highlighter')brushCursor?.move(e.clientX,e.clientY);
   const prev = pointers.get(e.pointerId);
   if (prev) pointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
 
@@ -1068,12 +1116,19 @@ app.canvas.addEventListener("pointermove", (e) => {
     const hover=hoverConnectionTarget(p),nextHover=hover?.id??null;
     if(nextHover!==hoveredConnectionWidget){hoveredConnectionWidget=nextHover;drawSelection();}
     const atDot=hover&&connectionHandles(hover).some(h=>Math.hypot(h.point.x-screen.x,h.point.y-screen.y)<=10);
-    app.canvas.style.cursor = atDot?"crosshair":hoveredLink ? "pointer" : "default";
+    const selected=state.selection.size===1?state.connectors.get([...state.selection][0]!):undefined,geometry=selected&&!selected.locked?connectorGeometry(selected,state.widgets):null;
+    const grab=geometry&&[geometry.points[0]!,geometry.points.at(-1)!,...connectorEditPoints(selected!,geometry)].some(point=>{const s=camera.worldToScreen(point);return Math.hypot(s.x-screen.x,s.y-screen.y)<=10;});
+    app.canvas.style.cursor = atDot?"pointer":grab?'grab':hoveredLink ? "pointer" : "default";
   }
-  if(gesture.kind==='none'&&tool==='connector'){const nextHover=hoverConnectionTarget(p)?.id??null;if(nextHover!==hoveredConnectionWidget){hoveredConnectionWidget=nextHover;drawSelection();}}
+  if(gesture.kind==='none'&&tool==='connector'){const hover=hoverConnectionTarget(p),nextHover=hover?.id??null;if(nextHover!==hoveredConnectionWidget){hoveredConnectionWidget=nextHover;drawSelection();}app.canvas.style.cursor=!pendingConnection&&hover&&connectionHandles(hover).some(h=>Math.hypot(h.point.x-screen.x,h.point.y-screen.y)<=10)?'pointer':'default';}
 
-  if(pendingConnection && gesture.kind === "none") {pendingConnection.current=p;connectPreview={from:resolveEndpoint(pendingConnection.fromAnchor,state.widgets)!,to:p};drawSelection();}
+  if(pendingConnection && gesture.kind === "none") {pendingConnection.current=connectionPointer(p,pendingConnection.fromAnchor,e.shiftKey);pendingConnection.snapDisabled=e.ctrlKey||e.metaKey;connectPreview={from:resolveEndpoint(pendingConnection.fromAnchor,state.widgets)!,to:pendingConnection.current};drawSelection();}
   switch (gesture.kind) {
+    case 'brush-adjust':{
+      const dx=e.clientX-gesture.start.x,dy=e.clientY-gesture.start.y;
+      drawingUI?.adjust(gesture.tool,{width:gesture.initial.width+dx/Math.max(.02,camera.scale)*.4,opacity:gesture.initial.opacity-dy*.005},false);
+      return;
+    }
     case "bend": {const index=gesture.index,c=state.connectors.get(gesture.id),points=gesture.points.map((v,i)=>i===index?p:v);const singleCurve=(c?.shape==='curved'||c?.shape==='elbowed')&&!c.waypoints?.length&&points.length===1;bus.exec({op:"CONNECTOR_UPDATE",payload:{id:gesture.id,patch:singleCurve?{controlPoint:points[0],waypoints:null}:{waypoints:points,controlPoint:null,...(c?.shape==="straight"?{shape:"curved"}:{})}}});return;}
     case "multi-rotate":{let angle=Math.atan2(p.y-gesture.center.y,p.x-gesture.center.x)-gesture.angle;if(e.shiftKey)angle=Math.round(angle/(Math.PI/12))*Math.PI/12;bus.exec({op:"BATCH",payload:{label:"Girar seleção",commands:transformSnapshot(state,gesture.initial,0,0,1,1,gesture.center,angle)}});return;}
     case "create": {
@@ -1132,22 +1187,9 @@ app.canvas.addEventListener("pointermove", (e) => {
         const pos = camera.screenToWorld({x:sample.clientX-bounds.left,y:sample.clientY-bounds.top});
         const last = gesture.points[gesture.points.length - 1]!;
         if (Math.hypot(pos.x-last.x,pos.y-last.y)*camera.scale < .3) continue;
-        const pressure = gesture.pressure && sample.pointerType === "pen" && sample.pressure > 0 ? sample.pressure : .5;
-        const base = gesture.width/2;
-        const targetRadius = Math.max(.3,base*(.4+1.2*pressure));
-        gesture.points.push({...pos,r:last.r*.35+targetRadius*.65});
+        gesture.points.push({...pos,r:gesture.width/2});
       }
-      overlay.clear();
-      const outline = strokeOutline(gesture.points);
-      for (let i=0;i<outline.length;i+=2) {
-        const pos=camera.worldToScreen({x:outline[i]!,y:outline[i+1]!}); outline[i]=pos.x;outline[i+1]=pos.y;
-      }
-      if (outline.length >= 6) {
-        overlay.poly(outline).fill({
-          color: gesture.color,
-          alpha: gesture.tool === "highlighter" ? 0.35 : 1,
-        });
-      }
+      brushPreview.update(gesture.points,gesture);
       return;
     }
     case "lasso":{gesture.points.push(p);const points=gesture.points.map(p=>camera.worldToScreen(p));overlay.clear().poly(points.flatMap(p=>[p.x,p.y])).fill({color:0x3859ff,alpha:.05}).stroke({color:0x3859ff,width:1});return;}
@@ -1157,14 +1199,14 @@ app.canvas.addEventListener("pointermove", (e) => {
       return;
     }
     case "reconnect": {
-      gesture.current = p;
       const connector = state.connectors.get(gesture.id);
       if (connector) {
-        const target = connectionTarget(p);
-        let endpoint: Endpoint = { kind: "point", x: p.x, y: p.y };
+        const other = gesture.which === "start" ? connector.end : connector.start;
+        gesture.current=connectionPointer(p,other,e.shiftKey);gesture.snapDisabled=e.ctrlKey||e.metaKey;
+        const picked=connectionPick(gesture.current,resolveEndpoint(other,state.widgets)??undefined,other.kind==='anchor'?other.widgetId:undefined,gesture.snapDisabled),target=picked?.widget;
+        let endpoint: Endpoint = { kind: "point", x: gesture.current.x, y: gesture.current.y };
         if (target) {
-          const other = gesture.which === "start" ? connector.end : connector.start;
-          const anchor = connectionAttachment(target,p,resolveEndpoint(other,state.widgets)??undefined);
+          const anchor = picked!.anchor;
           endpoint = { kind: "anchor", widgetId: target.id, x: anchor.x, y: anchor.y };
         }
         bus.exec({
@@ -1176,8 +1218,9 @@ app.canvas.addEventListener("pointermove", (e) => {
       return;
     }
     case "connect": {
-      gesture.current = p;
-      connectPreview = {from:resolveEndpoint(gesture.fromAnchor,state.widgets)??p,to:p};
+      gesture.current = connectionPointer(p,gesture.fromAnchor,e.shiftKey);gesture.snapDisabled=e.ctrlKey||e.metaKey;
+      app.canvas.style.cursor='default';
+      connectPreview = {from:resolveEndpoint(gesture.fromAnchor,state.widgets)??p,to:gesture.current};
       drawSelection();
       return;
     }
@@ -1252,10 +1295,12 @@ function endGesture(e: PointerEvent): void {
   if (pointers.size < 2) lastPinch = null;
 
   if(e.type==="pointercancel"){
+    brushPreview.clear();brushCursor?.adjusting(false);drawingUI?.commitSettings();
     bus.endTransaction();gesture={kind:"none"};pendingConnection=null;connectPreview=null;activeGuides=[];drawSelection();updateCursor();return;
   }
   let completionId:string|undefined;
   switch (gesture.kind) {
+    case 'brush-adjust':drawingUI?.commitSettings();brushCursor?.adjusting(false);break;
     case "create": {
       if (e.type === "pointercancel") break;
       const {widget,start,current} = gesture;
@@ -1276,13 +1321,15 @@ function endGesture(e: PointerEvent): void {
     case "drag": break;
     case "draw": {
       const raw = gesture.points;
-      if (raw.length >= 1) {
+      brushPreview.clear();
+      if (raw.length >= 1&&gesture.opacity>0) {
         const points = raw;
         const stroke: Stroke = {
           id: `stroke_${Date.now().toString(36)}_${Math.floor(Math.random() * 1e4)}`,
           type: "stroke",
           tool: gesture.tool,
           color: gesture.color,
+          opacity:gesture.opacity,precision:gesture.precision,
           points,
           z: 0,
         };
@@ -1294,6 +1341,7 @@ function endGesture(e: PointerEvent): void {
     case "reconnect": {
       const c=state.connectors.get(gesture.id);
       if(c&&c[gesture.which].kind==="point"&&c[gesture.which==="start"?"end":"start"].kind==="anchor")completionId=c.id;
+      connectionMagnet=null;app.canvas.style.cursor='default';
       break;
     }
     case "connect": {
@@ -1306,18 +1354,18 @@ function endGesture(e: PointerEvent): void {
         const distance=Math.max(180,Math.min(320,180/camera.scale));
         gesture.current={x:originPoint.x+dx/length*distance,y:originPoint.y+dy/length*distance};
       }
-      const target = connectionTarget(gesture.current);
+      const picked=connectionPick(gesture.current,originPoint,source?.id,gesture.snapDisabled),target=picked?.widget;
       const origin = gesture.fromAnchor;
       const startPoint = source ? widgetCenter(source) : {x:origin.x,y:origin.y};
       const finish = gesture.current;
-      if (target?.id !== source?.id || !source) {
+      if (!source||!pointInWidget(source,finish)) {
         if (Math.hypot(finish.x-startPoint.x,finish.y-startPoint.y)*camera.scale > 4) {
           const startAnchor = source ? (gesture.fixed ? gesture.fromAnchor : facingAnchor(source,target ? widgetCenter(target) : finish)) : null;
-          const endAnchor = target ? connectionAttachment(target,finish,source&&startAnchor?anchorWorldOf(source,startAnchor)??undefined:resolveEndpoint(origin,state.widgets)??undefined) : null;
+          const endAnchor = target ? picked!.anchor : null;
           const connector: Connector = {id:crypto.randomUUID(),type:"connector",
             start:source && startAnchor ? {kind:"anchor",widgetId:source.id,...startAnchor} : origin,
             end:target && endAnchor ? {kind:"anchor",widgetId:target.id,...endAnchor} : {kind:"point",...finish},
-            shape:connectorDefault.shape,style:{strokeColor:"#1a1a1a",strokeWidth:2,endCap:connectorDefault.arrow?"arrow":"none"},z:0};
+            shape:gesture.shape??connectorDefault.shape,style:{strokeColor:"#1a1a1a",strokeWidth:2,endCap:(gesture.arrow??connectorDefault.arrow)?"arrow":"none"},z:0};
           bus.exec({op:"BATCH",payload:{label:"Criar conexão",commands:[
             {op:"CONNECTOR_CREATE",payload:connector},
             {op:"SELECTION_SET",payload:[connector.id]},
@@ -1360,9 +1408,11 @@ app.canvas.addEventListener(
     e.preventDefault();
     connectorCompletion?.close();
     if (e.ctrlKey || !e.shiftKey) {
-      camera.zoomAt({ x: e.offsetX, y: e.offsetY }, Math.exp(-e.deltaY * 0.0025));
+      const unit=e.deltaMode===1?16:e.deltaMode===2?camera.height:1;
+      camera.zoomAt({ x: e.offsetX, y: e.offsetY }, Math.exp(-e.deltaY*unit*0.0025));
     } else {
-      camera.panByScreen(-e.deltaX, -e.deltaY);
+      const unit=e.deltaMode===1?16:e.deltaMode===2?camera.height:1;
+      camera.panByScreen(-e.deltaX*unit, -e.deltaY*unit);
     }
     gridDirty = true;
     refreshChrome();
@@ -1392,6 +1442,7 @@ window.addEventListener("keydown", (e) => {
   if (e.code === "Space") {
     spaceDown = true;
     app.canvas.style.cursor = "grab";
+    brushCursor?.update();e.preventDefault();
     return;
   }
   const mod = e.ctrlKey || e.metaKey;
@@ -1410,9 +1461,7 @@ window.addEventListener("keydown", (e) => {
     return;
   }
   if (mod && e.key === "0") {
-    camera.scale = 1;
-    camera.x = 0;
-    camera.y = 0;
+    e.preventDefault();camera.zoomAt({x:camera.width/2,y:camera.height/2},1/camera.scale);
     gridDirty = true;
     refreshChrome();
     return;
@@ -1470,7 +1519,9 @@ window.addEventListener("keydown", (e) => {
       break;
     case "p":
     case "P":
-      setTool("pen");
+    case "b":
+    case "B":
+      setTool("brush");
       break;
     case "e":
     case "E":
@@ -1522,6 +1573,7 @@ window.addEventListener("keydown", (e) => {
       break;
     }
     case "Escape":
+      brushPreview.clear();brushCursor?.adjusting(false);
       if (!helpPanel.hasAttribute("hidden")) {
         toggleHelp(false);
         break;
@@ -1541,6 +1593,7 @@ window.addEventListener("keyup", (e) => {
   if (e.code === "Space") {
     spaceDown = false;
     updateCursor();
+    brushCursor?.update();
   }
 });
 
@@ -1579,7 +1632,9 @@ editorUI = installEditorUI({state,bus,camera,setTool:t=>setTool(t as Tool),getTo
   getGroupScope:()=>isolatedGroup,onExitGroup:()=>{const group=isolatedGroup;isolatedGroup=null;if(group)bus.exec({op:"SELECTION_SET",payload:groupLeaves(state,group)});refreshChrome();},
   onAddWaypoint:()=>editWaypoint(false),onRemoveWaypoint:()=>editWaypoint(true),onCopyImage:()=>{void copySelectionImage();}});
 installIcons();
-drawingUI=installDrawingUI({getTool:()=>tool,setTool:t=>setTool(t as Tool)});
+drawingUI=installDrawingUI({getTool:()=>tool,setTool:t=>setTool(t as Tool),onChange:()=>brushCursor?.update()});
+brushCursor=installBrushCursor({camera,getTool:()=>tool,getSettings:()=>drawingUI!.settings(tool==='highlighter'?'highlighter':'brush'),temporaryHand:()=>spaceDown||gesture.kind==='pan'});
+app.canvas.addEventListener('pointerleave',()=>brushCursor?.leave());
 const projectFiles=installProjectFiles({state,bus,camera,sync:()=>{gridDirty=true;syncScene();drawSelection();refreshChrome();if(home&&!home.currentId())void home.adoptCurrent();else{home?.updateCurrent();scheduleSave();}}});
 const title=document.getElementById("board-title")!;title.contentEditable="true";title.setAttribute("role","textbox");title.setAttribute("aria-label","Nome do board");title.setAttribute("spellcheck","false");title.addEventListener("keydown",e=>{if(e.key==="Enter"){e.preventDefault();title.blur();}});title.addEventListener("blur",()=>{if(!title.textContent?.trim())title.textContent="Board sem título";home?.updateCurrent({title:title.textContent??"Board"});scheduleSave();});
 
@@ -1590,6 +1645,8 @@ let fps = 0;
 let fpsAt = performance.now();
 
 app.ticker.add(() => {
+  const resolution=Math.min(window.devicePixelRatio||1,3);
+  if(resolution!==app.renderer.resolution){const width=app.screen.width,height=app.screen.height;app.renderer.resolution=resolution;app.renderer.resize(width,height);syncSize();syncScene();brushPreview.request();gridDirty=true;}
   if (camera.scale !== lastScale) {
     lastScale = camera.scale;
     gridDirty = true;
@@ -1612,6 +1669,7 @@ app.ticker.add(() => {
       }
     }
     syncScene();
+    brushPreview.request();brushCursor?.update();
     if (state.selection.size > 0) {drawSelection();positionContextPanel(document.getElementById("selection-properties")!,state,camera);}
   }
 
@@ -1629,7 +1687,7 @@ app.ticker.add(() => {
     fpsAt = now;
   }
 
-  const snapped = snapPoint(cursorWorld, gridState);
+  if(!hud.hidden){const snapped = snapPoint(cursorWorld, gridState);
   hud.textContent = [
     `tool      ${tool}`,
     `objetos   ${state.widgets.size}   seleção ${state.selection.size}`,
@@ -1637,7 +1695,7 @@ app.ticker.add(() => {
     `mundo     ${cursorWorld.x.toFixed(1)}, ${cursorWorld.y.toFixed(1)} ${snapped.snapped ? "• snap" : ""}`,
     `undo/redo ${bus.undoStack.length}/${bus.redoStack.length}`,
     `fps       ${fps}`,
-  ].join("\n");
+  ].join("\n");}
 });
 
 home=installBoardHome({capture:savedBoard,open:async data=>{

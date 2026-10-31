@@ -1,12 +1,7 @@
 /**
- * Traço livre (F7).
- *
- * O chunk do Miro que implementa isso (c_ComputeCurveWidget) só carrega sob uso da
- * caneta; por isso esta implementação é uma RECONSTRUÇÃO a partir do comportamento
- * observável, não uma cópia de fórmula. Marcada como [derivado] na documentação.
- *
- * Modelo: lista de pontos com raio variável + geração de contorno (outline),
- * que é como traços com pressão são preenchidos em canvas.
+ * Vector brush centerlines with optional locally fitted precision curves.
+ * Legacy pressure samples retain their individual radii. Painting uses local
+ * stroke geometry, never a self-intersecting closed ribbon polygon.
  */
 
 import type { Vec } from "./geometry";
@@ -18,7 +13,7 @@ export interface StrokePoint {
   r: number;
 }
 
-export type StrokeTool = "pen" | "highlighter" | "eraser";
+export type StrokeTool = "brush" | "pen" | "highlighter" | "eraser";
 
 export interface Stroke {
   name?: string;
@@ -28,134 +23,91 @@ export interface Stroke {
   type: "stroke";
   tool: Exclude<StrokeTool, "eraser">;
   color: string;
+  /** One opacity for the complete painted stroke, including self-crossings. */
+  opacity?: number;
+  /** Fit a smooth local spline; ordinary brush keeps the sampled centerline. */
+  precision?: boolean;
   points: StrokePoint[];
   z: number;
 }
 
-/** Interpolate the sampled path while keeping the original endpoints fixed. */
-function smoothPoints(points: StrokePoint[]): StrokePoint[] {
-  if (points.length < 3) return points;
-  const out: StrokePoint[] = [points[0]!];
-  for (let i = 0; i < points.length - 1; i++) {
-    const a = points[Math.max(0, i - 1)]!, b = points[i]!, c = points[i + 1]!, d = points[Math.min(points.length - 1, i + 2)]!;
-    const count = Math.max(2, Math.min(16, Math.ceil(Math.hypot(c.x - b.x, c.y - b.y) / Math.max(.5, Math.min(b.r, c.r)))));
-    for (let k = 1; k <= count; k++) {
-      const t = k / count, t2 = t * t, t3 = t2 * t;
-      const curve = (v0: number, v1: number, v2: number, v3: number) => .5 * ((2*v1) + (-v0+v2)*t + (2*v0-5*v1+4*v2-v3)*t2 + (-v0+3*v1-3*v2+v3)*t3);
-      out.push({x:curve(a.x,b.x,c.x,d.x),y:curve(a.y,b.y,c.y,d.y),r:b.r+(c.r-b.r)*t});
+export interface StrokeCubic {p0:StrokePoint;p1:Vec;p2:Vec;p3:StrokePoint}
+export interface StrokeGeometry {knots:StrokePoint[];points:StrokePoint[];curves:StrokeCubic[];uniform:boolean;radius:number}
+const geometryCache=new WeakMap<StrokePoint[],{length:number;lastX:number;lastY:number;lastR:number;precision:boolean;geometry:StrokeGeometry}>();
+export const strokeOpacity=(stroke:Stroke):number=>Math.max(0,Math.min(1,stroke.opacity??(stroke.tool==='highlighter'?.35:1)));
+const safePoint=(point:StrokePoint):StrokePoint=>({x:point.x,y:point.y,r:Math.max(.01,point.r)});
+
+/** Local smoothing never changes the finished interior when more input arrives. */
+function precisionPoint(points:StrokePoint[],index:number):StrokePoint{
+  const point=safePoint(points[index]!);
+  if(points.length<3||index===0||index===points.length-1)return point;
+  const weights=[1,4,6,4,1];
+  let x=0,y=0;for(let j=-2;j<=2;j++){const p=points[Math.max(0,Math.min(points.length-1,index+j))]!;x+=p.x*weights[j+2]!;y+=p.y*weights[j+2]!;}
+  x=x/16-point.x;y=y/16-point.y;
+  // Sparse fast reversals must retain their intended turn, rather than averaging
+  // hundreds of board units away. Smoothing only removes local hand jitter.
+  const length=Math.hypot(x,y),limit=Math.max(.2,Math.min(2,point.r*.25)),amount=length>limit?limit/length:1;
+  return {x:point.x+x*amount,y:point.y+y*amount,r:point.r};
+}
+function cubicBetween(a:StrokePoint,b:StrokePoint,c:StrokePoint,d:StrokePoint):StrokeCubic{
+  const ab=Math.max(.0001,Math.sqrt(Math.hypot(b.x-a.x,b.y-a.y))),bc=Math.max(.0001,Math.sqrt(Math.hypot(c.x-b.x,c.y-b.y))),cd=Math.max(.0001,Math.sqrt(Math.hypot(d.x-c.x,d.y-c.y)));
+  const tangent=(key:'x'|'y')=>{
+    const m1=((b[key]-a[key])/ab-(c[key]-a[key])/(ab+bc)+(c[key]-b[key])/bc)*bc;
+    const m2=((c[key]-b[key])/bc-(d[key]-b[key])/(bc+cd)+(d[key]-c[key])/cd)*bc;
+    return [b[key]+m1/3,c[key]-m2/3];
+  };
+  const x=tangent('x'),y=tangent('y');return {p0:b,p1:{x:x[0]!,y:y[0]!},p2:{x:x[1]!,y:y[1]!},p3:c};
+}
+export function strokeGeometry(stroke:Stroke):StrokeGeometry{
+  const raw=stroke.points,last=raw[raw.length-1],precision=stroke.precision??stroke.tool==='pen',cached=geometryCache.get(raw);
+  if(cached&&cached.length===raw.length&&cached.lastX===last?.x&&cached.lastY===last?.y&&cached.lastR===last?.r&&cached.precision===precision)return cached.geometry;
+  const geometry=strokeGeometryRange(stroke,0,raw.length-1);geometryCache.set(raw,{length:raw.length,lastX:last?.x??NaN,lastY:last?.y??NaN,lastR:last?.r??NaN,precision,geometry});return geometry;
+}
+/** Compute only the requested raw-segment range and its local tangent neighbours. */
+export function strokeGeometryRange(stroke:Stroke,start=0,end=stroke.points.length-1):StrokeGeometry{
+  const raw=stroke.points,precision=stroke.precision??stroke.tool==='pen',from=Math.max(0,start),to=Math.min(raw.length-1,end),memo=new Map<number,StrokePoint>();
+  const at=(i:number)=>{const index=Math.max(0,Math.min(raw.length-1,i));let p=memo.get(index);if(!p){p=precision?precisionPoint(raw,index):safePoint(raw[index]!);memo.set(index,p);}return p;};
+  const knots:StrokePoint[]=[],curves:StrokeCubic[]=[],points:StrokePoint[]=[];
+  for(let i=from;i<=to;i++)knots.push(at(i));
+  if(precision&&raw.length>2&&knots.length>1){
+    points.push(knots[0]!);
+    for(let i=from;i<to;i++){
+      const b=at(i),c=at(i+1),a=i>0?at(i-1):{...b,x:2*b.x-c.x,y:2*b.y-c.y},d=i+2<raw.length?at(i+2):{...c,x:2*c.x-b.x,y:2*c.y-b.y};
+      const curve=cubicBetween(a,b,c,d);curves.push(curve);
+      const length=Math.hypot(curve.p1.x-b.x,curve.p1.y-b.y)+Math.hypot(curve.p2.x-curve.p1.x,curve.p2.y-curve.p1.y)+Math.hypot(c.x-curve.p2.x,c.y-curve.p2.y);
+      const count=Math.max(2,Math.min(24,Math.ceil(length/Math.max(.75,Math.min(b.r,c.r)*.45))));
+      for(let j=1;j<=count;j++){const t=j/count,u=1-t;points.push({x:u*u*u*b.x+3*u*u*t*curve.p1.x+3*u*t*t*curve.p2.x+t*t*t*c.x,y:u*u*u*b.y+3*u*u*t*curve.p1.y+3*u*t*t*curve.p2.y+t*t*t*c.y,r:b.r+(c.r-b.r)*t});}
     }
-  }
-  return out;
+  }else for(const point of knots)points.push(point);
+  const radius=knots[0]?.r??0,uniform=knots.every(p=>Math.abs(p.r-radius)<=Math.max(.0001,radius*.001));
+  return {knots,points,curves,uniform,radius};
 }
 
-/** Distância ponto→segmento (usada na simplificação e no hit-test). */
-function pointSegmentDistance(p: Vec, a: Vec, b: Vec): number {
-  const dx = b.x - a.x;
-  const dy = b.y - a.y;
-  const len2 = dx * dx + dy * dy;
-  if (len2 === 0) return Math.hypot(p.x - a.x, p.y - a.y);
-  let t = ((p.x - a.x) * dx + (p.y - a.y) * dy) / len2;
-  t = Math.min(1, Math.max(0, t));
-  return Math.hypot(p.x - (a.x + t * dx), p.y - (a.y + t * dy));
-}
-
-/** Ramer–Douglas–Peucker sobre os pontos (mantendo o raio médio do trecho). */
-export function simplify(points: StrokePoint[], tolerance = 1.2): StrokePoint[] {
-  if (points.length <= 2) return points;
-
-  const keep = new Array<boolean>(points.length).fill(false);
-  keep[0] = true;
-  keep[points.length - 1] = true;
-
-  const stack: Array<[number, number]> = [[0, points.length - 1]];
-  while (stack.length) {
-    const [first, last] = stack.pop()!;
-    let maxDist = 0;
-    let index = -1;
-    for (let i = first + 1; i < last; i++) {
-      const d = pointSegmentDistance(points[i]!, points[first]!, points[last]!);
-      if (d > maxDist) {
-        maxDist = d;
-        index = i;
-      }
-    }
-    if (maxDist > tolerance && index > 0) {
-      keep[index] = true;
-      stack.push([first, index], [index, last]);
-    }
-  }
-
-  return points.filter((_, i) => keep[i]);
-}
-
-/** Contorno fechado do traço, para preencher com fill. */
-export function strokeOutline(points: StrokePoint[]): number[] {
-  points = smoothPoints(points);
-  if (points.length === 0) return [];
-  if (points.length === 1) {
-    const p = points[0]!;
-    const out: number[] = [];
-    for (let i = 0; i < 32; i++) {
-      const a = (i / 32) * Math.PI * 2;
-      out.push(p.x + Math.cos(a) * p.r, p.y + Math.sin(a) * p.r);
-    }
-    return out;
-  }
-
-  const left: number[] = [];
-  const right: number[] = [];
-
-  for (let i = 0; i < points.length; i++) {
-    const prev = points[Math.max(0, i - 1)]!;
-    const next = points[Math.min(points.length - 1, i + 1)]!;
-    let dx = next.x - prev.x;
-    let dy = next.y - prev.y;
-    const len = Math.hypot(dx, dy) || 1;
-    dx /= len;
-    dy /= len;
-    const nx = -dy;
-    const ny = dx;
-    const p = points[i]!;
-    left.push(p.x + nx * p.r, p.y + ny * p.r);
-    right.push(p.x - nx * p.r, p.y - ny * p.r);
-  }
-
-  // Round end caps share the exact same outline in the live preview and saved path.
-  const end = points[points.length - 1]!, before = points[points.length - 2]!;
-  const endAngle = Math.atan2(end.y-before.y,end.x-before.x) + Math.PI/2;
-  for (let i=1;i<=12;i++) { const a=endAngle-i*Math.PI/12; left.push(end.x+Math.cos(a)*end.r,end.y+Math.sin(a)*end.r); }
-  // direita ao contrário fecha o polígono
-  for (let i = points.length - 1; i >= 0; i--) {
-    left.push(right[i * 2]!, right[i * 2 + 1]!);
-  }
-  const start=points[0]!, after=points[1]!;
-  const startAngle=Math.atan2(after.y-start.y,after.x-start.x)-Math.PI/2;
-  for (let i=1;i<=12;i++) {const a=startAngle-i*Math.PI/12;left.push(start.x+Math.cos(a)*start.r,start.y+Math.sin(a)*start.r);}
-  return left;
-}
-
+const boundsCache=new WeakMap<StrokeGeometry,{minX:number;minY:number;maxX:number;maxY:number}>();
 export function strokeBounds(stroke: Stroke) {
+  const geometry=strokeGeometry(stroke),cached=boundsCache.get(geometry);if(cached)return cached;
   let minX = Infinity;
   let minY = Infinity;
   let maxX = -Infinity;
   let maxY = -Infinity;
-  for (const p of stroke.points) {
+  for (const p of geometry.points) {
     minX = Math.min(minX, p.x - p.r);
     minY = Math.min(minY, p.y - p.r);
     maxX = Math.max(maxX, p.x + p.r);
     maxY = Math.max(maxY, p.y + p.r);
   }
-  return { minX, minY, maxX, maxY };
+  const bounds={minX,minY,maxX,maxY};boundsCache.set(geometry,bounds);return bounds;
 }
 
 export function distanceToStroke(p: Vec, stroke: Stroke): number {
   let best = Infinity;
-  for (let i = 1; i < stroke.points.length; i++) {
-    best = Math.min(best, pointSegmentDistance(p, stroke.points[i - 1]!, stroke.points[i]!));
+  const points=strokeGeometry(stroke).points;
+  for (let i = 1; i < points.length; i++) {
+    const a=points[i-1]!,b=points[i]!,dx=b.x-a.x,dy=b.y-a.y,length=dx*dx+dy*dy,t=length?Math.max(0,Math.min(1,((p.x-a.x)*dx+(p.y-a.y)*dy)/length)):0;
+    best = Math.min(best, Math.hypot(p.x-a.x-t*dx,p.y-a.y-t*dy)-(a.r+(b.r-a.r)*t));
   }
-  if (stroke.points.length === 1) {
-    best = Math.hypot(p.x - stroke.points[0]!.x, p.y - stroke.points[0]!.y);
+  if (points.length === 1) {
+    best = Math.hypot(p.x - points[0]!.x, p.y - points[0]!.y)-points[0]!.r;
   }
-  const width = stroke.points[0]?.r ?? 0;
-  return Math.max(0, best - width);
+  return Math.max(0, best);
 }

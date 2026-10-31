@@ -20,14 +20,15 @@ No Windows, `TESTAR.cmd` compila e abre a versão de produção em `http://local
 - Criação de boards em branco, sem templates. O botão de seleção liga/desliga: desligado, arrastar navega pelo canvas; Espaço também permite navegar temporariamente.
 - Controle Fundo na parte inferior: claro, escuro, cor personalizada, grade opcional e imagem de fundo com tamanho proporcional e opacidade, salvo por board e no arquivo editável.
 - Menu rápido de formas e biblioteca expandida em “Mais formas”, com 77 entradas pesquisáveis, geometrias próprias e exportação SVG.
-- Conectores retos, curvos e em cotovelo; pontos intermediários, seis terminações, inversão da direção, tracejado/pontilhado e múltiplos rótulos posicionáveis. Uma ponta solta pode criar um objeto conectado ou continuar livre.
+- Conectores retos, curvos e em cotovelo; portas magnéticas nos objetos próximos, pontos intermediários, seis terminações, inversão da direção, tracejado/pontilhado e múltiplos rótulos posicionáveis. Ctrl desativa o encaixe; Shift restringe a direção. Uma ponta solta pode criar um objeto conectado ou continuar livre.
 - Imagens com original preservado, substituição, tamanho original, máscaras retangular/elíptica/arredondada, espelhamento, opacidade e recorte não destrutivo. Recorte circular com prévia e borda personalizada independente da foto.
 - Grupos aninhados com formas, imagens, conectores e traços; movimentação, escala, rotação, duplicação e bloqueio.
 - Painel Camadas com grupos recolhíveis, nomes, miniaturas, ocultar, bloquear, seleção múltipla e ordenação por arraste ou botões. A ordem visual inclui fotos, texto, formas, traços e conectores.
 - Texto livre sem quebra automática por caixa: arrastar as alças aumenta/reduz as letras. Transformação com posição, proporção, tamanho e rotação.
 - Bordas proporcionais com barra de espessura e presets; acompanham o tamanho dos objetos. Pontos de conexão ao passar o mouse e curvas ajustáveis com prévia estável.
 - 25 famílias tipográficas locais, formatação de texto, paletas com transparente e barras de ícones específicas para cada seleção.
-- Caneta, marca-texto, borracha de traço inteiro/precisão e seleção com laço.
+- Pincel vetorial com precisão opcional, opacidade e ajuste por Alt + botão esquerdo: horizontal altera tamanho, vertical altera opacidade. Prévia incremental, cruzamentos sem retalhos, marca-texto, borracha de traço inteiro/precisão e seleção com laço. Desenhos antigos da caneta continuam compatíveis.
+- Zoom de 2% a 2.000%, presets, percentual personalizado e ajuste à tela de todos os tipos de objetos. Fontes são rasterizadas novamente conforme tamanho, zoom e densidade da tela, com filtragem na redução e limites de memória por textura.
 - Desfazer/refazer, exportação PNG/SVG e arquivos editáveis `.board.json`.
 
 Os boards ficam no IndexedDB do navegador. O aplicativo não possui backend, sincronização em nuvem ou upload de conteúdo. O armazenamento é separado por navegador e origem: use sempre o mesmo endereço/porta e exporte arquivos para transportar seus boards. Limpar os dados do navegador remove o armazenamento local.

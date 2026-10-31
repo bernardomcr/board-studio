@@ -3,6 +3,7 @@ import type { BoardState, CommandBus } from './core/commands';
 import type { Camera } from './core/camera';
 import { BACKGROUND_MAX_BYTES, DEFAULT_BACKGROUND, type BackgroundImage, type BackgroundPatch, type BoardBackground } from './core/background';
 import { icon } from './icons';
+import {configureRasterSampling} from './render/raster-quality';
 
 interface BackgroundAPI {
   state: BoardState;
@@ -97,6 +98,7 @@ body.home-visible #board-background-controls{display:none!important}
           const requested = source;
           void Assets.load<Texture>(requested).then(texture => {
             if (source !== requested || !current().image || sprite.destroyed) return;
+            configureRasterSampling(texture);
             sprite.texture = texture; loadedSource = requested; lastBackground = undefined; sync(); api.onChange?.();
           }).catch(() => { if (source === requested) { importError = 'Não foi possível abrir a imagem de fundo.'; renderedBackground = undefined; render(); } });
         }

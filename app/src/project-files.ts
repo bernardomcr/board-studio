@@ -106,7 +106,8 @@ export function validateBoardFile(value: unknown): BoardFile {
   const strokes: Stroke[] = list(data.strokes).map(raw => {
     const s = record(raw), points = list(s.points, 200000); totalPoints += points.length;
     if (totalPoints > 1000000) fail("O arquivo contém pontos de desenho demais.");
-    return { id: id(s.id),name:s.name===undefined?undefined:str(s.name,1000),hidden:!!s.hidden,locked:!!s.locked,type: one(s.type, ["stroke"] as const), tool: one(s.tool, ["pen", "highlighter"] as const), color: color(s.color), z: number(s.z),
+    return { id: id(s.id),name:s.name===undefined?undefined:str(s.name,1000),hidden:!!s.hidden,locked:!!s.locked,type: one(s.type, ["stroke"] as const), tool: one(s.tool, ["brush", "pen", "highlighter"] as const), color: color(s.color), z: number(s.z),
+      opacity:s.opacity===undefined?undefined:number(s.opacity,0,1),precision:s.precision===undefined?undefined:typeof s.precision==='boolean'?s.precision:fail('Precisão de pincel inválida.'),
       points: points.map(value => { const p = record(value); return { x: number(p.x), y: number(p.y), r: number(p.r, .001, 10000) }; }) };
   });
   const seen = new Set<string>(); unique(widgets, seen); unique(connectors, seen); unique(strokes, seen);

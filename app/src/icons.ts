@@ -1,6 +1,6 @@
 /** Lucide's ISC-licensed icon family; explicit imports keep the editor bundle small. */
 import {
-  MousePointer2, Hand, StickyNote, Shapes, Spline, Type, Pencil, Highlighter, Eraser,
+  MousePointer2, Hand, StickyNote, Shapes, Spline, Type, Pencil, Paintbrush, Highlighter, Eraser,
   LassoSelect, Frame, Image, Undo2, Redo2, House, Search, LayoutGrid, List,
   Star, Ellipsis, X, Copy, Trash2, Folder, ArrowDownWideNarrow, ArrowLeft,
   ArrowRight, ArrowUp, ArrowDown, Download, Upload, CircleHelp, LockKeyhole,
@@ -16,7 +16,7 @@ import {
 
 const symbols:Record<string,IconNode>={
   select:MousePointer2,hand:Hand,sticky:StickyNote,sticky_note:StickyNote,shape:Shapes,
-  connector:Spline,text:Type,pen:Pencil,highlighter:Highlighter,eraser:Eraser,
+  connector:Spline,text:Type,pen:Pencil,brush:Paintbrush,precision:Spline,highlighter:Highlighter,eraser:Eraser,
   lasso:LassoSelect,frame:Frame,image:Image,undo:Undo2,redo:Redo2,home:House,
   search:Search,grid:LayoutGrid,list:List,star:Star,more:Ellipsis,close:X,
   duplicate:Copy,trash:Trash2,folder:Folder,sort:ArrowDownWideNarrow,

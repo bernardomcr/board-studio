@@ -10,9 +10,9 @@ export interface Point {
   y: number;
 }
 
-/** Limites observados no comportamento do board; ajustáveis depois. */
+/** Miro's current live zoom controls: 2% through 2,000% (October 2026). */
 export const MIN_SCALE = 0.02;
-export const MAX_SCALE = 8;
+export const MAX_SCALE = 20;
 
 export class Camera {
   /** Posição do centro da tela, em coordenadas de mundo. */

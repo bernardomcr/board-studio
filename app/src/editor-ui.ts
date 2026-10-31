@@ -157,7 +157,7 @@ export function installEditorUI(api: EditorUIApi) {
   function applyStroke(field:string,value:string|number) {
     bus.beginTransaction('Formatar traço');for(const id of state.selection){const s=state.strokes.get(id);if(!s||s.locked)continue;
       const average=s.points.reduce((sum,p)=>sum+p.r,0)/Math.max(1,s.points.length);
-      bus.exec({op:'STROKE_UPDATE',payload:{id,patch:field==='color'?{color:value}:{points:s.points.map(p=>({...p,r:p.r*Math.max(.1,Number(value))/(Math.max(.05,average)*2)}))}}});
+      bus.exec({op:'STROKE_UPDATE',payload:{id,patch:field==='color'?{color:value}:field==='opacity'?{opacity:Math.max(0,Math.min(100,Number(value)))/100}:{points:s.points.map(p=>({...p,r:p.r*Math.max(.5,Number(value))/(Math.max(.05,average)*2)}))}}});
     }bus.endTransaction();
   }
   function action(name:string) {
@@ -260,7 +260,7 @@ export function installEditorUI(api: EditorUIApi) {
     if(input.dataset.image){bus.beginTransaction('Formatar imagem');for(const w of selected())if(w.type==='image'&&!w.locked)bus.exec({op:'WIDGET_UPDATE',payload:{id:w.id,patch:{[input.dataset.image]:input.dataset.image==='opacity'?Math.max(0,Math.min(100,Number(input.value)))/100:input.value}}});bus.endTransaction();}
     else if(input.dataset.captionIndex!==undefined||input.dataset.captionPosition!==undefined){const c=connectors()[0];if(!c||c.locked)return;const i=Number(input.dataset.captionIndex??input.dataset.captionPosition),captions=[...(c.captions??[])],captionPositions=captions.map((_,n)=>c.captionPositions?.[n]??(n+1)/(captions.length+1));if(input.dataset.captionIndex!==undefined)captions[i]=input.value;else captionPositions[i]=Math.max(.02,Math.min(.98,Number(input.value)/100));bus.exec({op:'CONNECTOR_UPDATE',payload:{id:c.id,patch:{captions,captionPositions}}});}
     else if(input.dataset.connector)applyConnector(input.dataset.connector,input.dataset.connector==='strokeWidth'?Math.max(1,Math.min(30,Number(input.value)||1)):input.value);
-    else if(input.dataset.stroke)applyStroke(input.dataset.stroke,input.dataset.stroke==='width'?Math.max(.1,Math.min(60,Number(input.value)||1)):input.value);
+    else if(input.dataset.stroke)applyStroke(input.dataset.stroke,input.dataset.stroke==='width'?Math.max(.5,Math.min(2048,Number(input.value)||1)):input.value);
     else if(input.dataset.field){
       const field=input.dataset.field;
       if(field==='fontFamily'){const target=[...state.selection].join('|');await loadBoardFont(input.value);if(target!==[...state.selection].join('|'))return;}
@@ -302,10 +302,10 @@ export function installEditorUI(api: EditorUIApi) {
   function refresh() {
     if(pointerInteraction){refreshAfterPointer=true;return;}
     positionContextPanel(properties,state,api.camera);
-    const currentTool=api.getTool(),labels:Record<string,string>={shape:'Arraste para desenhar a forma · Shift mantém a proporção · Esc cancela',sticky_note:'Clique ou arraste para criar uma nota adesiva',frame:'Arraste para criar um quadro',connector:'Arraste entre objetos ou clique no início e no fim · Arraste as alças para ajustar',text:'Clique para adicionar texto',hand:'Arraste para mover a tela',pen:'Desenhe no board · Esc para selecionar',highlighter:'Realce livremente no board'};
+    const currentTool=api.getTool(),labels:Record<string,string>={shape:'Arraste para desenhar a forma · Shift mantém a proporção · Esc cancela',sticky_note:'Clique ou arraste para criar uma nota adesiva',frame:'Arraste para criar um quadro',connector:'Arraste entre objetos ou clique no início e no fim · Arraste as alças para ajustar',text:'Clique para adicionar texto',hand:'Arraste para mover a tela',brush:'Pinte no board · Alt + arraste para ajustar tamanho e opacidade',highlighter:'Realce livremente no board'};
     hint.textContent=labels[currentTool]??'';hint.hidden=!hint.textContent;
     const ids=[...state.selection],selectionKey=ids.join('|'),widgets=selected(),cs=connectors(),strokes=ids.map(id=>state.strokes.get(id)).filter(s=>!!s),scope=api.getGroupScope?.();
-    properties.hidden=!ids.length||['hand','pen','highlighter','eraser'].includes(currentTool);
+    properties.hidden=!ids.length||['hand','brush','highlighter','eraser'].includes(currentTool);
     if(selectionKey!==displayedSelection){closeMenus();displayedSelection=selectionKey;renderKey='';}
     if(properties.hidden)return;
     if(properties.contains(document.activeElement)&&document.activeElement?.matches('input,select,textarea'))return;
@@ -316,7 +316,7 @@ export function installEditorUI(api: EditorUIApi) {
     if(cs.length===ids.length&&cs[0])html+=connectorToolbar(cs[0]);
     else if(strokes.length===ids.length&&strokes[0]){
       const s=strokes[0],width=s.points.reduce((sum,p)=>sum+p.r*2,0)/Math.max(1,s.points.length);
-      html+=menu('stroke','Traço da caneta',icon('pen'),palette('stroke','color','Cor do traço',s.color)+number('stroke','width','Espessura do traço',width,.1,60,.5));
+      html+=menu('stroke','Traço do pincel',icon('brush'),palette('stroke','color','Cor do traço',s.color)+number('stroke','width','Espessura do traço',width,.5,2048,.5)+number('stroke','opacity','Opacidade do traço',(s.opacity??(s.tool==='highlighter'?.35:1))*100,0,100));
     }else if(w){
       if(single&&w.type==='shape')html+=shapeMenu(w)+separator;
       if(allText){

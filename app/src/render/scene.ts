@@ -10,12 +10,14 @@ import { Container, Graphics, Text } from "pixi.js";
 import type { BoardState } from "../core/commands";
 import { widgetAABB, rectsIntersect, pointInWidget, widgetCorners, type Rect } from "../core/geometry";
 import { connectorGeometry, connectorBounds, connectorCaptionPoints } from "../core/connectors";
-import { strokeBounds, strokeOutline } from "../core/strokes";
+import { strokeBounds, type StrokePoint } from "../core/strokes";
+import {paintStroke} from './stroke-paint';
 import { parseRich, type Run } from "../core/richtext";
 import { paintConnector } from "./connector-paint";
 import type { Widget } from "../core/model";
 import { borderPattern, canonicalShape, patternedContour, shapeContours, shapePolygon, shapeDetails } from "../core/shapes";
 import {resolvedWidgetStyle} from '../core/style-scale';
+import {fitTextResolution,textRasterDensity,TEXT_SAMPLING} from './text-quality';
 
 interface Node {
   container: Container;
@@ -25,6 +27,7 @@ interface Node {
   type: Widget["type"];
   /** assinatura do último layout, evita reconstruir a cada frame */
   sig: string;
+  backgroundSig: string;
 }
 
 export class BoardScene {
@@ -37,7 +40,8 @@ export class BoardScene {
   private connectorNodes = new Map<string, Graphics>();
   private connectorLabels = new Map<string, Text[]>();
   private strokeNodes = new Map<string, Graphics>();
-  private clipContainers = new Map<string, { container: Container; mask: Graphics }>();
+  private strokePaintKeys=new Map<string,{points:StrokePoint[];length:number;lastX:number;lastY:number;lastR:number;color:string;tool:string;opacity?:number;precision?:boolean}>();
+  private clipContainers = new Map<string, { container: Container; mask: Graphics; sig:string }>();
   /** retângulos clicáveis de link, em coordenadas locais do objeto */
   private links = new Map<string, Array<{ x: number; y: number; w: number; h: number; url: string }>>();
   private textResolution = 2;
@@ -58,6 +62,7 @@ export class BoardScene {
       if (!state.strokes.has(id)) {
         node.destroy();
         this.strokeNodes.delete(id);
+        this.strokePaintKeys.delete(id);
       }
     }
 
@@ -71,14 +76,9 @@ export class BoardScene {
         this.strokeNodes.set(id, node);
         node.label=id;this.layer.addChild(node);
       }
-      node.clear();
-
-      const outline = strokeOutline(stroke.points);
-      if (outline.length >= 6) {
-        node.poly(outline).fill({
-          color: stroke.color,
-          alpha: stroke.tool === "highlighter" ? 0.35 : 1,
-        });
+      const last=stroke.points[stroke.points.length-1]!,key=this.strokePaintKeys.get(id);
+      if(!key||key.points!==stroke.points||key.length!==stroke.points.length||key.lastX!==last.x||key.lastY!==last.y||key.lastR!==last.r||key.color!==stroke.color||key.tool!==stroke.tool||key.opacity!==stroke.opacity||key.precision!==stroke.precision){
+        paintStroke(node,stroke);this.strokePaintKeys.set(id,{points:stroke.points,length:stroke.points.length,lastX:last.x,lastY:last.y,lastR:last.r,color:stroke.color,tool:stroke.tool,opacity:stroke.opacity,precision:stroke.precision});
       }
 
       node.visible=!stroke.hidden&&(!visible||rectsIntersect(visible,strokeBounds(stroke)));
@@ -123,6 +123,7 @@ export class BoardScene {
         let label = labels[i];
         if (!label) {
           label = new Text({
+            ...TEXT_SAMPLING,
             text: "",
             resolution: this.textResolution,
             style: { fontFamily: "Arial, sans-serif", fontSize: 12, fill: "#42413a" },
@@ -132,7 +133,8 @@ export class BoardScene {
           this.layer.addChild(label);
         }
         label.text = caption.text;
-        if (label.resolution !== this.textResolution) label.resolution = this.textResolution;
+        const resolution=fitTextResolution(label,this.textResolution);
+        if (label.resolution !== resolution) label.resolution = resolution;
         label.position.set(caption.position.x, caption.position.y - 10);
         label.zIndex = connector.z + .5;
         label.visible = node.visible && !!caption.text;
@@ -182,7 +184,7 @@ export class BoardScene {
     return best;
   }
 
-  private clipFor(frame: Widget): { container: Container; mask: Graphics } {
+  private clipFor(frame: Widget): { container: Container; mask: Graphics; sig:string } {
     let entry = this.clipContainers.get(frame.id);
     if (!entry) {
       const container = new Container();
@@ -190,12 +192,12 @@ export class BoardScene {
       container.addChild(mask);
       container.mask = mask;
       this.layer.addChild(container);
-      entry = { container, mask };
+      entry = { container, mask, sig:'' };
       this.clipContainers.set(frame.id, entry);
     }
     const { container, mask } = entry;
-    mask.clear();
-    mask.poly(widgetCorners(frame).flatMap(p=>[p.x,p.y])).fill({ color: 0xffffff });
+    const sig=[frame.x,frame.y,frame.width,frame.height,frame.rotation].join('|');
+    if(entry.sig!==sig){entry.sig=sig;mask.clear();mask.poly(widgetCorners(frame).flatMap(p=>[p.x,p.y])).fill({ color: 0xffffff });}
     container.zIndex = -1000 + frame.z;
     container.visible = true;
     return entry;
@@ -205,9 +207,7 @@ export class BoardScene {
 
   sync(state: BoardState, visible?: Rect, zoom = 1): void {
     this.zoom = zoom;
-    // Rasterize at the displayed pixel density instead of magnifying a 1x bitmap.
-    // Half-step buckets avoid texture churn on every wheel event.
-    this.textResolution = Math.min(16, Math.max(2, Math.ceil((globalThis.devicePixelRatio || 1) * zoom * 1.25 * 2) / 2));
+    this.textResolution = textRasterDensity(zoom);
     this.syncStrokes(state, visible);
     this.syncConnectors(state, visible);
 
@@ -265,7 +265,7 @@ export class BoardScene {
     const graphics = new Graphics();
     const text = new Container();
     container.addChild(graphics, text);
-    return { container, graphics, text, type: widget.type, sig: "" };
+    return { container, graphics, text, type: widget.type, sig: "", backgroundSig:'' };
   }
 
   private paint(node: Node, w: Widget): void {
@@ -275,8 +275,9 @@ export class BoardScene {
     container.position.set(w.x + w.width / 2, w.y + w.height / 2);
     container.rotation = w.rotation;
 
-    graphics.clear();
-    drawBackground(graphics, w, this.zoom);
+    const style=w.style;
+    const backgroundSig=[w.type,w.width,w.height,w.type==='shape'?w.shape:'',style.fillColor,style.fillOpacity,style.borderColor,style.borderWidth,style.borderScale,style.borderStyle,style.borderOpacity,style.cornerRadius,Math.round(Math.log2(Math.max(.02,this.zoom))*2)].join('|');
+    if(node.backgroundSig!==backgroundSig){node.backgroundSig=backgroundSig;graphics.clear();drawBackground(graphics,w,this.zoom);}
 
     this.layoutText(node, w);
     void text;
@@ -286,7 +287,7 @@ export class BoardScene {
 
   private layoutText(node: Node, w: Widget): void {
     if (w.type === "image") return;
-    for (const child of node.text.children) if (child instanceof Text && child.resolution !== this.textResolution) child.resolution = this.textResolution;
+    for (const child of node.text.children) if (child instanceof Text){const resolution=fitTextResolution(child,this.textResolution);if(child.resolution!==resolution)child.resolution=resolution;}
     const pad = w.type==='text'?0:10;
     const maxWidth = Math.max(1, w.width - pad * 2);
     const content = w.type === "frame" ? w.title : w.content;
@@ -312,6 +313,7 @@ export class BoardScene {
 
       if (w.type === "frame") {
         const title = new Text({
+          ...TEXT_SAMPLING,
           text: content || "Quadro",
           resolution: this.textResolution,
           style: {
@@ -321,6 +323,7 @@ export class BoardScene {
             fill: "#55544e",
           },
         });
+        title.resolution=fitTextResolution(title,this.textResolution);
         title.position.set(2, -24);
         node.text.addChild(title);
         node.text.position.set(0, 0);
@@ -397,7 +400,8 @@ function splitWords(run: Run): string[] {
 
 function makeRunText(token: string, run: Run, w: Widget, resolution: number): Text {
   const isLink = Boolean(run.link);
-  return new Text({
+  const node=new Text({
+    ...TEXT_SAMPLING,
     text: token,
     resolution,
     style: {
@@ -409,6 +413,8 @@ function makeRunText(token: string, run: Run, w: Widget, resolution: number): Te
       lineHeight: w.style.fontSize * 1.35,
     },
   });
+  node.resolution=fitTextResolution(node,resolution);
+  return node;
 }
 
 function placeLine(

@@ -31,7 +31,7 @@ test('hover dots pull a live curve that commits unchanged and bends without a ju
     return blue;
   });
   expect(pixels).toBeGreaterThan(100);expect(await page.evaluate(()=>window.__board.state.selection.size)).toBe(0);
-  await page.mouse.move(460,325);await expect(page.locator('#app canvas')).toHaveCSS('cursor','crosshair');
+  await page.mouse.move(460,325);await expect(page.locator('#app canvas')).toHaveCSS('cursor','pointer');
   await page.mouse.down();await page.mouse.move(920,595,{steps:20});
   expect(await page.evaluate(()=>window.__board.gesture().kind)).toBe('connect');
   // Read the cubic actually painted by Pixi before pointer release, rather than

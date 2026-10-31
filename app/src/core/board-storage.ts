@@ -61,6 +61,20 @@ export async function writeStoredBoard(key: string, data: unknown): Promise<void
     tx.oncomplete = () => resolve();
     tx.onerror = tx.onabort = () => reject(tx.error ?? request.error ?? new Error("Falha ao salvar o board no computador."));
   });
+  // The optional legacy cache is synchronous. Avoid serializing large drawings
+  // and embedded images a second time after the durable structured clone.
+  // Count references in the journal too: JSON duplicates shared point arrays and
+  // original image strings even after those objects were erased from the board.
+  let points=0,imageBytes=0,visited=0;const pending:unknown[]=[data];
+  while(pending.length){
+    const value=pending.pop();if(!value||typeof value!=='object')continue;
+    if(++visited>10000)return;
+    for(const [field,item]of Object.entries(value)){
+      if(field==='points'&&Array.isArray(item)){points+=item.length;if(points>12000)return;}
+      else if(typeof item==='string'&&item.startsWith('data:image/')){imageBytes+=item.length;if(imageBytes>1000000)return;}
+      else if(item&&typeof item==='object')pending.push(item);
+    }
+  }
   // A full browser quota must not make a successfully committed board look unsaved.
   try { localStorage.setItem(key, JSON.stringify(data)); } catch { /* IndexedDB contains the complete record. */ }
 }

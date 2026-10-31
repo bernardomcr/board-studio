@@ -73,12 +73,13 @@ test('connector paths, patterns, terminations and positioned labels persist',asy
   const c=await page.evaluate(()=>window.__board.state.connectors.get('link'));expect(c.style.endCap).toBe('diamond');expect(c.style.strokeStyle).toBe('dotted');expect(c.waypoints.length).toBeGreaterThan(0);expect(c.captions).toEqual(['Uma ligação']);expect(c.captionPositions).toEqual([.3]);
 });
 
-test('pen preview and committed paths agree after pan and at multiple zoom levels',async({page})=>{
+test('brush preview and committed paths agree after pan and at multiple zoom levels',async({page})=>{
   await blank(page);
   for(const scale of [.5,1,3]){
     await page.evaluate(scale=>{const b=window.__board;b.bus.exec({op:'SELECTION_SET',payload:[]});b.camera.x=1300;b.camera.y=-800;b.camera.scale=scale;},scale);
-    await page.locator('[data-tool="pen"]').click();await page.mouse.move(450,500);await page.mouse.down();await page.mouse.move(650,520,{steps:20});
-    const live=await page.evaluate(()=>{const b=window.__board,g=b.gesture(),r=b.app.stage.children[2].getBounds();return {x:r.x,right:r.x+r.width,radius:g.points[0].r};});
+    await page.locator('[data-tool="brush"]').click();await page.mouse.move(450,500);await page.mouse.down();await page.mouse.move(650,520,{steps:20});
+    await page.evaluate(()=>new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve))));
+    const live=await page.evaluate(()=>{const b=window.__board,g=b.gesture(),r=b.app.stage.children.find(n=>n.label==='brush-preview').getBounds();return {x:r.x,right:r.x+r.width,radius:g.points[0].r};});
     expect(Math.abs(live.x-(450-live.radius*scale))).toBeLessThan(2);expect(Math.abs(live.right-(650+live.radius*scale))).toBeLessThan(2);
     await page.mouse.up();const end=await page.evaluate(()=>{const b=window.__board,stroke=[...b.state.strokes.values()].at(-1);return b.camera.worldToScreen(stroke.points.at(-1));});expect(end.x).toBeCloseTo(650,3);expect(end.y).toBeCloseTo(520,3);
   }
