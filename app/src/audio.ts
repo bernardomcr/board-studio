@@ -45,7 +45,7 @@ export function installAudio(api:AudioAPI){
   // camera frame. Playback owns other fields (playhead/time), which stay live.
   const authoredStyles=new WeakMap<HTMLElement,Record<string,string>>();
   const styles=(element:HTMLElement,values:Record<string,string>)=>{let previous=authoredStyles.get(element);if(!previous){previous={};authoredStyles.set(element,previous);}for(const [key,value]of Object.entries(values))if(previous[key]!==value){previous[key]=value;if(key.startsWith('--'))element.style.setProperty(key,value);else (element.style as unknown as Record<string,string>)[key]=value;}};
-  const {state,bus,camera}=api,players=new Map<string,Player>();let popup:HTMLDivElement|null=null,recording:HTMLDivElement|null=null,playFrame=0;
+  const {state,bus,camera}=api,players=new Map<string,Player>();let popup:HTMLDivElement|null=null,recording:HTMLDivElement|null=null,playFrame=0,pendingRecording=false;
   const style=document.createElement('style');style.textContent=`
   #audio-create-menu{position:fixed;z-index:46;width:212px;padding:6px;background:#fff;color:#303746;border:1px solid #e4e7ed;border-radius:9px;box-shadow:0 5px 24px #15171b26;font:12px Inter,'Segoe UI',sans-serif}
   #audio-create-menu button{display:flex;align-items:center;gap:10px;width:100%;height:38px;padding:0 10px;border:0;border-radius:5px;background:transparent;color:inherit;font:inherit;text-align:left;cursor:pointer}
@@ -169,12 +169,12 @@ export function installAudio(api:AudioAPI){
     document.body.append(dialog);const start=dialog.querySelector<HTMLButtonElement>('[data-start]')!,stop=dialog.querySelector<HTMLButtonElement>('[data-stop]')!,cancel=dialog.querySelector<HTMLButtonElement>('[data-cancel]')!,error=dialog.querySelector<HTMLElement>('[role=alert]')!,status=dialog.querySelector<HTMLElement>('[data-record-status]')!,timer=dialog.querySelector<HTMLElement>('.audio-record-time')!,bars=[...dialog.querySelectorAll<HTMLElement>('.audio-record-wave span')];
     const point={x:camera.x,y:camera.y},boardKey=api.getBoardKey?.();let stream:MediaStream|undefined,recorder:MediaRecorder|undefined,context:AudioContext|undefined,analyser:AnalyserNode|undefined,frame=0,started=0,lastSample=0,sampleInterval=40,discard=false,failed=false,oversize=false,totalBytes=0,peaks:number[]=[],chunks:Blob[]=[];
     const cleanup=()=>{if(frame)cancelAnimationFrame(frame);frame=0;stream?.getTracks().forEach(track=>track.stop());if(context&&context.state!=='closed')void context.close();};
-    const close=()=>{cleanup();dialog.remove();if(recording===dialog)recording=null;};
+    const close=()=>{cleanup();dialog.remove();if(recording===dialog){recording=null;pendingRecording=false;}};
     const cancelRecord=()=>{discard=true;if(recorder?.state==='recording')recorder.stop();close();};
     cancel.onclick=cancelRecord;dialog.addEventListener('keydown',event=>{event.stopPropagation();if(event.key==='Escape'){event.preventDefault();cancelRecord();}if(event.key==='Tab'){const buttons=[...dialog.querySelectorAll<HTMLButtonElement>('button:not(:disabled):not([hidden])')],index=buttons.indexOf(document.activeElement as HTMLButtonElement);if(event.shiftKey&&index<=0){event.preventDefault();buttons.at(-1)?.focus();}else if(!event.shiftKey&&index===buttons.length-1){event.preventDefault();buttons[0]?.focus();}}});
     function meter(){frame=0;if(discard||!started||recorder?.state!=='recording')return;const now=performance.now();timer.textContent=formatAudioTime((now-started)/1000);if(analyser&&now-lastSample>=sampleInterval){const values=new Uint8Array(analyser.fftSize);analyser.getByteTimeDomainData(values);let peak=0;for(const value of values)peak=Math.max(peak,Math.abs(value-128)/128);peaks.push(peak);lastSample=now;if(peaks.length>=512){peaks=Array.from({length:256},(_,i)=>Math.max(peaks[i*2]!,peaks[i*2+1]!));sampleInterval*=2;}const view=audioWaveform(peaks,48);for(let i=0;i<bars.length;i++)bars[i]!.style.height=`${Math.max(3,(view[i]??0)*52)}px`;}frame=requestAnimationFrame(meter);}
     start.onclick=async()=>{
-      start.disabled=true;error.textContent='';status.textContent='Aguardando microfone…';
+      start.disabled=true;pendingRecording=true;error.textContent='';status.textContent='Aguardando microfone…';
       try{
         if(!navigator.mediaDevices?.getUserMedia||typeof MediaRecorder==='undefined')throw new Error('Este navegador não permite gravar áudio. Importe um arquivo pelo botão Áudio.');
         stream=await navigator.mediaDevices.getUserMedia({audio:true});if(discard||recording!==dialog){cleanup();return;}
@@ -188,10 +188,10 @@ export function installAudio(api:AudioAPI){
         };
         recorder.onerror=()=>{failed=true;cleanup();status.textContent='Gravação interrompida';error.textContent='Não foi possível continuar a gravação. Tente novamente ou importe um arquivo.';stop.disabled=true;cancel.textContent='Fechar';};
         recorder.start(1000);started=performance.now();status.textContent='Gravando';start.hidden=true;stop.disabled=false;stop.focus();meter();
-      }catch(failure){cleanup();error.textContent=(failure as DOMException)?.name==='NotAllowedError'?'O acesso ao microfone não foi permitido. Libere o microfone no navegador ou importe um áudio.':message(failure,'Não foi possível iniciar a gravação.');status.textContent='Não foi possível gravar';start.disabled=false;}
+      }catch(failure){cleanup();if(recording===dialog)pendingRecording=started>0||chunks.length>0;error.textContent=(failure as DOMException)?.name==='NotAllowedError'?'O acesso ao microfone não foi permitido. Libere o microfone no navegador ou importe um áudio.':message(failure,'Não foi possível iniciar a gravação.');status.textContent='Não foi possível gravar';start.disabled=false;}
     };
     stop.onclick=()=>{if(recorder?.state==='recording'){stop.disabled=true;status.textContent='Finalizando gravação…';recorder.stop();}};
     start.focus();
   }
-  refresh();return {refresh,openRecorder,importFiles,downloadSelected:()=>{const id=[...state.selection][0];if(id)download(id);},pauseAll:()=>{for(const player of players.values())player.audio.pause();}};
+  refresh();return {refresh,openRecorder,importFiles,hasPendingRecording:()=>pendingRecording,downloadSelected:()=>{const id=[...state.selection][0];if(id)download(id);},pauseAll:()=>{for(const player of players.values())player.audio.pause();}};
 }

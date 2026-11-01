@@ -74,11 +74,15 @@ import {installLinkUI} from './link-ui';
 import {installAudio} from './audio';
 import {installStructuredTextUI} from './structured-text-ui';
 import {installInterface} from './interface';
+import {installProfileUI} from './profile-ui';
+import {snapshotBoardLayers,restoreBoardLayers,type BoardLayers} from './core/board-layers';
 import {stickyPadPaper} from './core/stickies';
 import {scaledWidgetStyle} from './core/style-scale';
 
 installInterface();
+installProfileUI();
 await ensureFonts();
+if(window.boardStudioDesktop?.isDesktop)await import('pixi.js/unsafe-eval');
 const host = document.getElementById("app")!;
 const hud = document.getElementById("hud")!;
 const toolbar = document.getElementById("toolbar") as HTMLElement;
@@ -118,6 +122,7 @@ const mediaBoardKey=()=>{if(home?.transitioning())return null;const id=home?.cur
 const storageKey=()=>home?.currentKey()??STORAGE_KEY;
 
 interface SavedBoard {
+  layers?:BoardLayers;
   userFonts?:UserFont[];
   layerOrderVersion?:1;
   background?: BoardBackground;
@@ -134,7 +139,9 @@ interface SavedBoard {
   camera: { x: number; y: number; scale: number };
 }
 
+let restoringBoard=false;
 function loadBoard(stored?:SavedBoard): boolean {
+  restoringBoard=true;let complete=false;
   try {
     const raw = stored ? null : localStorage.getItem(STORAGE_KEY);
     if (!stored&&!raw) return false;
@@ -142,19 +149,21 @@ function loadBoard(stored?:SavedBoard): boolean {
     boardEpoch++;
     state.widgets.clear();state.order=[];state.connectors.clear();state.connectorOrder=[];state.strokes.clear();state.strokeOrder=[];state.groups.clear();state.selection.clear();
     state.background={...DEFAULT_BACKGROUND};
+    state.layers=undefined;
     if(data.title)document.getElementById("board-title")!.textContent=data.title;
 
     // journal reconstroi estado E pilhas de undo/redo
     if (data.journal && Array.isArray(data.journal.applied)) {
       const frames=new Set((data.widgets as Widget[]).filter(w=>w.type==='frame').map(w=>w.id));
       bus.restore(data.layerOrderVersion===1?data.journal.applied:migrateFrameCommands(data.journal.applied,frames),data.layerOrderVersion===1?(data.journal.undone??[]):migrateFrameCommands(data.journal.undone??[],frames));
+      restoreBoardLayers(state,data.layers);
       state.background=validateBoardBackground(data.background)??state.background;
       if (data.camera) {
         camera.x = data.camera.x;
         camera.y = data.camera.y;
         camera.scale = data.camera.scale;
       }
-      return true;
+      complete=true;return true;
     }
 
     for (const w of data.layerOrderVersion===1?data.widgets as Widget[]:migrateFrameSnapshots(data.widgets as Widget[]))state.widgets.set(w.id,isFreeText(w)?naturalText(w):w);
@@ -164,21 +173,55 @@ function loadBoard(stored?:SavedBoard): boolean {
     for (const s of data.strokes) state.strokes.set((s as Stroke).id, s as Stroke);
     state.strokeOrder = data.strokeOrder ?? [];
     for (const [id, items] of data.groups ?? []) state.groups.set(id, items);
+    restoreBoardLayers(state,data.layers);
     state.background=validateBoardBackground(data.background)??{...DEFAULT_BACKGROUND};
     if (data.camera) {
       camera.x = data.camera.x;
       camera.y = data.camera.y;
       camera.scale = data.camera.scale;
     }
-    return true;
+    complete=true;return true;
   } catch {
     return false;
+  } finally {
+    restoringBoard=false;
+    if(complete){gridDirty=true;syncScene();drawSelection();refreshChrome();}
   }
 }
 
 let saveTimer:ReturnType<typeof setTimeout>|null=null;
-function savedBoard():SavedBoard{return structuredClone({layerOrderVersion:1 as const,userFonts:snapshotUserFonts(boardFontFamilies(state.widgets.values(),state.connectors.values())),savedAt:Date.now(),title:document.getElementById("board-title")!.textContent??"Board",background:state.background??{...DEFAULT_BACKGROUND},widgets:[...state.widgets.values()],order:state.order,connectors:[...state.connectors.values()],connectorOrder:state.connectorOrder,strokes:[...state.strokes.values()],strokeOrder:state.strokeOrder,groups:[...state.groups.entries()],journal:bus.snapshot(),camera:{x:camera.x,y:camera.y,scale:camera.scale}});}
-async function persistBoard(flushEditors=false){if(home&&(!home.currentId()||home.transitioning()))return;if(flushEditors){flushGestureUpdate();structuredUI?.finalizeInteractions();}try{await writeStoredBoard(storageKey(),savedBoard());document.getElementById("save-warning")?.remove();}catch{let notice=document.getElementById("save-warning");if(!notice){notice=document.createElement("div");notice.id="save-warning";notice.style.cssText="position:fixed;bottom:60px;left:50%;transform:translateX(-50%);z-index:80;background:#fff9b1;padding:12px 18px;border-radius:8px;font:13px Segoe UI";document.body.append(notice);}notice.textContent="Não foi possível salvar automaticamente. Use Salvar arquivo para guardar seu trabalho.";}}
+function boardRecord():SavedBoard{const layers=snapshotBoardLayers(state);return {layerOrderVersion:1 as const,layers,userFonts:snapshotUserFonts(boardFontFamilies(state.widgets.values(),state.connectors.values())),savedAt:Date.now(),title:document.getElementById("board-title")!.textContent??"Board",background:state.background??{...DEFAULT_BACKGROUND},widgets:[...state.widgets.values()],order:state.order,connectors:[...state.connectors.values()],connectorOrder:state.connectorOrder,strokes:[...state.strokes.values()],strokeOrder:state.strokeOrder,groups:[...state.groups.entries()],journal:bus.snapshot(),camera:{x:camera.x,y:camera.y,scale:camera.scale}};}
+/** Library capture remains owned; autosave goes directly to IDB's atomic copy. */
+function savedBoard():SavedBoard{return structuredClone(boardRecord());}
+function saveFailed():false{let notice=document.getElementById("save-warning");if(!notice){notice=document.createElement("div");notice.id="save-warning";notice.style.cssText="position:fixed;bottom:60px;left:50%;transform:translateX(-50%);z-index:80;background:#fff9b1;color:#2f2b18;padding:12px 18px;border-radius:8px;font:13px Segoe UI";document.body.append(notice);}notice.textContent="Não foi possível salvar automaticamente. Use Salvar arquivo para guardar seu trabalho.";return false;}
+async function persistBoard(flushEditors=false):Promise<boolean>{
+  if(home?.transitioning())return false;
+  if(home&&!home.currentId())return true;
+  try{if(flushEditors){flushGestureUpdate();structuredUI?.finalizeInteractions();}const key=storageKey(),record=boardRecord();await writeStoredBoard(key,record);document.getElementById("save-warning")?.remove();return true;}catch{return saveFailed();}
+}
+/** Desktop close must commit visible drafts, including a gesture without its
+ * final pointerup. Ordinary autosave leaves those active interactions alone. */
+async function flushForClose():Promise<boolean>{
+  if(audioUI?.hasPendingRecording())return false;
+  if(home?.transitioning())return false;
+  if(home&&!home.currentId())return true;
+  try{
+    momentum.stop();flushGestureUpdate();
+    const active=[...pointers.entries()];
+    if(gesture.kind!=='none'){
+      const [pointerId,point]=active[0]??[1,undefined],rect=app.canvas.getBoundingClientRect(),screen=camera.worldToScreen(cursorWorld);
+      // A synthetic finalization must never activate an object's external link.
+      endGesture(new PointerEvent('flush',{pointerId,clientX:point?.x??rect.left+screen.x,clientY:point?.y??rect.top+screen.y}));
+    }
+    momentum.stop();for(const [id]of active)if(app.canvas.hasPointerCapture(id))app.canvas.releasePointerCapture(id);pointers.clear();lastPinch=null;
+    closeCaptionDraft(true);structuredUI?.finalizeInteractions();endEdit(true);
+    // Native number/color fields commit their pending change on blur too.
+    if(document.activeElement instanceof HTMLElement)document.activeElement.blur();
+    editorUI?.finalizePropertyGestures();bus.endTransaction();
+    pendingConnection=null;connectPreview=null;activeGuides=[];brushPreview.clear();creationPreview.clear();mindmapUI?.clearDrop();connectorCompletion?.close();
+    return await persistBoard();
+  }catch{return saveFailed();}
+}
 function scheduleSave(){if(home&&(!home.currentId()||home.transitioning()))return;if(saveTimer)clearTimeout(saveTimer);saveTimer=setTimeout(()=>{saveTimer=null;if(gesture.kind!=='none'||momentum.active){scheduleSave();return;}void persistBoard();},400);}
 window.addEventListener("pagehide",()=>{void persistBoard(true);});
 
@@ -195,6 +238,7 @@ const state: BoardState = {
 };
 const scene = new BoardScene(world);
 const bus = new CommandBus(state, () => {
+  if(restoringBoard)return;
   syncScene(false);
   drawSelection();
   refreshChrome();
@@ -330,10 +374,10 @@ function drawConnectPreview(): void {
   const a=path[0]!,b=path[path.length-1]!;
   const screenCurve=(c:NonNullable<typeof geometry>['cubic'])=>c?{p0:camera.worldToScreen(c.p0),p1:camera.worldToScreen(c.p1),p2:camera.worldToScreen(c.p2),p3:camera.worldToScreen(c.p3)}:undefined;
   paintConnector(overlay,{...preview,style:{...preview.style,strokeWidth:preview.style.strokeWidth*camera.scale}},{points:path,cubic:screenCurve(geometry?.cubic),cubics:geometry?.cubics?.map(c=>screenCurve(c)!)},false);
-  overlay.circle(a.x, a.y, 4).fill({ color: 0x3859ff });
-  overlay.circle(b.x, b.y, 4).stroke({ width: 1.5, color: 0x3859ff });
+  overlay.circle(a.x, a.y, 4).fill({ color: 0xa970f0 });
+  overlay.circle(b.x, b.y, 4).stroke({ width: 1.5, color: 0xa970f0 });
   const hit = target;
-  if(hit) overlay.poly(widgetCorners(hit).flatMap(p=>{const s=camera.worldToScreen(p);return [s.x,s.y]})).stroke({width:2,color:0x3859ff,alpha:.6});
+  if(hit) overlay.poly(widgetCorners(hit).flatMap(p=>{const s=camera.worldToScreen(p);return [s.x,s.y]})).stroke({width:2,color:0xa970f0,alpha:.6});
   drawConnectionTargets(cursor,source?.id);
 }
 
@@ -341,13 +385,13 @@ function drawConnectionDots(w:Widget):void {
   if(w.locked||widgetHidden(w)||w.mind&&tool!=='connector')return;
   if(tool!=='connector'&&Math.min(w.width,w.height)*camera.scale<24)return;
   for(const h of connectionHandles(w)){
-    overlay.circle(h.point.x,h.point.y,5).fill(0x3859ff).stroke({width:2,color:0xffffff});
+    overlay.circle(h.point.x,h.point.y,5).fill(0xa970f0).stroke({width:2,color:0xffffff});
   }
 }
 
 function drawGuides(): void {
   for (const g of activeGuides) {
-    const color = g.kind === "center" ? 0xff5fa2 : 0x3859ff;
+    const color = g.kind === "center" ? 0xff5fa2 : 0xa970f0;
     if (g.orientation === "vertical") {
       const a = camera.worldToScreen({ x: g.position, y: g.from });
       const b = camera.worldToScreen({ x: g.position, y: g.to });
@@ -518,7 +562,7 @@ function drawSelection(): void {
     return;
   }
 
-  const blue = 0x3859ff;
+  const blue = 0xa970f0;
   const onlyId = [...state.selection][0]!;
   const selectedConnector = state.widgets.has(onlyId) ? undefined : state.connectors.get(onlyId);
 
@@ -834,7 +878,7 @@ document.addEventListener('copy',event=>{
   const snapshot=captureSelection(state);if(!snapshot.widgets.length&&!snapshot.connectors.length&&!snapshot.strokes.length)return;
   clipboard=snapshot;clipboardToken=crypto.randomUUID();
   event.clipboardData.setData(BOARD_CLIPBOARD_TYPE,clipboardToken);
-  event.clipboardData.setData('text/plain',snapshot.widgets.map(w=>w.type==='frame'?w.title:w.content).filter(Boolean).join('\n')||'Objetos do Board Studio');
+  event.clipboardData.setData('text/plain',snapshot.widgets.map(w=>w.type==='frame'?w.title:w.content).filter(Boolean).join('\n')||'Objetos do No Teu Cu e Atiro');
   event.preventDefault();
 });
 // Images consume their native paste first. A stale in-app copy must never
@@ -924,8 +968,8 @@ function drawConnectionTargets(p:Vec,excludeId?:string):void {
   for(const w of nearbyConnectionTargets(p,excludeId))for(const port of connectionHandles(w)){
     if(!visibleConnectionPort(w,port.anchor))continue;const worldPoint=resolveEndpoint(port.anchor,state.widgets)!,s=camera.worldToScreen(worldPoint);
     const active=connectionMagnet?.widgetId===w.id&&Math.hypot(connectionMagnet.x-port.anchor.x,connectionMagnet.y-port.anchor.y)<.001;
-    if(active)overlay.circle(s.x,s.y,11).fill({color:0x3859ff,alpha:.17});
-    overlay.circle(s.x,s.y,active?5:4).fill(active?0x3859ff:0xffffff).stroke({width:active?2:1.5,color:0x3859ff});
+    if(active)overlay.circle(s.x,s.y,11).fill({color:0xa970f0,alpha:.17});
+    overlay.circle(s.x,s.y,active?5:4).fill(active?0xa970f0:0xffffff).stroke({width:active?2:1.5,color:0xa970f0});
   }
 }
 function connectionAttachment(w:Widget,p:Vec,from?:Vec):Vec {
@@ -1390,7 +1434,7 @@ app.canvas.addEventListener("pointermove", (e) => {
     }
     case "erase": {
       const erasing=gesture;erasing.pending.push(p);queueGestureUpdate(()=>{const points=erasing.pending;erasing.pending=[];if(points.length){erasePath([erasing.last,...points],erasing.radius,erasing.partial);erasing.last=points.at(-1)!;}});
-      const cursor=camera.worldToScreen(p);overlay.clear().circle(cursor.x,cursor.y,gesture.radius*camera.scale).stroke({width:1,color:0x3859ff});
+      const cursor=camera.worldToScreen(p);overlay.clear().circle(cursor.x,cursor.y,gesture.radius*camera.scale).stroke({width:1,color:0xa970f0});
       return;
     }
     case "reconnect": {
@@ -1423,8 +1467,8 @@ app.canvas.addEventListener("pointermove", (e) => {
       overlay.clear();
       overlay
         .rect(a.x, a.y, b.x - a.x, b.y - a.y)
-        .fill({ color: 0x3859ff, alpha: 0.08 })
-        .stroke({ width: 1, color: 0x3859ff });
+        .fill({ color: 0xa970f0, alpha: 0.08 })
+        .stroke({ width: 1, color: 0xa970f0 });
       return;
     }
     case "multi-resize": {
@@ -1829,7 +1873,7 @@ async function copySelectionImage(){
 // Local editor controls
 images = installImages({state,bus,camera,app,world,getBoardKey:mediaBoardKey,nodeAt:id=>scene.nodeAt(id),onChange:()=>{syncScene();drawSelection();refreshChrome();}});
 backgroundUI=installBackground({state,bus,camera,app,world,getBoardKey:mediaBoardKey,onChange:()=>{gridDirty=true;syncScene();refreshChrome();}});
-layersUI=installLayers({state,bus,camera,onSelect:()=>{isolatedGroup=null;setTool('select');},onChange:()=>{syncScene();drawSelection();refreshChrome();}});
+layersUI=installLayers({state,bus,camera,getBoardKey:mediaBoardKey,onSelect:()=>{isolatedGroup=null;setTool('select');},onChange:()=>{syncScene();drawSelection();refreshChrome();}});
 const mindImagePicker=document.createElement('input');mindImagePicker.type='file';mindImagePicker.accept='image/*';mindImagePicker.multiple=true;
 let mindImageTarget:{parentId:string;boardKey:string|null}|null=null;
 mindImagePicker.addEventListener('change',()=>{const files=Array.from(mindImagePicker.files??[]),target=mindImageTarget;mindImagePicker.value='';mindImageTarget=null;if(!target||!files.length)return;void images?.importFiles(files,{label:'Imagem no mapa mental',canInsert:()=>target.boardKey===mediaBoardKey()&&!!state.widgets.get(target.parentId)?.mind&&!state.widgets.get(target.parentId)?.locked,afterCreate:ids=>{for(const id of ids)attachMindWidget(state,bus,target.parentId,id);}});});
@@ -1974,6 +2018,7 @@ const bootPromise=home.start();
   navigation:{stop:()=>momentum.stop(),active:()=>momentum.active},
   load: loadBoard,
   saveNow: ()=>persistBoard(true),
+  flushForClose,
   booted: false,
 };
 

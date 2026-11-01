@@ -1,4 +1,4 @@
-# Board Studio — aplicativo
+# no teu cu e atiro — aplicativo
 
 Editor local independente, feito com TypeScript, Vite e PixiJS. Consulte o [README principal](../README.md) para recursos, armazenamento e licenças.
 

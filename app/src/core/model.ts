@@ -1,3 +1,4 @@
+import type {LayerMembership} from './layer-model';
 /**
  * Modelo de widgets — nomes, campos e defaults extraídos do bundle do Miro
  * (ver docs/01-modelo-de-dados.md).
@@ -45,7 +46,7 @@ export interface MindMetadata {
   theme?:string;
 }
 
-export interface BaseWidget {
+export interface BaseWidget extends LayerMembership {
   audio?:AudioMetadata;
   checklist?:ChecklistData;
   table?:TableData;

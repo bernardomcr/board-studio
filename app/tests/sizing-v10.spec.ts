@@ -43,8 +43,8 @@ test('project files accept large finite geometry and reject non-finite dimension
  const result=await page.evaluate(async data=>{
   const {validateBoardFile}=await import('/src/project-files.ts'),{validateBoardBackground}=await import('/src/core/background.ts');
   const w=data.widgets[0];w.x=2e9;w.y=-2e9;w.width=3e8;w.height=2e8;w.style.fontSize=3e5;w.style.borderWidth=1e8;w.style.borderScale=20;w.style.cornerRadius=2e5;
-  data.connectors=[{id:'big-line',type:'connector',shape:'straight',start:{kind:'point',x:0,y:0},end:{kind:'point',x:100,y:100},style:{strokeWidth:50000,strokeColor:'#333333'},z:1}];data.connectorOrder=['big-line'];
-  data.strokes=[{id:'big-brush',type:'stroke',tool:'brush',color:'#333333',points:[{x:0,y:0,r:50000}],z:2}];data.strokeOrder=['big-brush'];
+  data.connectors=[{id:'big-line',layerId:data.layers.activeId,type:'connector',shape:'straight',start:{kind:'point',x:0,y:0},end:{kind:'point',x:100,y:100},style:{strokeWidth:50000,strokeColor:'#333333'},z:1}];data.connectorOrder=['big-line'];
+  data.strokes=[{id:'big-brush',layerId:data.layers.activeId,type:'stroke',tool:'brush',color:'#333333',points:[{x:0,y:0,r:50000}],z:2}];data.strokeOrder=['big-brush'];
   const accepted=validateBoardFile(data),png=document.createElement('canvas').toDataURL(),background=validateBoardBackground({color:'#ffffff',grid:false,image:{src:png,x:2e9,y:-2e9,width:2e9,height:1e9,opacity:1}});
   const invalid=[Infinity,NaN,-Infinity].map(width=>{try{validateBoardFile({...data,widgets:[{...w,width}]});return false;}catch{return true;}});
   let badOpacity=false;try{validateBoardFile({...data,widgets:[{...w,style:{...w.style,fillOpacity:2}}]});}catch{badOpacity=true;}

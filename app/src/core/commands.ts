@@ -17,9 +17,12 @@ import { DEFAULT_BACKGROUND, validateBoardBackground, copyBoardBackground, type 
 import { isFreeText,naturalText } from './text-layout';
 import { relativeBorderScale } from './style-scale';
 import { mindLayoutCommands, mindSubtree } from './mindmap';
+import {ensureBoardLayers,projectLayerItem,prepareLayerPatch,syncBoardLayers,validateBoardLayers,ownLayerFlags,boardLayerFlags,boardLayerOrder,LAYER_Z_STRIDE,type BoardLayers} from './board-layers';
 
 export type CommandOp =
   | "BATCH"
+  | "LAYERS_SET"
+  | "LAYERS_ACTIVE"
   | "BACKGROUND_UPDATE"
   | "WIDGET_CREATE"
   | "WIDGET_UPDATE"
@@ -42,6 +45,7 @@ export type AlignMode = "left" | "hcenter" | "right" | "top" | "vcenter" | "bott
 export type DistributeAxis = "x" | "y";
 
 export interface BoardState {
+  layers?:BoardLayers;
   /** Optional for projects saved before background controls existed. */
   background?: BoardBackground;
   widgets: Map<string, Widget>;
@@ -103,6 +107,7 @@ function inheritDrawingCaches(source:Command,target:Command):void {
 function removeGroupMember(state:BoardState,id:string):void {
   let gone=[id];while(gone.length){const next:string[]=[];for(const [gid,members] of state.groups){const remaining=members.filter(m=>!gone.includes(m));if(!remaining.length){state.groups.delete(gid);next.push(gid);}else if(remaining.length!==members.length)state.groups.set(gid,remaining);}gone=next;}
 }
+function affectsLayerOrder(c:Command):boolean {if(c.op==='BATCH')return (c.payload as {commands:Command[]}).commands.some(affectsLayerOrder);if(['WIDGET_CREATE','STROKE_CREATE','CONNECTOR_CREATE','WIDGET_REORDER','LAYERS_SET'].includes(c.op))return true;if(['WIDGET_UPDATE','CONNECTOR_UPDATE','STROKE_UPDATE'].includes(c.op)){const p=(c.payload as {patch:Record<string,unknown>}).patch;return 'z'in p||'layerId'in p;}return false;}
 export class CommandBus {
   readonly undoStack: ExecutedCommand[] = [];
   readonly redoStack: ExecutedCommand[] = [];
@@ -125,21 +130,38 @@ export class CommandBus {
     for(const item of [...this.state.connectors.values(),...this.state.strokes.values()])max=Math.max(max,item.z);
     return max;
   }
+  private placementZ(layerId:string|undefined,bottom=false):number {
+    const s=this.state,order=boardLayerOrder(ensureBoardLayers(s));if(order.length<2)return bottom?Math.min(0,...[...s.widgets.values(),...s.connectors.values(),...s.strokes.values()].map(item=>item.z))-1:this.topZ()+1;
+    const rank=new Map(order.map((id,i)=>[id,i])),at=rank.get(layerId??'')??0;let low=-Infinity,high=Infinity,hasOwn=false;
+    for(const item of [...s.widgets.values(),...s.connectors.values(),...s.strokes.values()]){const index=rank.get(item.layerId??'')??0;if(index===at)hasOwn=true;if(index<at||index===at&&!bottom)low=Math.max(low,item.z);else high=Math.min(high,item.z);}
+    if(!Number.isFinite(low))return Number.isFinite(high)?high-(hasOwn?1:LAYER_Z_STRIDE):1;if(!Number.isFinite(high))return low+(hasOwn?1:LAYER_Z_STRIDE);
+    // Insert between neighboring layers without changing every existing record
+    // (important when adding many brush strokes below a large image layer).
+    const z=hasOwn?(bottom?high-1:low+1):low+(high-low)/2;return z>low&&z<high?z:NaN;
+  }
+  private rebalanceCreation(command:Command):ExecutedCommand|null {
+    const create={...command};command.op='BATCH';command.payload={label:'Inserir na camada',commands:[{op:'LAYERS_SET',payload:{document:ensureBoardLayers(this.state),rebalance:true}},create]};return this.execute(command);
+  }
 
   exec(command: Command): void {
     if(!this.canMutate())return;
     const source=command;command=structuredClone(command);inheritDrawingCaches(source,command);
+    // Every interactive creation belongs to the active layer, including paste,
+    // imports and duplicates. Journal replay uses its recorded membership.
+    let creationDocument=ensureBoardLayers(this.state),blockedCreation=false;
+    const assign=(c:Command)=>{if(c.op==='BATCH')for(const child of (c.payload as {commands:Command[]}).commands)assign(child);else if(c.op==='LAYERS_SET')creationDocument=validateBoardLayers((c.payload as {document:BoardLayers}).document);else if(c.op==='LAYERS_ACTIVE')creationDocument={...creationDocument,activeId:c.payload as string};else if(['WIDGET_CREATE','CONNECTOR_CREATE','STROKE_CREATE'].includes(c.op)){const flags=boardLayerFlags(creationDocument,creationDocument.activeId);blockedCreation||=flags.hidden||flags.locked;const own=ownLayerFlags(c.payload as Widget);c.payload={...own,layerId:creationDocument.activeId};}};assign(command);if(blockedCreation)return;
     const executed = this.execute(command);
     if (!executed) return;
     executed.redo();
+    if(affectsLayerOrder(command))syncBoardLayers(this.state);
     // Choosing an object must neither consume Undo nor discard content Redo.
     // Selection inside a content BATCH is still restored with that operation.
-    if(command.op==='SELECTION_SET'&&!this.transaction){this.onChange();return;}
+    if((command.op==='SELECTION_SET'||command.op==='LAYERS_ACTIVE')&&!this.transaction){this.onChange();return;}
     if (this.transaction) {
       retainGestureEntry(this.transaction.entries,{ ...executed, command });
     }
     else this.pushUndo({ ...executed, command });
-    if(command.op!=='SELECTION_SET')this.redoStack.length = 0;
+    if(command.op!=='SELECTION_SET'&&command.op!=='LAYERS_ACTIVE')this.redoStack.length = 0;
     this.onChange();
   }
 
@@ -157,7 +179,7 @@ export class CommandBus {
   endTransaction(): void {
     const pending = this.transaction;
     this.transaction = null;
-    if (!pending?.entries.length||pending.entries.every(entry=>entry.command.op==='SELECTION_SET')) return;
+    if (!pending?.entries.length||pending.entries.every(entry=>entry.command.op==='SELECTION_SET'||entry.command.op==='LAYERS_ACTIVE')) return;
     const entries = pending.entries;
     this.pushUndo({
       label: pending.label,
@@ -173,6 +195,16 @@ export class CommandBus {
     const s = this.state;
 
     switch (command.op) {
+      case 'LAYERS_ACTIVE': {
+        const id=command.payload as string,doc=ensureBoardLayers(s);if(!doc.nodes.some(n=>n.id===id&&n.kind==='layer'))return null;const before=doc.activeId;
+        return {command,label:'Ativar camada',redo:()=>{s.layers={...ensureBoardLayers(s),activeId:id};},undo:()=>{s.layers={...ensureBoardLayers(s),activeId:before};}};
+      }
+      case 'LAYERS_SET': {
+        const payload=command.payload as {document:BoardLayers;assignments?:Array<[string,string]>;rebalance?:boolean},after=validateBoardLayers(payload.document),before=structuredClone(ensureBoardLayers(s));
+        const entities=()=>[...s.widgets.values(),...s.connectors.values(),...s.strokes.values()],membership=entities().map(item=>[item.id,item.layerId] as const),zBefore=entities().map(item=>[item.id,item.z] as const);
+        const assign=(values:ReadonlyArray<readonly [string,string|undefined]>)=>{for(const [id,layerId]of values){const map=s.widgets.has(id)?s.widgets:s.connectors.has(id)?s.connectors:s.strokes,item=map.get(id);if(item)(map as Map<string,typeof item>).set(id,{...item,layerId});}};
+        return {command,label:'Editar camadas',redo:()=>{s.layers=structuredClone(after);assign(payload.assignments??[]);syncBoardLayers(s,!!payload.rebalance);},undo:()=>{s.layers=structuredClone(before);assign(membership);syncBoardLayers(s);for(const [id,z]of zBefore){const map=s.widgets.has(id)?s.widgets:s.connectors.has(id)?s.connectors:s.strokes,item=map.get(id);if(item&&item.z!==z)(map as Map<string,typeof item>).set(id,{...item,z});}}};
+      }
       case "BACKGROUND_UPDATE": {
         const before = s.background ? copyBoardBackground(s.background) : undefined;
         const base=s.background??DEFAULT_BACKGROUND,patch=command.payload as BackgroundPatch;
@@ -215,8 +247,8 @@ export class CommandBus {
         let widget = command.payload as Widget;
         if(isFreeText(widget))widget=naturalText(widget);
         command.payload=widget;
-        const bottom=Math.min(0,...[...s.widgets.values(),...s.connectors.values(),...s.strokes.values()].map(item=>item.z));
-        const placed: Widget = { ...widget, z: widget.type==='frame'?bottom-1:this.topZ() + 1 };
+        const z=this.placementZ(widget.layerId,widget.type==='frame');if(!Number.isFinite(z))return this.rebalanceCreation(command);
+        const placed: Widget = projectLayerItem(s,{ ...widget, z });
         const index = s.order.length;
         return {
           command,
@@ -301,8 +333,9 @@ export class CommandBus {
 
       case "CONNECTOR_CREATE": {
         const connector = command.payload as Connector;
-        const z = this.topZ() + 1;
-        const placed: Connector = { ...connector, z };
+        const z = this.placementZ(connector.layerId);
+        if(!Number.isFinite(z))return this.rebalanceCreation(command);
+        const placed: Connector = projectLayerItem(s,{ ...connector, z });
         return {
           command,
           label: "create connector",
@@ -323,7 +356,7 @@ export class CommandBus {
         const connector = s.connectors.get(id);
         if (!connector) return null;
         const before = { ...connector };
-        const after = { ...connector, ...patch };
+        const after = projectLayerItem(s,{ ...connector, ...prepareLayerPatch(connector,patch) });
         return {
           command,
           label: "update connector",
@@ -357,12 +390,13 @@ export class CommandBus {
       }
 
       case "STROKE_UPDATE": {
-        const {id,patch}=command.payload as {id:string;patch:Partial<Stroke>};const before=s.strokes.get(id);if(!before)return null;const after={...before,...patch};
+        const {id,patch}=command.payload as {id:string;patch:Partial<Stroke>};const before=s.strokes.get(id);if(!before)return null;const after=projectLayerItem(s,{...before,...prepareLayerPatch(before,patch)});
         return {command,label:'update stroke',redo:()=>void s.strokes.set(id,after),undo:()=>void s.strokes.set(id,before)};
       }
       case "STROKE_CREATE": {
         const stroke = command.payload as Stroke;
-        const placed: Stroke = { ...stroke, z: this.topZ() + 1 };
+        const z=this.placementZ(stroke.layerId);if(!Number.isFinite(z))return this.rebalanceCreation(command);
+        const placed: Stroke = projectLayerItem(s,{ ...stroke, z });
         return {
           command,
           label: "create stroke",
@@ -444,7 +478,7 @@ export class CommandBus {
         }
         command.payload={id,patch};
         const before = { ...widget } as Widget;
-        const after = { ...widget, ...patch } as Widget;
+        const after = projectLayerItem(s,{ ...widget, ...prepareLayerPatch(widget,patch) } as Widget);
         return {
           command,
           label: `update ${widget.type}`,
@@ -614,6 +648,7 @@ export class CommandBus {
     const cmd = this.undoStack.pop();
     if (!cmd) return;
     cmd.undo();
+    syncBoardLayers(this.state);
     this.redoStack.push(cmd);
     this.onChange();
   }
@@ -624,6 +659,7 @@ export class CommandBus {
     const cmd = this.redoStack.pop();
     if (!cmd) return;
     cmd.redo();
+    syncBoardLayers(this.state);
     this.undoStack.push(cmd);
     this.onChange();
   }
@@ -636,8 +672,8 @@ export class CommandBus {
         ...this.prefixApplied,
         ...this.undoStack.map((entry) => entry.command),
         ...(this.transaction?.entries.length ? [{ op: "BATCH" as const, payload: { label: this.transaction.label, commands: this.transaction.entries.map(entry => entry.command) } }] : []),
-      ].filter((c) => c.op !== "SELECTION_SET"),
-      undone: this.redoStack.map((entry) => entry.command).filter((c) => c.op !== "SELECTION_SET"),
+      ].filter((c) => c.op !== "SELECTION_SET"&&c.op!=='LAYERS_ACTIVE'),
+      undone: this.redoStack.map((entry) => entry.command).filter((c) => c.op !== "SELECTION_SET"&&c.op!=='LAYERS_ACTIVE'),
     };
   }
 
@@ -652,6 +688,7 @@ export class CommandBus {
       const executed = this.execute(command);
       if (!executed) continue;
       executed.redo();
+      if(affectsLayerOrder(command))syncBoardLayers(this.state);
       this.pushUndo({ ...executed, command });
     }
 
@@ -662,6 +699,7 @@ export class CommandBus {
       const executed = this.execute(command);
       if (!executed) continue;
       executed.redo();
+      if(affectsLayerOrder(command))syncBoardLayers(this.state);
       replayed.push({ ...executed, command });
     }
     for (const executed of [...replayed].reverse()) executed.undo();

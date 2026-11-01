@@ -11,8 +11,10 @@ import {migrateFrameSnapshots} from './core/layer-migration';
 import {validateMindMetadata,validateMindMapGraph} from './core/mindmap';
 import {validateAudioMetadata} from './core/audio';
 import {validateStructuredMetadataFields} from './core/structured-text';
+import {validateBoardLayers,snapshotBoardLayers,restoreBoardLayers,boardLayerFlags,type BoardLayers,type LayerMembership} from './core/board-layers';
 
 interface BoardFile {
+  layers?:BoardLayers;
   userFonts?:UserFont[];
   layerOrderVersion?:1;
   format: "local-board"; version: 1; title: string;
@@ -61,12 +63,15 @@ export function validateBoardFile(value: unknown): BoardFile {
   const data = record(value);
   if (data.format !== "local-board" || data.version !== 1) fail("Este arquivo não é um projeto Board compatível.");
   const userFonts=data.userFonts===undefined?undefined:validateUserFonts(data.userFonts);
+  const layers=data.layers===undefined?undefined:validateBoardLayers(data.layers),layerIds=layers?new Set(layers.nodes.filter(n=>n.kind==='layer').map(n=>n.id)):undefined;
+  const membership=(raw:Record<string,unknown>):LayerMembership=>{if(!layers)return {};const layerId=id(raw.layerId);if(!layerIds!.has(layerId))fail('Objeto aponta para camada ausente.');for(const field of ['layerOwnHidden','layerOwnLocked'])if(raw[field]!==undefined&&typeof raw[field]!=='boolean')fail('Estado próprio de camada inválido.');const flags=boardLayerFlags(layers,layerId);if(flags.hidden?(raw.hidden!==true||typeof raw.layerOwnHidden!=='boolean'):raw.layerOwnHidden!==undefined)fail('Visibilidade própria de camada inconsistente.');if(flags.locked?(raw.locked!==true||typeof raw.layerOwnLocked!=='boolean'):raw.layerOwnLocked!==undefined)fail('Bloqueio próprio de camada inconsistente.');return {layerId,...(raw.layerOwnHidden===undefined?{}:{layerOwnHidden:raw.layerOwnHidden as boolean}),...(raw.layerOwnLocked===undefined?{}:{layerOwnLocked:raw.layerOwnLocked as boolean})};};
   const widgets = list(data.widgets).map(raw => {
     const w = record(raw), style = record(w.style);
     const type = one(w.type, ["shape", "sticky_note", "text", "frame", "image"] as const);
     if(w.audio!==undefined&&(type!=='shape'||w.checklist!==undefined||w.table!==undefined))fail('Cartão de áudio incompatível com este objeto.');
     if((w.checklist!==undefined||w.table!==undefined)&&type!=='shape'&&type!=='text')fail('Conteúdo estruturado incompatível com este objeto.');
     const base = {
+      ...membership(w),
       mind:w.mind===undefined?undefined:validateMindMetadata(w.mind),
       audio:w.audio===undefined?undefined:validateAudioMetadata(w.audio),...validateStructuredMetadataFields(w),
       id: id(w.id), type, name:w.name===undefined?undefined:str(w.name,1000),hidden:!!w.hidden, locked:w.locked===undefined?undefined:!!w.locked, link:w.link===undefined?undefined:str(w.link,4000), x: number(w.x), y: number(w.y), width: number(w.width, .001), height: number(w.height, .001),
@@ -104,7 +109,7 @@ export function validateBoardFile(value: unknown): BoardFile {
   };
   const connectors: Connector[] = list(data.connectors).map(raw => {
     const c = record(raw), style = record(c.style);
-    return { id: id(c.id),mindBranch:c.mindBranch===undefined?undefined:id(c.mindBranch),name:c.name===undefined?undefined:str(c.name,1000),hidden:!!c.hidden,locked:!!c.locked,waypoints:c.waypoints==null?c.waypoints as null|undefined:list(c.waypoints,1000).map(v=>{const p=record(v);return {x:number(p.x),y:number(p.y)}}),captionPositions:c.captionPositions===undefined?undefined:list(c.captionPositions,100).map(v=>number(v,0,1)), type: one(c.type, ["connector"] as const), start: endpoint(c.start), end: endpoint(c.end),
+    return { ...membership(c),id: id(c.id),mindBranch:c.mindBranch===undefined?undefined:id(c.mindBranch),name:c.name===undefined?undefined:str(c.name,1000),hidden:!!c.hidden,locked:!!c.locked,waypoints:c.waypoints==null?c.waypoints as null|undefined:list(c.waypoints,1000).map(v=>{const p=record(v);return {x:number(p.x),y:number(p.y)}}),captionPositions:c.captionPositions===undefined?undefined:list(c.captionPositions,100).map(v=>number(v,0,1)), type: one(c.type, ["connector"] as const), start: endpoint(c.start), end: endpoint(c.end),
       shape: one(c.shape, ["straight", "elbowed", "curved"] as const), z: number(c.z),
       controlPoint: c.controlPoint == null ? c.controlPoint as null | undefined : (() => { const p = record(c.controlPoint); return { x: number(p.x), y: number(p.y) }; })(),
       style: { strokeStyle:style.strokeStyle===undefined?undefined:one(style.strokeStyle,["normal","dashed","dotted"] as const),strokeColor: color(style.strokeColor), strokeWidth: number(style.strokeWidth, .01),
@@ -121,7 +126,7 @@ export function validateBoardFile(value: unknown): BoardFile {
     const s = record(raw), points = list(s.points, 200000); totalPoints += points.length;
     const erasures=s.erasures===undefined?undefined:list(s.erasures,200000).map(value=>{const e=record(value),cutPoints=list(e.points,200000);if(!cutPoints.length)fail('Área apagada inválida.');totalPoints+=cutPoints.length;return {radius:number(e.radius,.000001),points:cutPoints.map(value=>{const p=record(value);return {x:number(p.x),y:number(p.y)};})};});
     if (totalPoints > 1000000) fail("O arquivo contém pontos de desenho demais.");
-    return { id: id(s.id),name:s.name===undefined?undefined:str(s.name,1000),hidden:!!s.hidden,locked:!!s.locked,type: one(s.type, ["stroke"] as const), tool: one(s.tool, ["brush", "pen", "highlighter"] as const), color: color(s.color), z: number(s.z),
+    return { ...membership(s),id: id(s.id),name:s.name===undefined?undefined:str(s.name,1000),hidden:!!s.hidden,locked:!!s.locked,type: one(s.type, ["stroke"] as const), tool: one(s.tool, ["brush", "pen", "highlighter"] as const), color: color(s.color), z: number(s.z),
       opacity:s.opacity===undefined?undefined:number(s.opacity,0,1),precision:s.precision===undefined?undefined:typeof s.precision==='boolean'?s.precision:fail('Precisão de pincel inválida.'),precisionSmoothing:s.precisionSmoothing===undefined?undefined:number(s.precisionSmoothing,0),
       ...(erasures?{erasures}:{}),points: points.map(value => { const p = record(value); return { x: number(p.x), y: number(p.y), r: number(p.r, .001) }; }) };
   });
@@ -134,13 +139,14 @@ export function validateBoardFile(value: unknown): BoardFile {
     groupIds.add(groupId); return [groupId, members];
   });
   const groupMap=new Map(groups),parented=new Set<string>();
+  if(layers)for(const node of layers.nodes)if(seen.has(node.id)||groupIds.has(node.id))fail('Identificador de camada repetido em um objeto ou grupo.');
   for(const [gid,members] of groups){if(seen.has(gid))fail('Identificador de grupo repetido.');for(const member of members){if(!seen.has(member)&&!groupMap.has(member))fail('Membro de grupo ausente.');if(parented.has(member))fail('Objeto em múltiplos grupos.');parented.add(member);}}
   const visiting=new Set<string>(),visited=new Set<string>();const visit=(id:string)=>{if(visiting.has(id))fail('Grupo circular inválido.');if(visited.has(id))return;visiting.add(id);for(const member of groupMap.get(id)??[])if(groupMap.has(member))visit(member);visiting.delete(id);visited.add(id);};for(const id of groupMap.keys())visit(id);
   const camera = record(data.camera);
   const background=data.background===undefined?{...DEFAULT_BACKGROUND}:validateBoardBackground(data.background);
   if(!background)fail("Fundo do board inválido.");
   return { format: "local-board", version: 1,layerOrderVersion:1, title: str(data.title, 1000), widgets:data.layerOrderVersion===1?widgets:migrateFrameSnapshots(widgets), connectors, strokes, groups,
-    background: background!,userFonts,
+    background: background!,userFonts,layers,
     order: order(data.order, widgets), connectorOrder: order(data.connectorOrder, connectors), strokeOrder: order(data.strokeOrder, strokes),
     camera: { x: number(camera.x), y: number(camera.y), scale: number(camera.scale, MIN_SCALE, MAX_SCALE) } };
 }
@@ -159,6 +165,7 @@ export function installProjectFiles(api: { state: BoardState; bus: CommandBus; c
   saveButton.onclick = () => {
     api.beforeOperation?.();
     const data: BoardFile = { format: "local-board", version: 1,layerOrderVersion:1, title: document.getElementById("board-title")?.textContent ?? "Board",
+      layers:snapshotBoardLayers(state),
       background:state.background??{...DEFAULT_BACKGROUND},userFonts:snapshotUserFonts(boardFontFamilies(state.widgets.values(),state.connectors.values())),
       widgets: [...state.widgets.values()], order: [...state.order], connectors: [...state.connectors.values()], connectorOrder: [...state.connectorOrder],
       strokes: [...state.strokes.values()], strokeOrder: [...state.strokeOrder], groups: [...state.groups.entries()], camera: { x: camera.x, y: camera.y, scale: camera.scale } };
@@ -183,6 +190,7 @@ export function installProjectFiles(api: { state: BoardState; bus: CommandBus; c
       const connectorById = new Map(data.connectors.map(c => [c.id, c]));
       const strokeById = new Map(data.strokes.map(s => [s.id, s]));
       const baseline: Command[] = [
+        ...(data.layers?[{op:'LAYERS_SET' as const,payload:{document:data.layers}}]:[]),
         {op:"BACKGROUND_UPDATE",payload:data.background??{...DEFAULT_BACKGROUND}},
         ...data.order.map(id => ({ op: "WIDGET_CREATE" as const, payload: widgetById.get(id)! })),
         ...data.order.map(id => ({ op: "WIDGET_UPDATE" as const, payload: { id, patch: { z: widgetById.get(id)!.z } } })),
@@ -195,8 +203,10 @@ export function installProjectFiles(api: { state: BoardState; bus: CommandBus; c
       state.widgets = new Map(); state.order = []; state.connectors = new Map(); state.connectorOrder = [];
       state.strokes = new Map(); state.strokeOrder = []; state.groups = new Map(); state.selection = new Set();
       state.background={...DEFAULT_BACKGROUND};
+      delete state.layers;
       // Persist the validated snapshot as commands so reload reconstructs imported content.
       bus.restore(baseline, []);
+      restoreBoardLayers(state,data.layers);
       camera.x = data.camera.x; camera.y = data.camera.y; camera.scale = data.camera.scale;
       const title = document.getElementById("board-title"); if (title) title.textContent = data.title;
       api.sync(); status.textContent = "Projeto aberto";

@@ -17,15 +17,18 @@ for(const width of [360,800,1280,1600,1920])test(`tools dock at the actual top e
   if(dark)await page.getByRole('button',{name:'Ativar tema escuro',exact:true}).click();await settle(page);
   const dock=await page.evaluate(()=>{
    const bounds=element=>{const r=element.getBoundingClientRect();return {x:r.x,y:r.y,right:r.right,bottom:r.bottom,width:r.width,height:r.height};};
-   const bar=document.getElementById('toolbar'),header=document.getElementById('topbar');return {tools:bounds(bar),header:bounds(header),title:document.getElementById('board-title').textContent,rounding:getComputedStyle(bar).borderRadius,surface:getComputedStyle(bar).backgroundColor,scenery:getComputedStyle(document.body,'::before').backgroundColor,shadow:getComputedStyle(bar).boxShadow,overflow:getComputedStyle(bar).overflowX,
+   const bar=document.getElementById('toolbar'),header=document.getElementById('topbar'),dock=document.getElementById('studio-dock');return {tools:bounds(bar),header:bounds(header),dock:bounds(dock),title:document.getElementById('board-title').textContent,rounding:getComputedStyle(bar).borderRadius,surface:getComputedStyle(dock).backgroundColor,scenery:getComputedStyle(header).backgroundColor,shadow:getComputedStyle(bar).boxShadow,overflow:getComputedStyle(bar).overflowX,
     controls:[...document.querySelectorAll('#toolbar button,#topbar button,#board-title,#theme-toggle,#layers-toggle')].filter(element=>{const r=element.getBoundingClientRect();return r.width>0&&r.height>0;}).map(element=>{const rect=bounds(element),hit=document.elementFromPoint(rect.x+rect.width/2,rect.y+rect.height/2);return {name:element.id||element.getAttribute('aria-label')||element.textContent.trim(),...rect,usable:element===hit||element.contains(hit)};})};
   });
-  expect(dock.title.length).toBe(800);expect(dock.tools.x).toBe(0);expect(dock.tools.y).toBe(0);expect(dock.tools.width).toBe(width);expect(dock.rounding).toBe('0px');expect(dock.shadow).toBe('none');expect(dock.surface).toBe(dock.scenery);expect(['auto','scroll']).not.toContain(dock.overflow);expect(dock.header.y).toBeCloseTo(dock.tools.bottom,5);
+  expect(dock.title.length).toBe(800);expect(dock.dock.x).toBe(0);expect(dock.dock.y).toBe(0);expect(dock.dock.width).toBe(width);expect(dock.tools.x).toBeGreaterThanOrEqual(0);expect(dock.tools.y).toBe(0);expect(dock.tools.x+dock.tools.width).toBeLessThanOrEqual(width);expect(dock.rounding).toBe('0px');expect(dock.shadow).toBe('none');expect(dock.surface).not.toBe('rgba(0, 0, 0, 0)');expect(['auto','scroll']).not.toContain(dock.overflow);expect(dock.header.y).toBe(width<=740?44:0);
   const top=await workspace(page);
   for(const control of dock.controls){expect(control.x,control.name).toBeGreaterThanOrEqual(-.5);expect(control.right,control.name).toBeLessThanOrEqual(width+.5);expect(control.bottom,control.name).toBeLessThanOrEqual(top-9.5);expect(control.usable,`${width}: ${control.name}`).toBe(true);
    for(const other of dock.controls){if(other===control)continue;const overlap=Math.min(control.right,other.right)-Math.max(control.x,other.x)>1&&Math.min(control.bottom,other.bottom)-Math.max(control.y,other.y)>1;expect(overlap,`${width}: ${control.name} overlaps ${other.name}`).toBe(false);}
   }
-  for(const name of ['Salvar arquivo','Abrir arquivo','Exportar PNG','Exportar SVG','Atalhos','Camadas'])await expect(page.getByRole('button',{name,exact:true})).toBeVisible();
+  await expect(page.getByRole('button',{name:'Camadas',exact:true})).toBeVisible();
+  if(width<=1100)await page.getByRole('button',{name:'Mais opções do board',exact:true}).click();
+  for(const name of ['Salvar arquivo','Abrir arquivo','Exportar PNG','Exportar SVG','Atalhos'])await expect(page.getByRole('button',{name,exact:true})).toBeVisible();
+  if(width<=1100)await page.keyboard.press('Escape');
  }
 });
 

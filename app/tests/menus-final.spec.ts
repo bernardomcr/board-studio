@@ -63,7 +63,7 @@ test('deleting a mind-map branch through Layers removes its subtree and one undo
     b.bus.exec({op:'SELECTION_SET',payload:[branch]});return {root,branch,leaf};
   });
   await page.getByRole('button',{name:'Camadas',exact:true}).click();
-  await page.getByRole('region',{name:'Camadas',exact:true}).getByRole('button',{name:'Excluir camada',exact:true}).click();
+  await page.getByRole('region',{name:'Camadas',exact:true}).getByRole('button',{name:'Excluir objeto',exact:true}).click();
   expect(await page.evaluate(({root,branch,leaf})=>({root:window.__board.state.widgets.has(root),branch:window.__board.state.widgets.has(branch),leaf:window.__board.state.widgets.has(leaf)}),ids)).toEqual({root:true,branch:false,leaf:false});
   await page.keyboard.press('Control+z');
   expect(await page.evaluate(({branch,leaf})=>({branch:window.__board.state.widgets.has(branch),parent:window.__board.state.widgets.get(leaf)?.mind?.parentId}),ids)).toEqual({branch:true,parent:ids.branch});

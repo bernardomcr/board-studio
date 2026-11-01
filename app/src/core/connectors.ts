@@ -1,3 +1,4 @@
+import type {LayerMembership} from './layer-model';
 /** Connector geometry reconstructed for the local editor; no cloud dependency. */
 import { rotate, widgetCenter, widgetAABB, worldToLocal, type Vec } from "./geometry";
 import { shapeContours,canonicalShape } from "./shapes";
@@ -12,7 +13,7 @@ export interface ConnectorCaptionStyle {
   followPath?:boolean;
   side?:'above'|'center'|'below';
 }
-export interface Connector {
+export interface Connector extends LayerMembership {
   /** Child topic owning an automatically routed mind-map branch. */
   mindBranch?:string;
   id: string; type: "connector"; start: Endpoint; end: Endpoint; shape: ConnectorShape;

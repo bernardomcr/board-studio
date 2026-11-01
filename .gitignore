@@ -3,6 +3,11 @@ app/dist/
 app/.vite/
 app/test-results/
 app/playwright-report/
+desktop/node_modules/
+desktop/dist/
+desktop/renderer/
+desktop/test-results/
+desktop/*.log
 work/
 outputs/
 *.board.json

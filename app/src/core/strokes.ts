@@ -1,3 +1,4 @@
+import type {LayerMembership} from './layer-model';
 /**
  * Vector brush centerlines with optional locally fitted precision curves.
  * Legacy pressure samples retain their individual radii. Painting uses local
@@ -18,7 +19,7 @@ export type StrokeTool = "brush" | "pen" | "highlighter" | "eraser";
 /** Swept circular eraser paths subtract coverage without changing brush samples. */
 export interface StrokeErasure {points:Vec[];radius:number}
 
-export interface Stroke {
+export interface Stroke extends LayerMembership {
   name?: string;
   hidden?: boolean;
   locked?: boolean;

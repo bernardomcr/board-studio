@@ -1,0 +1,113 @@
+name: Windows release
+on:
+  push:
+    branches: [main]
+    paths: [desktop/release.json]
+  workflow_dispatch:
+permissions:
+  contents: write
+  statuses: write
+concurrency:
+  group: windows-release
+  cancel-in-progress: false
+jobs:
+  package:
+    runs-on: windows-latest
+    timeout-minutes: 50
+    steps:
+      - name: Report release started
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh api "repos/$env:GITHUB_REPOSITORY/statuses/$env:GITHUB_SHA" -f state=pending -f context=board-studio/windows-release -f description='Building and checking Windows executables' -f "target_url=$env:GITHUB_SERVER_URL/$env:GITHUB_REPOSITORY/actions/runs/$env:GITHUB_RUN_ID" --silent
+          if ($LASTEXITCODE -ne 0) { throw 'Release status could not be registered' }
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 26
+          cache: npm
+          cache-dependency-path: |
+            app/package-lock.json
+            desktop/package-lock.json
+      - run: npm ci --no-audit --no-fund
+        working-directory: app
+      - run: npm ci --no-audit --no-fund
+        working-directory: desktop
+      - run: node node_modules/electron/install.js
+        working-directory: desktop
+      - run: npx playwright install chromium
+        working-directory: app
+      - name: Browser regression suite
+        run: npm test
+        working-directory: app
+        env:
+          CI: 'true'
+      - run: npm run package
+        working-directory: desktop
+        env:
+          CSC_IDENTITY_AUTO_DISCOVERY: 'false'
+      - run: node scripts/check-package.cjs
+        working-directory: desktop
+      - run: node tests/smoke.cjs dist/win-unpacked/Atiro.exe
+        working-directory: desktop
+      - name: Install and check the packaged application
+        shell: pwsh
+        run: |
+          $installer = @(Get-ChildItem desktop/dist -Filter '*-setup.exe' -File)
+          if ($installer.Count -ne 1) { throw 'Expected a single Windows installer' }
+          $installDirectory = Join-Path $env:RUNNER_TEMP 'BoardStudioSmoke'
+          Start-Process -FilePath $installer[0].FullName -ArgumentList @('/S',"/D=$installDirectory") -Wait -WindowStyle Hidden
+          $executable = Join-Path $installDirectory 'Atiro.exe'
+          if (-not (Test-Path -LiteralPath $executable)) { throw 'Installer did not create the application' }
+          node desktop/tests/smoke.cjs $executable
+          if ($LASTEXITCODE -ne 0) { throw 'Installed application smoke test failed' }
+      - name: Checksums and release
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $release = Get-Content desktop/release.json -Raw | ConvertFrom-Json
+          $version = (Get-Content desktop/package.json -Raw | ConvertFrom-Json).version
+          if ($version -ne $release.version) { throw 'Release/package version mismatch' }
+          $files = @(Get-ChildItem desktop/dist -Filter '*.exe' -File)
+          if ($files.Count -ne 2) { throw 'Expected installer and portable executable' }
+          $hashes = $files | ForEach-Object { $hash = Get-FileHash -LiteralPath $_.FullName -Algorithm SHA256; "$($hash.Hash.ToLowerInvariant())  $($_.Name)" }
+          $hashes | Set-Content desktop/dist/SHA256SUMS.txt -Encoding ascii
+          $assets = @($files.FullName) + @('desktop/dist/SHA256SUMS.txt')
+          $tag = "v$version"
+          $existing = & gh release view $tag --json isDraft,targetCommitish 2>$null
+          if ($LASTEXITCODE -eq 0) {
+            $draft = $existing | ConvertFrom-Json
+            if (-not $draft.isDraft -or $draft.targetCommitish -ne $env:GITHUB_SHA) { throw 'Refusing to replace a published or unrelated release' }
+          } else {
+            & gh release create $tag --draft --target $env:GITHUB_SHA --title "No Teu Cu e Atiro $version" --notes-file desktop/RELEASE.md
+            if ($LASTEXITCODE -ne 0) { throw 'Draft release was not created' }
+          }
+          & gh release upload $tag @assets --clobber
+          if ($LASTEXITCODE -ne 0) { throw 'Release assets were not uploaded' }
+          $metadata = & gh api "repos/$env:GITHUB_REPOSITORY/releases/tags/$tag" | ConvertFrom-Json
+          if ($LASTEXITCODE -ne 0) { throw 'Release could not be verified' }
+          foreach ($file in $files) {
+            $asset = @($metadata.assets | Where-Object name -eq $file.Name)
+            if ($asset.Count -ne 1 -or $asset[0].size -ne $file.Length) { throw 'Release asset size mismatch' }
+            $expected = 'sha256:' + (Get-FileHash -LiteralPath $file.FullName -Algorithm SHA256).Hash.ToLowerInvariant()
+            if ($asset[0].digest -and $asset[0].digest -ne $expected) { throw 'Release asset digest mismatch' }
+          }
+          $arguments = @('release','edit',$tag,'--draft=false')
+          if ($release.prerelease) { $arguments += '--prerelease' }
+          & gh @arguments
+          if ($LASTEXITCODE -ne 0) { throw 'GitHub release was not created' }
+          $receipt = & gh api "repos/$env:GITHUB_REPOSITORY/releases/tags/$tag" --jq '{tag_name,html_url,draft,prerelease,target_commitish,assets:[.assets[]|{name,size,digest,browser_download_url}]}'
+          if ($LASTEXITCODE -ne 0) { throw 'Published release could not be verified' }
+          Write-Output "BOARD_STUDIO_RELEASE_JSON=$($receipt -join '')"
+      - name: Report release result
+        if: always()
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_JOB_STATUS: ${{ job.status }}
+        run: |
+          $state = if ($env:RELEASE_JOB_STATUS -eq 'success') { 'success' } else { 'failure' }
+          gh api "repos/$env:GITHUB_REPOSITORY/statuses/$env:GITHUB_SHA" -f "state=$state" -f context=board-studio/windows-release -f "description=Windows release: $env:RELEASE_JOB_STATUS" -f "target_url=$env:GITHUB_SERVER_URL/$env:GITHUB_REPOSITORY/actions/runs/$env:GITHUB_RUN_ID" --silent
+          if ($LASTEXITCODE -ne 0) { throw 'Release result could not be registered' }

@@ -23,7 +23,10 @@ test('content barriers and additive moves retain their order in a compacted gest
 test('legacy applied and undone gestures migrate after normalization without changing undo boundaries',async({page})=>{
  await blank(page);const r=await page.evaluate(async()=>{
   const {CommandBus}=await import('/src/core/commands.ts'),{createWidget}=await import('/src/core/model.ts');
-  const state=()=>({widgets:new Map(),order:[],connectors:new Map(),connectorOrder:[],strokes:new Map(),strokeOrder:[],groups:new Map(),selection:new Set()}),digest=s=>JSON.stringify({widgets:[...s.widgets],strokes:[...s.strokes],selection:[...s.selection]});
+  // Property insertion order is not persisted content. Keep every field (even
+  // an explicit undefined) and every array position when comparing timelines.
+  const canonical=(_key,value)=>value===undefined?{$testUndefined:true}:value&&typeof value==='object'&&!Array.isArray(value)?Object.fromEntries(Object.keys(value).sort().map(key=>[key,value[key]])):value;
+  const state=()=>({widgets:new Map(),order:[],connectors:new Map(),connectorOrder:[],strokes:new Map(),strokeOrder:[],groups:new Map(),selection:new Set()}),digest=s=>JSON.stringify({widgets:[...s.widgets],strokes:[...s.strokes],selection:[...s.selection]},canonical);
   const basePoints=Array.from({length:256},(_,i)=>({x:i,y:i%9,r:3})),creates=[{op:'WIDGET_CREATE',payload:{...createWidget('text',{x:0,y:0,content:'Original'}),id:'legacy-text'}},{op:'STROKE_CREATE',payload:{id:'legacy-stroke',type:'stroke',tool:'brush',color:'#299d70',points:basePoints,z:0}}];
   const gesture=(number,frames)=>({op:'BATCH',payload:{label:'Gesto legado '+number,commands:Array.from({length:frames},(_,i)=>{
    const frame=i+1,patch={x:number*1000+frame,y:frame*2,...(frame===1?{content:'Texto legado '+number+' com área natural maior'}:{}),...(frame===2?{style:{fontSize:40+number*10}}:{}),...(frame===3?{width:700+number*100}:{})};

@@ -127,12 +127,12 @@ export function duplicateSnapshot(s:BoardState,bus:CommandBus,snapshot:EntitySna
       return {kind:'point',...point(resolved)};
     };
     const mindBranch=c.mindBranch&&map.has(c.mindBranch)&&c.start.kind==='anchor'&&c.end.kind==='anchor'&&map.has(c.start.widgetId)&&map.has(c.end.widgetId)?map.get(c.mindBranch):undefined;
-    return {...c,id:map.get(c.id)!,mindBranch,start:endpoint('start'),end:endpoint('end'),controlPoint:c.controlPoint?point(c.controlPoint):null,waypoints:c.waypoints?.map(point)??null,locked:false};
+    return {...c,id:map.get(c.id)!,mindBranch,start:endpoint('start'),end:endpoint('end'),controlPoint:c.controlPoint?point(c.controlPoint):null,waypoints:c.waypoints?.map(point)??null,locked:false,layerOwnLocked:undefined};
   });
   const ids:string[]=[],commands:Command[]=[];
-  for(const w of snapshot.widgets){const id=map.get(w.id)!;commands.push({op:'WIDGET_CREATE',payload:{...w,id,mind:copiedMind(w),x:w.x+dx,y:w.y+dy,locked:false}});ids.push(id);}
+  for(const w of snapshot.widgets){const id=map.get(w.id)!;commands.push({op:'WIDGET_CREATE',payload:{...w,id,mind:copiedMind(w),x:w.x+dx,y:w.y+dy,locked:false,layerOwnLocked:undefined}});ids.push(id);}
   for(const c of copiedConnectors){commands.push({op:'CONNECTOR_CREATE',payload:c});ids.push(c.id);}
-  for(const st of snapshot.strokes){const id=map.get(st.id)!;commands.push({op:'STROKE_CREATE',payload:{...st,id,locked:false,points:st.points.map(p=>({...p,...point(p)})),...(st.erasures?{erasures:st.erasures.map(e=>({...e,points:e.points.map(point)}))}:{})}});ids.push(id);}
+  for(const st of snapshot.strokes){const id=map.get(st.id)!;commands.push({op:'STROKE_CREATE',payload:{...st,id,locked:false,layerOwnLocked:undefined,points:st.points.map(p=>({...p,...point(p)})),...(st.erasures?{erasures:st.erasures.map(e=>({...e,points:e.points.map(point)}))}:{})}});ids.push(id);}
   for(const [id,members] of snapshot.groups)commands.push({op:'GROUP_CREATE',payload:{id:map.get(id)!,items:members.map(m=>map.get(m)).filter(Boolean)}});
   commands.push({op:'SELECTION_SET',payload:ids});
   bus.exec({op:'BATCH',payload:{label:'Duplicar seleção',commands}});

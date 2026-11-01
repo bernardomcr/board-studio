@@ -5,6 +5,8 @@ import type { Connector } from "./core/connectors";
 interface HomeAPI {
   beforeTransition?():void;
   afterTransition?():void;
+  /** Return an owned, isolated snapshot; storage adds metadata without cloning
+   * the media/history graph a second time. */
   capture(): unknown;
   open(data: unknown, id: string): Promise<void> | void;
   thumbnail(): Promise<string>;
@@ -104,7 +106,7 @@ export function installBoardHome(api: HomeAPI) {
   `;
   document.head.append(style);
   const root = document.createElement("section"); root.id = "board-home"; root.hidden = true; root.setAttribute("aria-label", "Biblioteca de boards");
-  root.innerHTML = `<aside class="bh-side"><div class="bh-brand"><span class="bh-brand-mark">${icon("board", 23)}</span><span>Board Studio</span></div><div class="bh-workspace"><span class="bh-avatar">B</span><div><strong>Meu espaço</strong><small>Workspace local</small></div></div><nav class="bh-nav" aria-label="Navegação da biblioteca">${[["home", "home", "Início"], ["recent", "recent", "Recentes"], ["starred", "star", "Favoritos"], ["projects", "folder", "Projetos"], ["trash", "trash", "Lixeira"]].map(([id, glyph, text]) => `<button data-section="${id}">${icon(glyph!)}<span>${text}</span></button>`).join("")}</nav><div class="bh-project-heading"><span>Meus projetos</span><button data-action="new-project" aria-label="Criar projeto">${icon("plus", 17)}</button></div><div class="bh-projects"></div><div class="bh-local-note"><strong>Seu espaço, no seu computador.</strong>Boards salvos neste navegador.<br>Exporte uma cópia para guardar em outro lugar.</div></aside><main class="bh-main"><header class="bh-top"><label class="bh-search">${icon("search", 18)}<input type="search" aria-label="Buscar boards" placeholder="Buscar boards" autocomplete="off"></label><span class="bh-offline"><i></i>Workspace local</span></header><div class="bh-content"></div></main>`;
+  root.innerHTML = `<aside class="bh-side"><div class="bh-brand"><span class="bh-brand-mark">${icon("board", 23)}</span><span>no teu cu e atiro</span></div><div class="bh-workspace"><span class="bh-avatar">B</span><div><strong>Meu espaço</strong><small>Workspace local</small></div></div><nav class="bh-nav" aria-label="Navegação da biblioteca">${[["home", "home", "Início"], ["recent", "recent", "Recentes"], ["starred", "star", "Favoritos"], ["projects", "folder", "Projetos"], ["trash", "trash", "Lixeira"]].map(([id, glyph, text]) => `<button data-section="${id}" aria-label="${text}" title="${text}">${icon(glyph!)}<span>${text}</span></button>`).join("")}</nav><div class="bh-project-heading"><span>Meus projetos</span><button data-action="new-project" aria-label="Criar projeto">${icon("plus", 17)}</button></div><div class="bh-projects"></div><div class="bh-local-note"><strong>Seu espaço, no seu computador.</strong>${window.boardStudioDesktop?.isDesktop ? "Boards salvos neste computador." : "Boards salvos neste navegador."}<br>Exporte uma cópia para guardar em outro lugar.</div></aside><main class="bh-main"><header class="bh-top"><label class="bh-search">${icon("search", 18)}<input type="search" aria-label="Buscar boards" placeholder="Buscar boards" autocomplete="off"></label><span class="bh-offline"><i></i>Workspace local</span></header><div class="bh-content"></div></main>`;
   document.body.append(root);
   const menu = document.createElement("div"); menu.className = "bh-menu"; menu.hidden = true; menu.setAttribute("role", "menu"); document.body.append(menu);
   const homeButton = document.createElement("button"); homeButton.id = "board-home-trigger"; homeButton.title = "Voltar para a biblioteca"; homeButton.setAttribute("aria-label", "Início"); homeButton.innerHTML = icon("home", 18); homeButton.style.cssText = "width:40px;height:40px;display:grid;place-items:center;border:1px solid #e7e7e5;background:white;color:#42413a;cursor:pointer;border-radius:8px;box-shadow:var(--shadow-1)";
@@ -132,7 +134,7 @@ export function installBoardHome(api: HomeAPI) {
       return canvas.toDataURL("image/jpeg", .65);
     } catch { return ""; }
   }
-  function dataWithTitle(value: unknown, title: string) { if (!value || typeof value !== "object") throw new Error("O conteúdo do board não pôde ser salvo."); return { ...structuredClone(value), title, savedAt: Date.now() }; }
+  function dataWithTitle(value: unknown, title: string) { if (!value || typeof value !== "object") throw new Error("O conteúdo do board não pôde ser salvo."); return { ...value, title, savedAt: Date.now() }; }
   async function saveActive() {
     const board = meta(); if (!board) return;
     const captured = api.capture(); const title = titleOf((captured as { title?: unknown })?.title, board.title);
@@ -246,6 +248,7 @@ export function installBoardHome(api: HomeAPI) {
     boards.sort(index.sort === "title" ? (a, b) => a.title.localeCompare(b.title, "pt-BR") : index.sort === "created" ? (a, b) => b.createdAt - a.createdAt : (a, b) => b.editedAt - a.editedAt);
     const subtitles: Record<string, string> = { home: "Um espaço para organizar suas ideias e dar forma ao que vem a seguir.", recent: "Continue de onde parou.", starred: "Os boards que você quer ter sempre por perto.", trash: "Boards excluídos continuam aqui até você restaurá-los.", projects: "Organize seus boards por assunto ou projeto." };
     let content = `<div class="bh-heading"><div><h1>${escapeHTML(title)}</h1><div class="bh-subtitle">${projectId ? "Todos os boards deste projeto, em um só lugar." : subtitles[section] ?? ""}</div></div>${!isTrash ? `<button class="bh-primary" data-action="${section === "projects" ? "new-project" : "new-board"}">${icon("plus", 18)}${section === "projects" ? "Criar projeto" : "Criar board"}</button>` : ""}</div>`;
+    if(section==='home'&&!term)content=`<div class="bh-identity"><img src="/brand/logo.png" width="2172" height="724" alt="no teu cu e atiro"></div>`+content;
     if (section === "projects") {
       const projects = index.projects.filter(project => !term || project.title.toLocaleLowerCase("pt-BR").includes(term));
       content += projects.length ? `<div class="bh-grid">${projects.map(project => `<button class="bh-project-card" data-project="${escapeHTML(project.id)}">${icon("folder", 34)}<span><strong>${escapeHTML(project.title)}</strong><small>${index.boards.filter(board => board.project === project.id && board.trashedAt === null).length} boards</small></span></button>`).join("")}</div>` : `<div class="bh-empty">${icon("folder")}<h2>Nenhum projeto por aqui</h2><p>Crie um projeto para reunir boards relacionados.</p></div>`;
@@ -280,6 +283,7 @@ export function installBoardHome(api: HomeAPI) {
   document.addEventListener("pointerdown", event => { if (!menu.contains(event.target as Node)) closeMenu(); });
   document.addEventListener("keydown", event => {
     if(root.hidden&&!modal)return;
+    const externalDialog=(event.target as Element|null)?.closest?.('dialog[open],[role="dialog"][aria-modal="true"]');if(externalDialog&&externalDialog!==modal)return;
     if(event.key==='Escape'){event.preventDefault();if(modal)closeModal();else closeMenu(true);event.stopPropagation();return;}
     if(modal&&event.key==='Tab'){
       const controls=[...modal.querySelectorAll<HTMLElement>('input:not(:disabled),select:not(:disabled),textarea:not(:disabled),button:not(:disabled),a[href],[tabindex]:not([tabindex="-1"])')].filter(control=>control.getClientRects().length>0),index=controls.indexOf(document.activeElement as HTMLElement);

@@ -4,15 +4,16 @@ import {connectorCaptionLayout,captionCutCubics,captionCutSegments,captionDotVis
 import { capGeometry, patternedLineSegments } from '../core/line-decoration';
 import type { Vec } from '../core/geometry';
 import {screenStroke,screenDot} from './screen-coverage';
+import {connectorShaftGeometry} from './connector-shaft';
 
 /** Shared canvas paint for line patterns and all terminal decorations. */
 export function paintConnector(graphics:Graphics,connector:Connector,geometry:ConnectorGeometry,clear=true,zoom=1):void {
   if(clear)graphics.clear();
   const color=connector.style.strokeColor,width=connector.style.strokeWidth;
-  const line=patternedLineSegments(geometry.points,connector.style.strokeStyle,width);
+  const shaft=connectorShaftGeometry(connector,geometry),line=patternedLineSegments(shaft.points,connector.style.strokeStyle,width);
   const captions=connectorCaptionLayout(connector,geometry);
   const coverage=screenStroke(width,zoom),stroke={color,...coverage,cap:'round' as const,join:'round' as const};
-  const curves=geometry.cubics??(geometry.cubic?[geometry.cubic]:[]);
+  const curves=shaft.cubics??(shaft.cubic?[shaft.cubic]:[]);
   if((!connector.style.strokeStyle||connector.style.strokeStyle==='normal')&&curves.length){
     for(const c of captionCutCubics(curves,captions)){graphics.moveTo(c.p0.x,c.p0.y);graphics.bezierCurveTo(c.p1.x,c.p1.y,c.p2.x,c.p2.y,c.p3.x,c.p3.y);graphics.stroke(stroke);}
   }else for(const source of line.segments)for(const segment of captionCutSegments(source,captions)){if(segment.length<2)continue;graphics.moveTo(segment[0]!.x,segment[0]!.y);for(const point of segment.slice(1))graphics.lineTo(point.x,point.y);graphics.stroke(stroke);}
@@ -33,10 +34,10 @@ const polyline=(points:Vec[])=>points.map(p=>`${n(p.x)},${n(p.y)}`).join(' ');
 export function connectorSvgContent(connector:Connector,geometry:ConnectorGeometry,includeCaptions=true):string {
   const color=escaped(connector.style.strokeColor),width=connector.style.strokeWidth;
   const stroke=`fill="none" stroke="${color}" stroke-width="${n(width)}" stroke-linecap="round" stroke-linejoin="round"`;
-  const line=patternedLineSegments(geometry.points,connector.style.strokeStyle,width),pieces:string[]=[];
+  const shaft=connectorShaftGeometry(connector,geometry),line=patternedLineSegments(shaft.points,connector.style.strokeStyle,width),pieces:string[]=[];
   const captions=connectorCaptionLayout(connector,geometry);
   if(!connector.style.strokeStyle||connector.style.strokeStyle==='normal') {
-    const curves=geometry.cubics ?? (geometry.cubic?[geometry.cubic]:[]);
+    const curves=shaft.cubics ?? (shaft.cubic?[shaft.cubic]:[]);
     if(curves.length)for(const c of captionCutCubics(curves,captions))pieces.push(`<path d="M${n(c.p0.x)} ${n(c.p0.y)} C${n(c.p1.x)} ${n(c.p1.y)} ${n(c.p2.x)} ${n(c.p2.y)} ${n(c.p3.x)} ${n(c.p3.y)}" ${stroke}/>`);
     else for(const source of line.segments)for(const segment of captionCutSegments(source,captions))pieces.push(`<polyline points="${polyline(segment)}" ${stroke}/>`);
   }else{

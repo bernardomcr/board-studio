@@ -1,17 +1,17 @@
 :root{
- --studio-surface:#fffdf9;--studio-raised:#fff;--studio-soft:#f2eee7;--studio-line:#e4ddd2;--studio-ink:#292d32;--studio-muted:#7b7b79;
- --studio-accent:#c35932;--studio-tint:#f9e9df;--studio-shadow:0 6px 28px #39332a0e,0 1px 3px #39332a0c;
+ color-scheme:light;--studio-surface:#fbfaff;--studio-raised:#fff;--studio-soft:#eee9f6;--studio-line:#ded7e8;--studio-ink:#292331;--studio-muted:#746b80;
+ --studio-accent:#8050ba;--studio-tint:#eee3fb;--studio-vivid:#a970f0;--studio-brand:#b68aff;--studio-shadow:0 6px 28px #2816370e,0 1px 3px #2816370c;
  --panel:var(--studio-surface);--ink:var(--studio-ink);--accent:var(--studio-accent);--line:var(--studio-line);--muted:var(--studio-muted);
  --font-ui:var(--font);
- --blue-500:var(--studio-accent);--blue-450:#d87852;--blue-100:var(--studio-tint);--blue-50:var(--studio-tint);
- --cloud-50:#f6f3ed;--cloud-100:var(--studio-soft);--cloud-200:var(--studio-line);--cloud-300:#c8c1b6;--cloud-400:#a29d94;--cloud-500:var(--studio-muted);--cloud-600:#626366;--cloud-700:#474b50;--cloud-800:var(--studio-ink);--cloud-900:var(--studio-ink);
+ --blue-500:var(--studio-accent);--blue-450:var(--studio-vivid);--blue-100:var(--studio-tint);--blue-50:var(--studio-tint);
+ --cloud-50:#f0edf5;--cloud-100:var(--studio-soft);--cloud-200:var(--studio-line);--cloud-300:#c6bbd3;--cloud-400:#a096ad;--cloud-500:var(--studio-muted);--cloud-600:#655c70;--cloud-700:#4b4257;--cloud-800:var(--studio-ink);--cloud-900:var(--studio-ink);
  --font:'Inter','Noto Sans',system-ui,sans-serif;--shadow-1:var(--studio-shadow);
  --studio-tools-height:48px;--studio-dock-height:96px;
 }
 :root[data-theme=dark]{
- color-scheme:dark;--studio-surface:#24272c;--studio-raised:#2d3036;--studio-soft:#34383f;--studio-line:#41464e;--studio-ink:#f2f0eb;--studio-muted:#afb1b5;
- --studio-accent:#f09b72;--studio-tint:#4a342d;--studio-shadow:0 10px 32px #0003,0 1px 3px #0003;
- --cloud-50:#1c1f23;--cloud-300:#646971;--cloud-400:#92969d;--cloud-600:#c1c3c8;--cloud-700:#d9dadc;
+ color-scheme:dark;--studio-surface:#24212d;--studio-raised:#2d2938;--studio-soft:#373141;--studio-line:#3a3447;--studio-ink:#f4effa;--studio-muted:#b5adbf;
+ --studio-accent:#b68aff;--studio-tint:#3b2a50;--studio-shadow:0 10px 32px #0003,0 1px 3px #0003;
+ --cloud-50:#1b1a21;--cloud-300:#6d627c;--cloud-400:#9d90ad;--cloud-600:#c6bccf;--cloud-700:#e1d8e9;
 }
 /* The tools and document commands form one continuous dock at the window edge. */
 html body:not(.home-visible)::before{content:'';position:fixed;inset:0 0 auto;height:var(--studio-dock-height);z-index:9;background:var(--studio-surface);border-bottom:1px solid var(--studio-line);box-shadow:0 2px 8px #24272c08;pointer-events:auto}
@@ -144,3 +144,99 @@ html body.home-visible #interface-controls{right:24px;top:20px;z-index:120}
 }
 @media(max-width:560px){html body #toolbar{gap:1px;padding:4px;--tool-size:32px}html body #toolbar button{width:clamp(24px,7.3vw,32px);height:34px;border-radius:8px}html body #toolbar .sep{margin:0 2px;height:20px}html body #toolbar button .key{display:none}html body #toolbar button>svg{width:19px;height:19px}html body #topbar .chip:has(#undo){gap:0}html body #topbar .chip:has(#undo) button{width:24px;height:32px}}
 @media(prefers-reduced-motion:reduce){html body *{scroll-behavior:auto!important;transition:none!important}}
+
+/* One compact application bar; the real commands move to an overflow only
+   when their available width is small. No canvas hit area can cover chrome. */
+:root{--studio-dock-height:48px}
+html body.studio-dock-ready::before{content:none}
+#studio-dock{position:fixed;inset:0 0 auto;z-index:50;display:grid;grid-template-columns:minmax(0,1fr) auto minmax(0,1fr);align-items:center;gap:6px;width:100%;height:48px;padding:0 8px;background:var(--studio-surface);color:var(--studio-ink);border-bottom:1px solid var(--studio-line);isolation:isolate}
+html body #studio-dock #topbar{position:static;inset:auto;display:flex;gap:2px;width:auto;height:48px;padding:0;min-width:0;max-width:none;align-items:center}
+html body #studio-dock #board-title{margin:0;flex:1;min-width:0;max-width:180px;height:36px;line-height:36px;font-size:12px;padding:0 6px}
+html body #studio-dock #topbar .chip{height:36px;padding:0 2px;gap:0;border:0;flex:none}
+html body #studio-dock #topbar #board-title{flex:1}
+html body #studio-dock #topbar .chip:has(#export){display:flex}
+html body #studio-dock #topbar button{flex:none;width:28px;height:32px;padding:0}
+html body #studio-dock #project-file-controls{padding:0 2px;gap:0}
+html body #studio-dock #project-file-controls button{display:flex;align-items:center;justify-content:center;width:28px!important;height:32px;min-width:0;padding:0!important;gap:5px}
+html body #studio-dock #topbar .studio-command-label{display:none}
+html body #studio-dock #toolbar{position:static;inset:auto;transform:none;grid-column:2;grid-row:1;display:flex;width:max-content;max-width:none;height:48px;gap:2px;padding:0 2px;border:0;background:transparent;box-shadow:none}
+html body #studio-dock #toolbar button{width:36px;height:36px}
+html body #studio-dock #toolbar .sep{margin:0 3px;height:22px}
+html body #studio-dock #interface-controls,html body #studio-dock #layers-controls{position:static;inset:auto;display:block;width:auto;z-index:auto}
+#studio-dock-actions{grid-column:3;grid-row:1;display:flex;align-items:center;justify-content:flex-end;gap:3px;min-width:0}
+html body #studio-dock #theme-toggle,html body #studio-dock #layers-toggle,#studio-more{flex:none;width:36px;height:36px;padding:7px;border:0;border-radius:7px;background:transparent;color:var(--studio-ink);box-shadow:none;cursor:pointer}
+html body #studio-dock #layers-toggle{width:auto}
+html body #studio-dock #profile-open{max-width:112px;min-width:0}
+html body #studio-dock #board-home-trigger{width:32px!important;height:32px!important}
+#studio-more{display:grid;place-items:center}#studio-more[hidden]{display:none}
+#studio-more:hover,#studio-more[aria-expanded=true]{background:var(--studio-soft);color:var(--studio-accent)}
+#studio-more:focus-visible{outline:2px solid var(--studio-accent);outline-offset:2px}
+#studio-command-menu{position:fixed;width:248px;max-width:calc(100vw - 24px);overflow:auto;padding:7px;border:1px solid var(--studio-line);border-radius:12px;background:var(--studio-surface);color:var(--studio-ink);box-shadow:var(--studio-shadow);font:12px Inter,sans-serif;z-index:90}
+#studio-command-menu[hidden]{display:none}
+#studio-command-menu .studio-command-group{display:flex;flex-direction:column;gap:2px}
+html body #studio-command-menu button{display:flex;align-items:center;justify-content:flex-start;gap:10px;flex:none;width:100%!important;height:36px;padding:7px 9px!important;border:0;border-radius:7px;background:transparent;color:var(--studio-ink);font:12px Inter,sans-serif!important;text-align:left;cursor:pointer;white-space:nowrap}
+#studio-command-menu button>svg{width:18px;height:18px;flex:none}
+html body #studio-command-menu button:hover{background:var(--studio-soft);color:var(--studio-accent)}
+#studio-command-menu button:disabled{opacity:.45;cursor:default}
+html body #studio-command-menu #project-file-controls{display:flex;flex-direction:column;align-items:stretch;height:auto;margin-top:5px;padding:5px 0 0;border-top:1px solid var(--studio-line);border-radius:0;box-shadow:none;background:transparent}
+html body #studio-command-menu .studio-command-label{display:inline}
+html body.home-visible #studio-dock,html body.home-visible #studio-dock-actions{display:contents}
+html body.home-visible #studio-dock #interface-controls{position:fixed;right:24px;top:20px;z-index:120}
+html body.home-visible #studio-command-menu,html body.home-visible #studio-more,html body.home-visible #studio-dock #profile-open{display:none!important}
+@media(min-width:1441px){html body #studio-dock #topbar #project-file-controls button{width:auto!important;padding:0 5px!important}html body #studio-dock #topbar #project-file-controls .studio-command-label{display:inline}}
+@media(max-width:1440px){html body #studio-dock #layers-toggle{width:36px}html body #studio-dock #layers-toggle :is(.layers-label,.layers-total){display:none}}
+@media(max-width:1100px){html body #studio-dock #toolbar button{width:32px;height:34px}html body #studio-dock #toolbar .sep{margin:0 2px}html body #studio-dock #toolbar{gap:1px}html body #studio-dock #profile-open{width:32px;max-width:32px;min-width:32px;padding:0;gap:0;justify-content:center}html body #studio-dock #profile-open .profile-name{display:none}html body #studio-dock #theme-toggle,html body #studio-dock #layers-toggle,#studio-more{width:32px;height:32px;padding:6px}}
+@media(max-width:740px){
+ :root{--studio-dock-height:88px}
+ #studio-dock{height:88px;grid-template-columns:minmax(0,1fr) auto;grid-template-rows:44px 44px;gap:0 6px}
+ html body #studio-dock #toolbar{grid-column:1/-1;grid-row:1;width:100%;height:44px;justify-content:center}
+ html body #studio-dock #topbar{grid-column:1;grid-row:2;height:44px}
+ #studio-dock-actions{grid-column:2;grid-row:2}
+ html body #studio-dock #topbar .chip:has(#export){display:none}
+ html body #studio-dock #board-title{max-width:none;font-size:12px}
+ html body.home-visible #studio-dock #interface-controls{right:18px;top:12px}
+}
+@media(max-width:560px){html body #studio-dock #toolbar button{width:clamp(24px,7.3vw,32px);height:34px}html body #studio-dock #toolbar .sep{margin:0 2px}}
+
+/* Every floating surface follows the theme, including selected icon states. */
+html[data-theme=dark] body :is(#editor-context,#link-dialog,#connector-completion,.brand-dialog,.image-crop-toolbar,#help-panel .card,#studio-command-menu){background:var(--studio-surface);color:var(--studio-ink);border-color:var(--studio-line)}
+html[data-theme=dark] body :is(#selection-properties,#mindmap-properties,#shape-picker,#connector-picker,#drawing-palette,#board-background-panel,#audio-create-menu,#editor-context,#link-dialog,#connector-completion,.brand-dialog,.font-picker-popover) :is(input,select,textarea){background-color:var(--studio-raised);color:var(--studio-ink);border-color:var(--studio-line);accent-color:var(--studio-accent)}
+html[data-theme=dark] body :is(#selection-properties,#mindmap-properties,#shape-picker,#connector-picker,#drawing-palette,#board-background-panel,#audio-create-menu,#editor-context,#link-dialog,#connector-completion,.brand-dialog) :is(button,summary):not(.color-swatch):not([data-color]):not([data-sticky-color]):not([data-mind-color]){color:var(--studio-ink)}
+html[data-theme=dark] body :is(#selection-properties,#mindmap-properties,#shape-picker,#connector-picker,#drawing-palette,#board-background-panel,#audio-create-menu,#editor-context,#link-dialog,#connector-completion,.brand-dialog) :is(button[aria-pressed=true],button[aria-checked=true],details[open]>summary):not(.color-swatch):not([data-color]):not([data-sticky-color]):not([data-mind-color]){background:var(--studio-tint)!important;color:var(--studio-accent)!important;border-color:var(--studio-accent)}
+html[data-theme=dark] body :is(#selection-properties,#mindmap-properties,#shape-picker,#connector-picker,#drawing-palette,#board-background-panel,#audio-create-menu,#editor-context,#link-dialog,#connector-completion,.brand-dialog) :is(button,summary):hover:not(.color-swatch):not([data-color]):not([data-sticky-color]):not([data-mind-color]){background-color:var(--studio-soft);color:var(--studio-accent)}
+html[data-theme=dark] body :is(#selection-properties,#mindmap-properties,#shape-picker,#connector-picker,#drawing-palette,#board-background-panel,#audio-create-menu,#editor-context,#link-dialog,#connector-completion,.brand-dialog,.font-picker-popover) :is(label,p,small,.control-note,.empty-message,.editor-footnote,.palette-heading,.palette-empty,.font-picker-heading){color:var(--studio-muted)}
+html[data-theme=dark] body :is(#selection-properties,#mindmap-properties,#shape-picker,#connector-picker,#drawing-palette,#board-background-panel,#audio-create-menu,#editor-context,#link-dialog,#connector-completion,.brand-dialog,.font-picker-popover) :is(input,textarea)::placeholder{color:var(--studio-muted);opacity:1}
+html[data-theme=dark] body :is(#selection-properties,#mindmap-properties) .toolbar-border-color{background-color:var(--studio-surface)}
+html[data-theme=dark] body .font-picker-trigger:is(:hover,[aria-expanded=true]){background:var(--studio-soft)!important;color:var(--studio-ink)!important}
+html[data-theme=dark] body :is(.brand-dialog,#link-dialog,#connector-completion) :is(button,.brand-close,.brand-row button){color:var(--studio-ink)}
+html[data-theme=dark] body .brand-dialog button[type=submit]{background:var(--studio-accent);color:var(--studio-surface)}
+html[data-theme=dark] body :is(.brand-dialog,#selection-properties,#mindmap-properties,#link-dialog) [role=alert]{color:#ffb4ab}
+html[data-theme=dark] body #mindmap-properties :is(.mind-form-row button,.mind-icon-presets button,.mind-transparent){background:var(--studio-raised);border-color:var(--studio-line);color:var(--studio-ink)}
+html[data-theme=dark] body .font-picker-trigger{background:var(--studio-raised)!important;color:var(--studio-ink);border-color:var(--studio-line)!important}
+html body #help-panel{z-index:100}
+html[data-theme=dark] body .image-crop-toolbar button[data-crop-apply]{color:var(--studio-surface)}
+html[data-theme=dark] body #audio-record-dialog button[data-stop]{background:var(--studio-tint);color:var(--studio-accent);border-color:var(--studio-line)}
+html[data-theme=dark] body .font-picker-upload:hover{background:var(--studio-soft);color:var(--studio-accent)}
+
+/* The supplied wordmark lives on charcoal in both interface themes. */
+html body #board-home .studio-mark{gap:10px;margin:0 6px 28px;letter-spacing:-.025em}
+html body #board-home .studio-mark .studio-symbol{display:block;flex:none;width:36px;height:36px;object-fit:contain}
+html body #board-home .studio-name{font-size:15px;line-height:1.2;font-weight:750;max-width:132px;color:var(--studio-ink)}
+html body #board-home .bh-identity{position:relative;display:flex;align-items:center;justify-content:flex-start;height:180px;margin:0 0 30px;padding:18px 32px;overflow:hidden;border:1px solid #3a3447;border-radius:20px;background:radial-gradient(ellipse at 94% 8%,#8050ba35,transparent 66%),#1b1a21;box-shadow:0 12px 30px #1b152211}
+html body #board-home .bh-identity:after{content:'';position:absolute;width:240px;height:240px;right:-94px;top:-110px;border:1px solid #b68aff24;border-radius:50%;pointer-events:none}
+html body #board-home .bh-identity img{position:relative;z-index:1;display:block;width:min(100%,440px);height:100%;object-fit:contain;object-position:left center}
+html body #board-home .bh-search{border-color:var(--studio-line);color:var(--studio-muted)}
+html body #board-home .bh-offline i{background:var(--studio-vivid);box-shadow:0 0 0 3px color-mix(in srgb,var(--studio-vivid) 13%,transparent)}
+html body #board-home .bh-project-card{background:var(--studio-surface);color:var(--studio-ink);border-color:var(--studio-line)}
+html body #board-home .bh-project-card:hover{border-color:var(--studio-accent);box-shadow:var(--studio-shadow)}
+@media(max-width:740px){html body #board-home .studio-mark{margin:0 6px 28px}html body #board-home .studio-mark .studio-symbol{width:36px;height:36px}html body #board-home .bh-identity{height:132px;padding:16px 22px;margin-bottom:24px;border-radius:16px}}
+
+/* Library secondary actions override the legacy white button/card surfaces. */
+html body :is(#board-home,.bh-modal) :is(.bh-secondary,.bh-import,.bh-btn:not(.bh-primary)){background:var(--studio-raised)!important;color:var(--studio-ink)!important;border-color:var(--studio-line)!important}
+html body :is(#board-home,.bh-modal) :is(.bh-secondary,.bh-import,.bh-btn:not(.bh-primary)):hover{background:var(--studio-soft)!important;color:var(--studio-accent)!important}
+html body :is(#board-home,.bh-modal) :is(.bh-secondary,.bh-import,.bh-btn:not(.bh-primary)):focus-visible{outline:2px solid var(--studio-accent);outline-offset:3px}
+html body #board-home .bh-project-card{background:var(--studio-surface)!important;color:var(--studio-ink)!important;border-color:var(--studio-line)!important}
+html body #board-home .bh-project-card:hover{border-color:var(--studio-accent)!important}
+html body #board-home .bh-project-card :is(small,svg),html body .bh-modal-note{color:var(--studio-muted)}
+html body #board-home .bh-project-card svg{color:var(--studio-accent)}
+html[data-theme=dark] body .bh-menu button.danger{color:#ffabb5}

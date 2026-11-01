@@ -1,6 +1,6 @@
-# Board Studio
+# no teu cu e atiro
 
-Editor visual local com canvas infinito, biblioteca de boards e ferramentas para diagramas, imagens, texto e desenho livre.
+Editor visual local com canvas infinito, biblioteca de boards, conectores, imagens, texto e desenho livre. Identidade em cinza escuro e roxo, com o logo original da marca.
 
 ## Executar
 
@@ -14,11 +14,28 @@ npm run dev
 
 No Windows, `TESTAR.cmd` compila e abre a versão de produção em `http://localhost:4173`.
 
+## Aplicativo Windows
+
+Os instaladores e a versão sem instalação ficam em [Releases](https://github.com/bernardomcr/board-studio/releases). O aplicativo Windows x64 funciona offline e usa um perfil local com nome, sem senha ou conta online. A integração com Google Drive está prevista para uma próxima etapa.
+
+O navegador e o executável usam armazenamentos separados. Para levar boards existentes, exporte seus arquivos `.board.json` no navegador e escolha **Importar board de arquivo** na biblioteca do aplicativo. A versão sem instalação também guarda os boards no perfil local do Windows; exportar os arquivos permite transportá-los.
+
+Para compilar no Windows:
+
+```sh
+npm --prefix app ci
+npm --prefix desktop ci
+node desktop/node_modules/electron/install.js
+npm --prefix desktop run package
+```
+
+Os executáveis ficam em `desktop/dist`. O instalador desta versão não possui assinatura digital de editor; os hashes SHA-256 acompanham o release.
+
 ## Recursos
 
 - Biblioteca inicial com projetos, busca, ordenação, grade/lista, favoritos, duplicação e lixeira recuperável.
 - Criação de boards em branco, sem templates. O botão de seleção liga/desliga: desligado, arrastar navega pelo canvas; Espaço também permite navegar temporariamente.
-- Interface Studio com faixa de ferramentas encostada no topo da janela, comandos logo abaixo, identidade em tinta/areia/cobre e temas claro/escuro persistentes. Menus respeitam a área ocupada pelas duas faixas.
+- Uma faixa compacta no topo do desktop reúne título, ferramentas e comandos. A identidade usa cinza escuro e roxo, com temas claro/escuro persistentes; o executável começa escuro quando ainda não há preferência. Em janelas estreitas, comandos secundários ficam em Mais opções do board. Menus respeitam a área ocupada pela faixa.
 - Notas novas e seus redimensionamentos mantêm a proporção quadrada. O bloco é um objeto físico no quadro: arraste o papel para puxar uma nota independente e use o pegador inferior para mover o bloco.
 - Controle Fundo na parte inferior: claro, escuro, cor personalizada, malha pontilhada, quadriculada, de cruzetas ou sem malha, opacidade ajustável da malha, e imagem de fundo com tamanho proporcional e opacidade, salvo por board e no arquivo editável.
 - Menu rápido de formas e biblioteca expandida em “Mais formas”, com 77 entradas pesquisáveis, geometrias próprias e exportação SVG.
@@ -27,7 +44,7 @@ No Windows, `TESTAR.cmd` compila e abre a versão de produção em `http://local
 - Rótulos de conectores horizontais ou acompanhando a tangente, com posição, tamanho e cor próprios; a linha abre espaço sob o texto centralizado. Arrastar o rótulo muda sua posição ao longo do caminho. T+ ou duplo clique inicia a edição; Escape cancela um rascunho sem consumir Undo. Inserir texto, nota ou forma no meio divide a conexão em duas, preservando os rótulos e o histórico.
 - Menu de imagens com baixar original, recorte no próprio quadro, opacidade e bordas/cantos. O recorte aceita área livre, original, círculo, quadrado, 3:4, 4:3, 16:9 e cantos arredondados; arraste a foto dentro da moldura ou ajuste as alças, Enter aplica e Escape cancela. Máscaras ficam dentro de Recortar. O original é preservado.
 - Grupos aninhados com formas, imagens, conectores e traços; movimentação, escala, rotação, duplicação e bloqueio.
-- Painel Camadas com grupos recolhíveis, nomes, miniaturas, ocultar, bloquear, seleção múltipla e ordenação por arraste ou botões. A ordem visual inclui fotos, texto, formas, traços e conectores.
+- Camadas de trabalho: a camada ativa recebe os próximos textos, imagens, formas, conectores e traços. O + cria uma camada vazia transparente; grupos de camadas, visibilidade, bloqueio e ordem são independentes dos grupos de objetos. Camadas começam recolhidas e mostram a quantidade de objetos; expandir revela os detalhes editáveis. Boards antigos migram para uma camada preservando sua composição. O histórico e o arquivo editável preservam camadas, grupos e estados próprios de cada objeto.
 - Texto livre sem quebra automática por caixa: arrastar qualquer alça aumenta/reduz as letras e mantém a caixa ajustada ao conteúdo, inclusive em escalas grandes. Texto novo começa no centro da tela com tamanho visual adaptado ao zoom, sem mover a câmera. Duplo clique em formas permite escrever dentro delas. Formas, notas e tópicos ajustam a fonte visual para caber, preservando o tamanho preferido; ao ampliar a caixa, as letras voltam a crescer até esse tamanho.
 - Bordas proporcionais com barra de espessura e presets; acompanham o tamanho dos objetos. Pontos de conexão ao passar o mouse e curvas ajustáveis com prévia estável.
 - 43 famílias tipográficas locais, incluindo 18 novas opções artísticas/manuscritas, seletor com busca, filtros de estilo e prévia de cada fonte, importação de TTF/OTF/WOFF/WOFF2, formatação de texto, paletas com transparente, seleção por contorno azul e cores da marca locais com adicionar/editar/excluir. As barras de ícones respeitam cada tipo de seleção. Fontes importadas acompanham os arquivos editáveis e o SVG exportado.
@@ -39,7 +56,7 @@ No Windows, `TESTAR.cmd` compila e abre a versão de produção em `http://local
 - Zoom de 2% a 2.000%, presets, percentual personalizado e ajuste à tela de todos os tipos de objetos. Fontes são rasterizadas novamente conforme tamanho, zoom e densidade da tela, com filtragem na redução e limites de memória por textura.
 - Precisão do pincel ajustável entre mais fiel e mais suave, com tolerância capturada na escala do desenho. Renderização adaptativa reduz segmentos invisíveis em zoom baixo, conservando os pontos e o SVG. Gestos de movimentação/redimensionamento são agrupados por quadro, e alças de objetos minúsculos deixam de capturar cliques de movimento.
 - Tamanhos lógicos de fonte, objetos, traços e bordas não têm os antigos tetos artificiais. A espessura dos conectores e das bordas usa barras expansíveis; os limites de arquivos, quantidade de células e memória de renderização continuam protegendo o navegador.
-- Navegação com momentum também ao segurar Espaço. Movimentar objetos conserva a geometria local; pintura e layout são reutilizados durante navegação. O histórico compacta atualizações intermediárias dos gestos e normaliza históricos antigos ao carregá-los, preservando Undo/Redo; a versão compacta é gravada no próximo salvamento. O arraste fino não é quantizado à malha: as guias entre objetos usam atração de 6 pixels de tela, desativada por Alt. Movimentos recebidos entre quadros usam a posição mais recente.
+- Navegação com momentum também ao segurar Espaço. A malha retém sua geometria vetorial durante o pan e altera apenas a fase, sem recriar milhares de pontos a cada quadro. Movimentar objetos conserva a geometria local; pintura e layout são reutilizados durante navegação. O autosave captura diretamente no IndexedDB quando a conexão está pronta, com uma cópia isolada de fallback ao abrir o banco; captura, chave e histórico permanecem consistentes. O histórico compacta atualizações intermediárias dos gestos e normaliza históricos antigos ao carregá-los, preservando Undo/Redo. O arraste fino não é quantizado à malha: as guias entre objetos usam atração de 6 pixels de tela, desativada por Alt. Movimentos recebidos entre quadros usam a posição mais recente.
 - Navegação com momentum interrompido por novas ações; alças mostram setas de redimensionamento conforme a rotação. Duplo clique em uma camada enquadra seu objeto. A barra superior não tem rolagem e concentra linhas e setas em Formas.
 - Desfazer/refazer, exportação PNG/SVG e arquivos editáveis `.board.json`.
 

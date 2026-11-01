@@ -4,6 +4,8 @@ import type { Connector } from './connectors';
 import type { Stroke } from './strokes';
 import { SHAPE_OPTIONS } from './model';
 import { groupLeaves } from './groups';
+export {ensureBoardLayers,snapshotBoardLayers,restoreBoardLayers,boardLayerOrder,boardLayerFlags,layerDescendants,validateBoardLayers} from './board-layers';
+export type {BoardLayers,BoardLayer,LayerMembership} from './layer-model';
 
 export type LayerEntity = (Widget | Connector | Stroke) & { name?: string; hidden?: boolean };
 export type LayerDestination = 'front' | 'back' | 'forward' | 'backward' | { targetId: string; position: 'before' | 'after' };
@@ -35,7 +37,7 @@ export function layerLabel(state: BoardState, id: string): string {
   return item.type === 'text' ? 'Texto' : 'Nota adesiva';
 }
 
-/** Top to bottom. Groups are a display hierarchy; members retain their own identity. */
+/** Object detail tree inside a document layer. Object groups retain their identity. */
 export function layerTree(state: BoardState): LayerNode[] {
   const parented = new Set([...state.groups.values()].flat());
   const seen = new Set<string>();
