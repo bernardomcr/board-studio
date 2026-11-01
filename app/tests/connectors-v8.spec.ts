@@ -26,9 +26,9 @@ test('hover dots pull a live curve that commits unchanged and bends without a ju
   const errors=[];page.on('pageerror',e=>errors.push(e.message));await fixture(page);
   await page.mouse.move(350,325);
   const pixels=await page.evaluate(()=>{
-    const data=window.__board.app.renderer.extract.pixels({target:window.__board.app.stage.children[2]}),p=data.pixels;let blue=0;
-    for(let i=0;i<p.length;i+=4)if(p[i]===56&&p[i+1]===89&&p[i+2]===255&&p[i+3]>200)blue++;
-    return blue;
+    const data=window.__board.app.renderer.extract.pixels({target:window.__board.app.stage.children[2]}),p=data.pixels;let purple=0;
+    for(let i=0;i<p.length;i+=4)if(p[i]===169&&p[i+1]===112&&p[i+2]===240&&p[i+3]>200)purple++;
+    return purple;
   });
   expect(pixels).toBeGreaterThan(100);expect(await page.evaluate(()=>window.__board.state.selection.size)).toBe(0);
   await page.mouse.move(460,325);await expect(page.locator('#app canvas')).toHaveCSS('cursor','pointer');

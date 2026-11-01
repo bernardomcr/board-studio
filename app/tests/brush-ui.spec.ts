@@ -41,6 +41,8 @@ test('brush precision and Alt-left size/opacity gestures use the visible tip and
 });
 
 test('a long real brush gesture has identical opacity at crossings and frozen-preview chunk joins before and after release',async({page})=>{
+ // Preserve every native sample and pixel assertion on software-GPU runners.
+ if(process.env.CI)test.setTimeout(180000);
   await blank(page);await brush(page);
   // The tool options now open under the top strip. Begin the native stroke in
   // the free canvas area; it still crosses itself and every preview chunk.

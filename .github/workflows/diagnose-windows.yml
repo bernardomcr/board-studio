@@ -32,9 +32,9 @@ jobs:
         timeout-minutes: 5
         run: npx playwright install chromium --only-shell
         working-directory: app
-      - name: Browser boot and local profile
-        timeout-minutes: 3
-        run: npm test -- profile-v18.spec.ts --max-failures=1 --reporter=line,./tests/reporters/github-status.cjs
+      - name: Long native brush gestures
+        timeout-minutes: 7
+        run: npm test -- brush-precision.spec.ts brush-ui.spec.ts --grep "native precision at two percent|a long real brush gesture" --max-failures=1 --reporter=line,./tests/reporters/github-status.cjs
         working-directory: app
         env:
           CI: 'true'

@@ -11,14 +11,14 @@ async function fixture(page){
     {...createWidget('shape',{x:-200,y:250,width:180,height:110}),id:'locked',locked:true},
   ])b.bus.exec({op:'WIDGET_CREATE',payload:w});b.bus.exec({op:'SELECTION_SET',payload:[]});});
 }
-async function bluePixels(page,x,y){return page.evaluate(({x,y})=>{const b=window.__board,data=b.app.renderer.extract.pixels({target:b.app.stage,frame:new b.app.screen.constructor(x-9,y-9,18,18),resolution:1}).pixels;let n=0;for(let i=0;i<data.length;i+=4)if(data[i]===56&&data[i+1]===89&&data[i+2]===255&&data[i+3]>200)n++;return n;},{x,y});}
+async function selectionPixels(page,x,y){return page.evaluate(({x,y})=>{const b=window.__board,data=b.app.renderer.extract.pixels({target:b.app.stage,frame:new b.app.screen.constructor(x-9,y-9,18,18),resolution:1}).pixels;let n=0;for(let i=0;i<data.length;i+=4)if(data[i]===169&&data[i+1]===112&&data[i+2]===240&&data[i+3]>200)n++;return n;},{x,y});}
 async function paintedEndpoint(page){return page.evaluate(()=>{const b=window.__board,instruction=b.app.stage.children[2].context.instructions.find(i=>i.action==='stroke'&&i.data?.path?.instructions.some(p=>p.action==='bezierCurveTo'));const curve=instruction.data.path.instructions.filter(p=>p.action==='bezierCurveTo').at(-1);return curve.data.slice(4,6);});}
 
 test('connector ports advertise nearby targets and magnetize without a crosshair or snap flicker',async({page})=>{
   await fixture(page);await page.mouse.move(390,395);await page.mouse.move(500,395);await expect(page.locator('#app canvas')).toHaveCSS('cursor','pointer');
   await page.mouse.down();await expect(page.locator('#app canvas')).toHaveCSS('cursor','default');await page.mouse.move(700,560,{steps:15});
   // The visible destination port is ahead of the wire, not merely its end marker.
-  expect(await bluePixels(page,800,595)).toBeGreaterThan(12);expect(await bluePixels(page,760,810)).toBe(0);expect(await bluePixels(page,600,805)).toBe(0);
+  expect(await selectionPixels(page,800,595)).toBeGreaterThan(12);expect(await selectionPixels(page,760,810)).toBe(0);expect(await selectionPixels(page,600,805)).toBe(0);
   await page.screenshot({path:'../work/v9-connector-target-ports.png'});
   await page.mouse.move(790,595,{steps:6});let end=await paintedEndpoint(page);expect(end[0]).toBeCloseTo(800,5);expect(end[1]).toBeCloseTo(595,5);
   await page.mouse.move(780,595);end=await paintedEndpoint(page);expect(end[0]).toBeCloseTo(800,5);expect(end[1]).toBeCloseTo(595,5);

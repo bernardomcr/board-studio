@@ -40,6 +40,9 @@ test('subpixel strokes remain continuous at two percent without increasing their
 });
 
 test('native precision at two percent records the visible smoothing window and survives reload',async({page})=>{
+ // SwiftShader in CI delivers hundreds of real input events much more slowly
+ // than the hardware-GPU run. Keep all 320 events, geometry and reload checks.
+ if(process.env.CI)test.setTimeout(180000);
  await blank(page);await page.evaluate(()=>{const c=window.__board.camera;c.x=0;c.y=0;c.scale=.02;});
  await page.locator('[data-tool="brush"]').click();await openDrawingPalette(page);await page.getByRole('checkbox',{name:'Precisão do pincel',exact:true}).check();await page.getByRole('slider',{name:'Suavização da precisão',exact:true}).press('End');
  await page.mouse.move(500,550);await page.mouse.down();for(let i=1;i<=320;i++){const x=500+i*1.8,y=550+40*Math.sin((x-500)/120)+2*Math.sin(i*1.4);await page.mouse.move(x,y);}await page.mouse.up();
