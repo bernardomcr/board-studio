@@ -3,6 +3,7 @@ import { Camera } from "./core/camera";
 import {PanMomentum} from './core/pan-momentum';
 import {resizeCursor,ROTATE_CURSOR} from './core/cursors';
 import {paintBoardGrid} from './render/grid-paint';
+import {installRenderDemand} from './render/render-demand';
 import { gridStateAt, snapPoint, type GridState } from "./core/grid";
 import { CommandBus, type AlignMode, type BoardState, type Command } from "./core/commands";
 import { nextId, createWidget, STICKY_COLORS, type Widget, type WidgetType, type Style, type ShapeWidget } from "./core/model";
@@ -95,6 +96,7 @@ await app.init({
   resolution: Math.min(window.devicePixelRatio || 1, 3),
   autoDensity: true,
 });
+const requestRender=installRenderDemand(app).request;
 host.appendChild(app.canvas);
 // Board input is handled by the canvas DOM listeners below. Traversing Pixi's
 // complete display tree again for native pointermove duplicates hit testing.
@@ -113,7 +115,7 @@ const gridLayer = new Graphics();
 const overlay = new Graphics();
 
 app.stage.addChild(gridLayer, world, overlay);
-const brushPreview=installBrushPreview(app.stage,camera);
+const brushPreview=installBrushPreview(app.stage,camera,requestRender);
 
 const STORAGE_KEY = "board-app:v1";
 let home:ReturnType<typeof installBoardHome>|undefined;
@@ -266,6 +268,7 @@ function syncScene(refreshOverlays=true): void {
   // Content commands refresh chrome immediately afterwards; camera-only syncs
   // still need overlays here. Avoid updating both overlay trees twice per move.
   if(refreshOverlays){audioUI?.refresh();structuredUI?.refresh();}
+  requestRender();
 }
 
 function syncSize(): void {
@@ -290,6 +293,7 @@ let lastCamera = { x: camera.x, y: camera.y, scale: camera.scale };
 function drawGrid(): void {
   gridState = gridStateAt(camera.scale);
   paintBoardGrid(gridLayer,camera,state.background);
+  requestRender();
 }
 
 // ------------------------------------------------------------- selection
@@ -485,6 +489,7 @@ function beginEdit(w: Widget): void {
   selection?.addRange(range);
 
   scene.setTextVisible(w.id, false);
+  requestRender();
 
   el.addEventListener("keydown", (event) => {
     if(w.mind&&!event.ctrlKey&&!event.metaKey&&(event.key==='Tab'||event.key==='Enter'&&!event.shiftKey)){
@@ -550,6 +555,7 @@ function connectorControlVisible(c:Connector,geometry:NonNullable<ReturnType<typ
 }
 function drawSelection(): void {
   overlay.clear();
+  requestRender();
   if(document.body.classList.contains('image-cropping'))return;
   if(['hand','brush','highlighter','eraser'].includes(tool))return;
   if(state.selection.size&&[...state.selection].every(entityHidden))return;
@@ -639,7 +645,7 @@ let tool: Tool = "select";
 let stickyStackMode=false;
 const creationStyles:Partial<Record<WidgetType,Partial<Style>>>={};
 let selectedShape: ShapeWidget["shape"] = "rectangle";
-const creationPreview=installCreationPreview({parent:world,camera,canvas:app.canvas,getTool:()=>tool,getGesture:()=>gesture,temporaryHand:()=>spaceDown,getTemplate:()=>{
+const creationPreview=installCreationPreview({parent:world,camera,canvas:app.canvas,onChange:requestRender,getTool:()=>tool,getGesture:()=>gesture,temporaryHand:()=>spaceDown,getTemplate:()=>{
   if(!['shape','sticky_note','text','frame'].includes(tool))return;
   const widget=createWidget(tool as WidgetType,{x:0,y:0,shape:selectedShape,content:tool==='text'?'Texto':tool==='frame'?'Quadro':''});
   widget.style={...widget.style,...creationStyles[widget.type]};return widget;
@@ -1435,6 +1441,7 @@ app.canvas.addEventListener("pointermove", (e) => {
     case "erase": {
       const erasing=gesture;erasing.pending.push(p);queueGestureUpdate(()=>{const points=erasing.pending;erasing.pending=[];if(points.length){erasePath([erasing.last,...points],erasing.radius,erasing.partial);erasing.last=points.at(-1)!;}});
       const cursor=camera.worldToScreen(p);overlay.clear().circle(cursor.x,cursor.y,gesture.radius*camera.scale).stroke({width:1,color:0xa970f0});
+      requestRender();
       return;
     }
     case "reconnect": {
@@ -1469,6 +1476,7 @@ app.canvas.addEventListener("pointermove", (e) => {
         .rect(a.x, a.y, b.x - a.x, b.y - a.y)
         .fill({ color: 0xa970f0, alpha: 0.08 })
         .stroke({ width: 1, color: 0xa970f0 });
+      requestRender();
       return;
     }
     case "multi-resize": {

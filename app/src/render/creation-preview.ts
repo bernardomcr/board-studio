@@ -26,6 +26,7 @@ interface CreationPreviewOptions{
   getTemplate():Widget|undefined;
   getGesture():{kind:string};
   temporaryHand():boolean;
+  onChange?():void;
 }
 
 /** Real renderer, isolated transient state: a triangle previews as a triangle. */
@@ -37,8 +38,9 @@ export function installCreationPreview(api:CreationPreviewOptions){
     current=widget;const displayed={...widget,id:'creation-preview-widget'};
     state.widgets.set(displayed.id,displayed);state.order=[displayed.id];layer.visible=true;
     scene.sync(state,api.camera.visibleWorldRect(),api.camera.scale);
+    api.onChange?.();
   }
-  function clear(){layer.visible=false;current=undefined;}
+  function clear(){const changed=layer.visible;layer.visible=false;current=undefined;if(changed)api.onChange?.();}
   function refresh(){
     if(!isCreationTool(api.getTool())&&api.getGesture().kind!=='sticky-pull'||api.temporaryHand()||document.body.classList.contains('home-visible')){clear();return;}
     if(['create','sticky-pull'].includes(api.getGesture().kind)&&current)show(current);else clear();

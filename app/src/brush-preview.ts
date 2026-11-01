@@ -17,10 +17,10 @@ function rangeBounds(geometry:StrokeGeometry):BrushBounds|undefined {
 const unionBounds=(a:BrushBounds|undefined,b:BrushBounds|undefined):BrushBounds|undefined=>!a?b:!b?a:{minX:Math.min(a.minX,b.minX),minY:Math.min(a.minY,b.minY),maxX:Math.max(a.maxX,b.maxX),maxY:Math.max(a.maxY,b.maxY)};
 
 /** Completed sections remain immutable: one input sample never rebuilds the whole scribble. */
-export function installBrushPreview(stage:Container,camera:Camera){
+export function installBrushPreview(stage:Container,camera:Camera,onChange?:()=>void){
   const layer=new Container();layer.label='brush-preview';layer.eventMode='none';stage.addChild(layer);
   const opacity=new AlphaFilter({alpha:1,resolution:'inherit',antialias:'inherit'});let tail=new Graphics();layer.addChild(tail);
-  let frozen=0,scheduled=0,current:{points:StrokePoint[];settings:DrawingSettings}|undefined,cameraKey='',pointsReference:StrokePoint[]|undefined,geometryStyle='',frozenBounds:BrushBounds|undefined;
+  let frozen=0,scheduled=0,current:{points:StrokePoint[];settings:DrawingSettings}|undefined,cameraKey='',pointsReference:StrokePoint[]|undefined,geometryStyle='',frozenBounds:BrushBounds|undefined,painted=false;
   const filterArea=new Rectangle();
   const resetGeometry=()=>{for(const child of layer.removeChildren())destroyDisplayTree(child);tail=new Graphics();layer.addChild(tail);frozen=0;frozenBounds=undefined;};
   function paint(){
@@ -36,9 +36,10 @@ export function installBrushPreview(stage:Container,camera:Camera){
     paintStroke(tail,stroke,{...options,geometry,startSegment:frozen,endSegment:Math.max(0,points.length-1)});
     const bounds=unionBounds(frozenBounds,rangeBounds(geometry));
     if(bounds){const a=camera.worldToScreen({x:bounds.minX,y:bounds.minY}),b=camera.worldToScreen({x:bounds.maxX,y:bounds.maxY}),left=Math.max(0,Math.min(camera.width,a.x-2)),top=Math.max(0,Math.min(camera.height,a.y-2)),right=Math.max(0,Math.min(camera.width,b.x+2)),bottom=Math.max(0,Math.min(camera.height,b.y+2));filterArea.x=left;filterArea.y=top;filterArea.width=Math.max(1,right-left);filterArea.height=Math.max(1,bottom-top);layer.filterArea=filterArea;}
+    painted=true;onChange?.();
   }
   const request=()=>{if(!scheduled&&current)scheduled=requestAnimationFrame(paint);};
-  function clear(){if(scheduled)cancelAnimationFrame(scheduled);scheduled=0;current=undefined;resetGeometry();layer.filters=null;cameraKey='';pointsReference=undefined;geometryStyle='';clearStrokePaint(tail);}
+  function clear(){if(!scheduled&&!current&&!painted)return;const changed=painted;if(scheduled)cancelAnimationFrame(scheduled);scheduled=0;current=undefined;resetGeometry();layer.filters=null;cameraKey='';pointsReference=undefined;geometryStyle='';clearStrokePaint(tail);painted=false;if(changed)onChange?.();}
   return {update:(points:StrokePoint[],settings:DrawingSettings)=>{current={points,settings};request();},request,flush:()=>{if(scheduled)cancelAnimationFrame(scheduled);paint();},clear,layer};
 }
 

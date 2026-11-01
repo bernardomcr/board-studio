@@ -1,8 +1,12 @@
 name: Check
 on: [push, pull_request]
+concurrency:
+  group: check-${{ github.ref }}
+  cancel-in-progress: true
 jobs:
   check:
     runs-on: ubuntu-latest
+    timeout-minutes: 50
     defaults:
       run:
         working-directory: app
@@ -15,5 +19,5 @@ jobs:
           cache-dependency-path: app/package-lock.json
       - run: npm ci
       - run: npx playwright install --with-deps chromium
-      - run: npm test
+      - run: npm test -- --max-failures=1
       - run: npm run build

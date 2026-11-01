@@ -32,7 +32,7 @@ jobs:
         timeout-minutes: 5
         run: npx playwright install chromium --only-shell
         working-directory: app
-      - name: Isolate profile rendering cost
+      - name: Browser boot and local profile
         timeout-minutes: 3
         run: npm test -- profile-v18.spec.ts --max-failures=1 --reporter=line,./tests/reporters/github-status.cjs
         working-directory: app
@@ -43,7 +43,7 @@ jobs:
           BOARD_TEST_STEPS: 'true'
           PLAYWRIGHT_BUNDLED_BROWSER: 'true'
           BOARD_TEST_GPU_PROBE: 'true'
-          BOARD_TEST_PAUSE_RENDERER: 'true'
+          BOARD_TEST_PAUSE_RENDERER: 'false'
       - uses: actions/upload-artifact@v4
         if: always()
         with:

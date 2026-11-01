@@ -17,7 +17,7 @@ No Windows, `../TESTAR.cmd` compila e abre `http://localhost:4173`. Os boards fi
 |---|---|
 | Selecionar / navegar | V; clicar novamente no botão de seleção ativa a mão |
 | Navegar temporariamente | Espaço + arrastar ou botão do meio, com momentum ao soltar |
-| Pincel / borracha | B (ou P) / E; clicar novamente fecha o painel e ativa a mão |
+| Pincel / borracha | B (ou P) / E; botão direito abre/fecha o painel mantendo a ferramenta; clicar novamente no ícone ativa a mão |
 | Ajustar pincel | Alt + botão direito (ou esquerdo); horizontal = tamanho, vertical = opacidade |
 | Suavizar pincel | Marcar Precisão no painel |
 | Forma / texto / nota / quadro | R / T / S / F |
@@ -29,11 +29,12 @@ No Windows, `../TESTAR.cmd` compila e abre `http://localhost:4173`. Os boards fi
 | Estilo do próximo conector | Cor, espessura, tipo e pontas permanecem até nova alteração |
 | Texto em conector | T+ na barra ou duplo clique na linha; Enter confirma e Escape cancela o rascunho |
 | Inserir objeto no conector | Ícone de formas na barra; divide a ligação e abre o texto do novo objeto |
-| Imagens | Baixar original, máscara, recorte, opacidade e estilo da borda |
+| Imagens | Baixar original, recorte e máscaras no quadro, opacidade e estilo da borda |
 | Mapa mental selecionado | Tab adiciona filho; Enter adiciona irmão; Shift+Enter adiciona irmão acima |
 | Editar tópico | Enter confirma; Shift+Enter quebra linha; Escape cancela |
 | Recolher um ramo | Espaço com um tópico selecionado ou botão de recolher |
-| Lista / tabela / áudio | Botões na barra lateral |
+| Checklist | Menu de listas do texto; cada check pode ser marcado e risca sua linha |
+| Tabela / áudio | Botões na barra superior |
 | Link em texto ou objeto | Ctrl+K ou botão de link da seleção |
 | Suspender encaixe de conector | Ctrl (Command no macOS) |
 | Restringir direção de conector | Shift |

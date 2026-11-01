@@ -25,7 +25,7 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
-          node-version: 26
+          node-version: 22
           cache: npm
           cache-dependency-path: |
             app/package-lock.json
@@ -36,23 +36,29 @@ jobs:
         working-directory: desktop
       - run: node node_modules/electron/install.js
         working-directory: desktop
-      - name: Prepare browser
-        shell: pwsh
-        run: |
-          $chromeExecutable = Join-Path $env:ProgramFiles 'Google/Chrome/Application/chrome.exe'
-          if (Test-Path -LiteralPath $chromeExecutable) {
-            "CHROME_PATH=$chromeExecutable" | Out-File -LiteralPath $env:GITHUB_ENV -Encoding utf8 -Append
-            Write-Output "Using installed Chrome $((Get-Item -LiteralPath $chromeExecutable).VersionInfo.ProductVersion)"
-          } else {
-            npx playwright install chromium
-            if ($LASTEXITCODE -ne 0) { throw 'Test browser could not be installed' }
-          }
+      - name: Prepare matched browser
+        timeout-minutes: 5
+        run: npx playwright install chromium --only-shell
         working-directory: app
-      - name: Browser regression suite
-        run: npm test
+      - name: Browser preflight
+        timeout-minutes: 3
+        run: npm test -- profile-v18.spec.ts --max-failures=1 --reporter=line,./tests/reporters/github-status.cjs
         working-directory: app
         env:
           CI: 'true'
+          GH_TOKEN: ${{ github.token }}
+          BOARD_TEST_STATUS_CONTEXT: board-studio/browser-preflight
+          PLAYWRIGHT_BUNDLED_BROWSER: 'true'
+          BOARD_TEST_PAUSE_RENDERER: 'false'
+      - name: Browser regression suite
+        run: npm test -- --max-failures=1 --reporter=line,./tests/reporters/github-status.cjs
+        working-directory: app
+        env:
+          CI: 'true'
+          GH_TOKEN: ${{ github.token }}
+          BOARD_TEST_STATUS_CONTEXT: board-studio/browser-tests
+          PLAYWRIGHT_BUNDLED_BROWSER: 'true'
+          BOARD_TEST_PAUSE_RENDERER: 'false'
       - run: npm run package
         working-directory: desktop
         env:
@@ -111,6 +117,15 @@ jobs:
           $receipt = & gh api "repos/$env:GITHUB_REPOSITORY/releases/tags/$tag" --jq '{tag_name,html_url,draft,prerelease,target_commitish,assets:[.assets[]|{name,size,digest,browser_download_url}]}'
           if ($LASTEXITCODE -ne 0) { throw 'Published release could not be verified' }
           Write-Output "BOARD_STUDIO_RELEASE_JSON=$($receipt -join '')"
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: windows-release-diagnostics-${{ github.run_id }}
+          path: |
+            app/test-results
+            desktop/test-results
+          retention-days: 3
+          if-no-files-found: ignore
       - name: Report release result
         if: always()
         shell: pwsh
