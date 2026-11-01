@@ -2,6 +2,10 @@
 import {test,expect} from '@playwright/test';
 import {nativeFling} from './helpers/native-fling';
 
+// Visual trace readbacks stall software-GPU inertia; retain API/source evidence
+// and the independent failure screenshot without perturbing the native clock.
+test.use({trace:{mode:'retain-on-failure',screenshots:false,snapshots:false,sources:true}});
+
 async function blank(page){await page.goto('/');await page.waitForFunction(()=>window.__board?.booted);await page.getByRole('button',{name:'Criar board',exact:true}).click();await page.getByRole('dialog',{name:'Criar board',exact:true}).getByRole('button',{name:'Criar board',exact:true}).click();await expect(page.locator('#board-home')).toBeHidden();}
 
 test('Space autorepeat preserves fling velocity and restores the original tool',async({page})=>{

@@ -2,6 +2,10 @@
 import {test,expect} from '@playwright/test';
 import {nativeFling} from './helpers/native-fling';
 
+// Visual trace readbacks stall software-GPU inertia; retain API/source evidence
+// and the independent failure screenshot without perturbing the native clock.
+test.use({trace:{mode:'retain-on-failure',screenshots:false,snapshots:false,sources:true}});
+
 async function blank(page){await page.goto('/');await page.waitForFunction(()=>window.__board?.booted);await page.getByRole('button',{name:'Criar board',exact:true}).click();await page.getByRole('dialog',{name:'Criar board',exact:true}).getByRole('button',{name:'Criar board',exact:true}).click();await expect(page.locator('#board-home')).toBeHidden();}
 async function settle(page){await page.evaluate(()=>new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve))));}
 function wav(){const count=16000,buffer=Buffer.alloc(44+count*2);buffer.write('RIFF',0);buffer.writeUInt32LE(buffer.length-8,4);buffer.write('WAVEfmt ',8);buffer.writeUInt32LE(16,16);buffer.writeUInt16LE(1,20);buffer.writeUInt16LE(1,22);buffer.writeUInt32LE(8000,24);buffer.writeUInt32LE(16000,28);buffer.writeUInt16LE(2,32);buffer.writeUInt16LE(16,34);buffer.write('data',36);buffer.writeUInt32LE(count*2,40);return 'data:audio/wav;base64,'+buffer.toString('base64');}

@@ -2,6 +2,10 @@
 import {test,expect} from '@playwright/test';
 import {nativeFling} from './helpers/native-fling';
 
+// Visual trace readbacks stall software-GPU inertia; retain API/source evidence
+// and the independent failure screenshot without perturbing the native clock.
+test.use({trace:{mode:'retain-on-failure',screenshots:false,snapshots:false,sources:true}});
+
 import {openDrawingPalette} from './helpers/drawing-palette';
 async function blank(page){await page.goto('/');await page.waitForFunction(()=>window.__board?.booted);await page.getByRole('button',{name:'Criar board',exact:true}).click();await page.getByRole('dialog',{name:'Criar board',exact:true}).getByRole('button',{name:'Criar board',exact:true}).click();await expect(page.locator('#board-home')).toBeHidden();}
 async function shape(page,extra={}){await page.evaluate(async extra=>{const b=window.__board,{createWidget}=await import('/src/core/model.ts');b.bus.exec({op:'WIDGET_CREATE',payload:{...createWidget('shape',{x:-160,y:-100,width:320,height:200,content:''}),...extra,id:'navigation-shape'}});b.bus.exec({op:'SELECTION_SET',payload:['navigation-shape']});},extra);}
