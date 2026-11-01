@@ -32,7 +32,7 @@ jobs:
         timeout-minutes: 5
         run: npx playwright install chromium --only-shell
         working-directory: app
-      - name: Native momentum with nonintrusive API tracing
+      - name: Native momentum on undecorated control boards
         timeout-minutes: 12
         run: npm test -- tests/motion-v17.spec.ts tests/navigation-v13.spec.ts tests/performance-v14.spec.ts --grep "automatic saving waits for momentum|native background drag|zoom controls interrupt a fling|Space autorepeat" --reporter=line,./tests/reporters/github-status.cjs
         working-directory: app

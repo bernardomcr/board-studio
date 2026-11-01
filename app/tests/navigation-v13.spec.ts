@@ -16,12 +16,18 @@ test('pan inertia decays in screen space at every zoom and rejects paused releas
 });
 
 test('native background drag continues after release and a new gesture stops momentum without editing content',async({page})=>{
- await blank(page);await shape(page);await page.locator('#toolbar [data-tool=select]').click();const before=await page.evaluate(()=>({w:structuredClone(window.__board.state.widgets.get('navigation-shape')),undo:window.__board.bus.undoStack.length}));await nativeFling(page,{x:1100,y:700,dx:15,dy:3});await expect.poll(()=>page.evaluate(()=>window.__board.navigation.active())).toBe(true);const released=await page.evaluate(()=>window.__board.camera.x);await page.waitForTimeout(85);expect(await page.evaluate(()=>window.__board.camera.x)).toBeLessThan(released);
+ await blank(page);
+ // Isolate inertia semantics from decorative grid GPU work before baselines.
+ await page.evaluate(()=>window.__board.bus.exec({op:'BACKGROUND_UPDATE',payload:{grid:false}}));
+ await shape(page);await page.locator('#toolbar [data-tool=select]').click();const before=await page.evaluate(()=>({w:structuredClone(window.__board.state.widgets.get('navigation-shape')),undo:window.__board.bus.undoStack.length}));await nativeFling(page,{x:1100,y:700,dx:15,dy:3});await expect.poll(()=>page.evaluate(()=>window.__board.navigation.active())).toBe(true);const released=await page.evaluate(()=>window.__board.camera.x);await page.waitForTimeout(85);expect(await page.evaluate(()=>window.__board.camera.x)).toBeLessThan(released);
  await page.mouse.down();await page.mouse.up();expect(await page.evaluate(()=>window.__board.navigation.active())).toBe(false);const stopped=await page.evaluate(()=>window.__board.camera.x);await page.waitForTimeout(85);expect(await page.evaluate(()=>window.__board.camera.x)).toBe(stopped);expect(await page.evaluate(()=>window.__board.state.widgets.get('navigation-shape'))).toEqual(before.w);expect(await page.evaluate(()=>window.__board.bus.undoStack.length)).toBe(before.undo);
 });
 
 test('zoom controls interrupt a fling before changing the camera',async({page})=>{
- await blank(page);await page.locator('#toolbar [data-tool="select"]').click();await nativeFling(page,{x:1000,y:650,dx:20,steps:6});await expect.poll(()=>page.evaluate(()=>window.__board.navigation.active())).toBe(true);await page.locator('#zoombar [data-zoom="in"]').click();expect(await page.evaluate(()=>window.__board.navigation.active())).toBe(false);const camera=await page.evaluate(()=>({x:window.__board.camera.x,y:window.__board.camera.y,scale:window.__board.camera.scale}));await page.waitForTimeout(100);expect(await page.evaluate(()=>({x:window.__board.camera.x,y:window.__board.camera.y,scale:window.__board.camera.scale}))).toEqual(camera);
+ await blank(page);
+ // Isolate inertia semantics from decorative grid GPU work before baselines.
+ await page.evaluate(()=>window.__board.bus.exec({op:'BACKGROUND_UPDATE',payload:{grid:false}}));
+ await page.locator('#toolbar [data-tool="select"]').click();await nativeFling(page,{x:1000,y:650,dx:20,steps:6});await expect.poll(()=>page.evaluate(()=>window.__board.navigation.active())).toBe(true);await page.locator('#zoombar [data-zoom="in"]').click();expect(await page.evaluate(()=>window.__board.navigation.active())).toBe(false);const camera=await page.evaluate(()=>({x:window.__board.camera.x,y:window.__board.camera.y,scale:window.__board.camera.scale}));await page.waitForTimeout(100);expect(await page.evaluate(()=>({x:window.__board.camera.x,y:window.__board.camera.y,scale:window.__board.camera.scale}))).toEqual(camera);
 });
 
 test('all eight resize cursors follow rotated handles and rotation has a distinct cursor',async({page})=>{
