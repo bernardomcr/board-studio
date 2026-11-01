@@ -1,0 +1,139 @@
+name: Publish validated v0.18.0 draft
+on:
+  push:
+    branches: [main]
+    paths: [.github/workflows/publish-validated-v18.yml]
+  workflow_dispatch:
+permissions:
+  contents: write
+  actions: read
+  statuses: write
+concurrency:
+  group: publish-validated-v18
+  cancel-in-progress: false
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      GH_TOKEN: ${{ github.token }}
+      GH_REPO: ${{ github.repository }}
+      SOURCE_SHA: 7b9d58ec6f3ef0e9b4cc01b79398f8b357d58238
+      SOURCE_RUN: '41269777422'
+      RELEASE_ID: '430348906'
+    steps:
+      - name: Verify completed browser and installed application gates
+        shell: bash
+        run: |
+          set -euo pipefail
+          gh api "repos/$GH_REPO/actions/runs/$SOURCE_RUN" > run.json
+          gh api "repos/$GH_REPO/actions/runs/$SOURCE_RUN/jobs?per_page=100" > jobs.json
+          gh api "repos/$GH_REPO/releases/$RELEASE_ID" > release-before.json
+          node <<'NODE'
+          const fs=require('fs'),assert=require('node:assert/strict');
+          const read=p=>JSON.parse(fs.readFileSync(p,'utf8'));
+          const run=read('run.json'),jobs=read('jobs.json').jobs;
+          assert.equal(run.head_sha,process.env.SOURCE_SHA);
+          assert.equal(run.repository.full_name,process.env.GH_REPO);
+          assert.equal(run.path,'.github/workflows/release.yml');
+          assert.equal(run.head_branch,'main');
+          assert.equal(run.event,'push');
+          assert.equal(run.status,'completed');
+          assert.equal(run.conclusion,'failure');
+          for(let shard=1;shard<=4;shard++){
+            const matches=jobs.filter(j=>j.name===`Browser shard ${shard} / 4`);
+            assert.equal(matches.length,1);
+            assert.equal(matches[0].conclusion,'success');
+            for(const name of ['Browser preflight','Browser regression suite'])
+              assert.equal(matches[0].steps.find(s=>s.name===name)?.conclusion,'success');
+          }
+          const packages=jobs.filter(j=>j.name==='package');
+          assert.equal(packages.length,1);
+          const pkg=packages[0];
+          assert.equal(pkg.id,124742584413);
+          assert.equal(pkg.conclusion,'failure');
+          for(const name of ['Run npm run package','Run node scripts/check-package.cjs','Run node tests/smoke.cjs dist/win-unpacked/Atiro.exe','Install and check the packaged application'])
+            assert.equal(pkg.steps.find(s=>s.name===name)?.conclusion,'success');
+          assert.deepEqual(pkg.steps.filter(s=>s.conclusion==='failure').map(s=>s.name),['Checksums and release']);
+          const release=read('release-before.json');
+          assert.equal(release.id,Number(process.env.RELEASE_ID));
+          assert.equal(release.tag_name,'v0.18.0');
+          assert.equal(release.target_commitish,process.env.SOURCE_SHA);
+          assert.equal(release.draft,true);
+          assert.equal(release.assets.length,3);
+          const expected={
+            'Atiro-0.18.0-x64-portable.exe':[115774064,'78a59fa4761aa3462828c017cbf99a5c4ecae9581ab6ce7f9db22164f4f50e1b'],
+            'Atiro-0.18.0-x64-setup.exe':[125855883,'e5661e41ace871f6dd4538923974a71c776a7ae5b330c4881f18efa9bb519388'],
+            'SHA256SUMS.txt':[191,'9c2c9a3620bab2af454fb9e764e9da2959267f62a2f8fd8e4d83d99053c26d9c']
+          };
+          for(const asset of release.assets){
+            assert.ok(Object.hasOwn(expected,asset.name));
+            assert.equal(asset.state,'uploaded');
+            assert.equal(asset.size,expected[asset.name][0]);
+            assert.equal(asset.digest,'sha256:'+expected[asset.name][1]);
+          }
+          console.log('448 browser checks and both native smoke gates verified for exact source; draft metadata matches.');
+          NODE
+      - name: Download and verify every already uploaded byte
+        shell: bash
+        run: |
+          set -euo pipefail
+          gh release download v0.18.0 --dir recovered-assets
+          node <<'NODE'
+          const fs=require('fs'),crypto=require('crypto'),assert=require('node:assert/strict');
+          const release=JSON.parse(fs.readFileSync('release-before.json','utf8'));
+          assert.deepEqual(fs.readdirSync('recovered-assets').sort(),release.assets.map(a=>a.name).sort());
+          for(const asset of release.assets){
+            const bytes=fs.readFileSync('recovered-assets/'+asset.name);
+            assert.equal(bytes.length,asset.size);
+            assert.equal('sha256:'+crypto.createHash('sha256').update(bytes).digest('hex'),asset.digest);
+          }
+          const lines=fs.readFileSync('recovered-assets/SHA256SUMS.txt','utf8').trim().split(/\r?\n/);
+          assert.equal(lines.length,2);
+          const seen=new Set();
+          for(const line of lines){
+            const match=/^([a-f0-9]{64})  (Atiro-0\.18\.0-x64-(?:setup|portable)\.exe)$/.exec(line);
+            assert.ok(match);assert.ok(!seen.has(match[2]));seen.add(match[2]);
+            assert.equal(release.assets.find(a=>a.name===match[2])?.digest,'sha256:'+match[1]);
+          }
+          console.log('All three downloaded files match their exact sizes and SHA-256 digests.');
+          NODE
+      - name: Publish the verified existing draft and record receipt
+        shell: bash
+        run: |
+          set -euo pipefail
+          gh api "repos/$GH_REPO/releases/$RELEASE_ID" > release-live.json
+          gh api "repos/$GH_REPO/git/matching-refs/tags/v0.18.0" > matching-tags.json
+          node <<'NODE'
+          const fs=require('fs'),assert=require('node:assert/strict');
+          const read=p=>JSON.parse(fs.readFileSync(p,'utf8'));
+          const before=read('release-before.json'),live=read('release-live.json');
+          for(const key of ['id','tag_name','target_commitish','draft']) assert.equal(live[key],before[key]);
+          const stable=r=>r.assets.map(({id,name,size,digest,state})=>({id,name,size,digest,state})).sort((a,b)=>a.id-b.id);
+          assert.deepEqual(stable(live),stable(before));
+          const exact=read('matching-tags.json').filter(r=>r.ref==='refs/tags/v0.18.0');
+          assert.ok(exact.length<=1);
+          if(exact.length){assert.equal(exact[0].object.type,'commit');assert.equal(exact[0].object.sha,process.env.SOURCE_SHA);}
+          NODE
+          gh api --method PATCH "repos/$GH_REPO/releases/$RELEASE_ID" -f tag_name=v0.18.0 -f "target_commitish=$SOURCE_SHA" -F draft=false -F prerelease=true -f make_latest=false > /dev/null
+          gh api "repos/$GH_REPO/releases/$RELEASE_ID" > release-published.json
+          gh api "repos/$GH_REPO/git/ref/tags/v0.18.0" > published-tag.json
+          node <<'NODE'
+          const fs=require('fs'),assert=require('node:assert/strict');
+          const before=JSON.parse(fs.readFileSync('release-before.json','utf8'));
+          const receipt=JSON.parse(fs.readFileSync('release-published.json','utf8'));
+          assert.equal(receipt.id,before.id);assert.equal(receipt.tag_name,'v0.18.0');
+          assert.equal(receipt.target_commitish,process.env.SOURCE_SHA);
+          assert.equal(receipt.draft,false);assert.equal(receipt.prerelease,true);
+          assert.equal(receipt.html_url,'https://github.com/'+process.env.GH_REPO+'/releases/tag/v0.18.0');
+          assert.equal(receipt.assets.length,3);
+          const tag=JSON.parse(fs.readFileSync('published-tag.json','utf8'));
+          assert.equal(tag.object.type,'commit');assert.equal(tag.object.sha,process.env.SOURCE_SHA);
+          for(const asset of receipt.assets){
+            const previous=before.assets.find(a=>a.id===asset.id);
+            assert.ok(previous);assert.equal(asset.name,previous.name);
+            assert.equal(asset.size,previous.size);assert.equal(asset.digest,previous.digest);
+          }
+          console.log('BOARD_STUDIO_RELEASE_JSON='+JSON.stringify({tag_name:receipt.tag_name,html_url:receipt.html_url,draft:receipt.draft,prerelease:receipt.prerelease,target_commitish:receipt.target_commitish,assets:receipt.assets.map(({name,size,digest,browser_download_url})=>({name,size,digest,browser_download_url}))}));
+          NODE
+          gh api "repos/$GH_REPO/statuses/$SOURCE_SHA" -f state=success -f context=board-studio/windows-release -f description='Release published after validating browser, package, installed app and all asset bytes' -f "target_url=https://github.com/$GH_REPO/actions/runs/$GITHUB_RUN_ID" --silent

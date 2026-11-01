@@ -145,8 +145,15 @@ jobs:
           }
           & gh release upload $tag @assets --clobber
           if ($LASTEXITCODE -ne 0) { throw 'Release assets were not uploaded' }
-          $metadata = & gh api "repos/$env:GITHUB_REPOSITORY/releases/tags/$tag" | ConvertFrom-Json
+          # A draft without a Git tag cannot be resolved by releases/tags/{tag}.
+          $listed = @(& gh api "repos/$env:GITHUB_REPOSITORY/releases?per_page=100" | ConvertFrom-Json)
+          if ($LASTEXITCODE -ne 0) { throw 'Release drafts could not be listed' }
+          $matching = @($listed | Where-Object tag_name -eq $tag)
+          if ($matching.Count -ne 1) { throw 'Expected exactly one matching release draft' }
+          $releaseId = $matching[0].id
+          $metadata = & gh api "repos/$env:GITHUB_REPOSITORY/releases/$releaseId" | ConvertFrom-Json
           if ($LASTEXITCODE -ne 0) { throw 'Release could not be verified' }
+          if (-not $metadata.draft -or $metadata.target_commitish -ne $env:GITHUB_SHA) { throw 'Release draft does not match the tested source' }
           foreach ($file in $files) {
             $asset = @($metadata.assets | Where-Object name -eq $file.Name)
             if ($asset.Count -ne 1 -or $asset[0].size -ne $file.Length) { throw 'Release asset size mismatch' }
@@ -157,7 +164,7 @@ jobs:
           if ($release.prerelease) { $arguments += '--prerelease' }
           & gh @arguments
           if ($LASTEXITCODE -ne 0) { throw 'GitHub release was not created' }
-          $receipt = & gh api "repos/$env:GITHUB_REPOSITORY/releases/tags/$tag" --jq '{tag_name,html_url,draft,prerelease,target_commitish,assets:[.assets[]|{name,size,digest,browser_download_url}]}'
+          $receipt = & gh api "repos/$env:GITHUB_REPOSITORY/releases/$releaseId" --jq '{tag_name,html_url,draft,prerelease,target_commitish,assets:[.assets[]|{name,size,digest,browser_download_url}]}'
           if ($LASTEXITCODE -ne 0) { throw 'Published release could not be verified' }
           Write-Output "BOARD_STUDIO_RELEASE_JSON=$($receipt -join '')"
       - uses: actions/upload-artifact@v4
