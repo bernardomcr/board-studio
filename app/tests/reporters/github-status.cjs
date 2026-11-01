@@ -4,6 +4,7 @@ module.exports=class GitHubStatusReporter{
   async onBegin(_config,suite){this.total=suite.allTests().length;await this.send('pending');}
   onTestEnd(test,result){this.results.set(test.id,result.status!==test.expectedStatus);const failed=[...this.results.values()].filter(Boolean).length;if(this.results.size%10===0||failed!==this.lastFailed){this.lastFailed=failed;const description=this.description();this.queue=this.queue.then(()=>this.send('pending',description));}}
   async onEnd(result){await this.queue;await this.send(result.status==='passed'?'success':'failure');}
+  onStepEnd(_test,_result,step){if(process.env.BOARD_TEST_STEPS==='true'&&step.category==='pw:api')console.log('CI_TEST_STEP '+JSON.stringify({title:step.title,durationMs:step.duration,error:step.error?.message?.slice(0,500)}));}
   description(){return `${this.results.size}/${this.total} tests; ${[...this.results.values()].filter(Boolean).length} unexpected`;}
   async send(state,description=this.description()){
     console.log(`CI_TEST_PROGRESS ${this.context}: ${description}`);

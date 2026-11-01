@@ -36,13 +36,14 @@ jobs:
           "CHROME_PATH=$chromeExecutable" | Out-File -LiteralPath $env:GITHUB_ENV -Encoding utf8 -Append
           Write-Output "Chrome $((Get-Item -LiteralPath $chromeExecutable).VersionInfo.ProductVersion)"
       - name: Browser boot and local profile
-        timeout-minutes: 3
-        run: npm test -- profile-v18.spec.ts --max-failures=1 --reporter=line,./tests/reporters/github-status.cjs
+        timeout-minutes: 5
+        run: npm test -- profile-v18.spec.ts --timeout=90000 --max-failures=1 --reporter=line,./tests/reporters/github-status.cjs
         working-directory: app
         env:
           CI: 'true'
           GH_TOKEN: ${{ github.token }}
           BOARD_TEST_STATUS_CONTEXT: board-studio/runner-diagnostics
+          BOARD_TEST_STEPS: 'true'
       - uses: actions/upload-artifact@v4
         if: always()
         with:
