@@ -16,12 +16,21 @@ const environment={...process.env};
 delete environment.ELECTRON_RUN_AS_NODE;
 
 async function launch(){
-  return _electron.launch({
+  const application=await _electron.launch({
     executablePath:executable,
     args:[...(!binaryArg?[root]:[]),'--smoke-test',`--board-studio-data=${userData}`],
     env:environment,
     timeout:45000,
   });
+  // Chromium does not reliably capture a never-presented native window when
+  // the renderer is idle. Present without focus or visible pixels, as in the
+  // native performance checks; keep all normal rendering and close behavior.
+  await application.evaluate(({BrowserWindow})=>{
+    const window=BrowserWindow.getAllWindows()[0];
+    window.setOpacity(0);
+    window.showInactive();
+  });
+  return application;
 }
 
 function observeErrors(page,report){
