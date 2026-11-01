@@ -58,6 +58,10 @@ test('background colors, grid and independent boards survive reload and history'
 });
 
 test('large background image is scenery, scales proportionally and round-trips through project and SVG',async({page})=>{
+  // This functional round-trip transfers the real 18MP PNG through two file
+  // choosers, SVG/export, storage and reload. CI VMs need a separate I/O budget;
+  // native runs retain the normal 30s limit and every content/render assertion.
+  if(process.env.CI)test.setTimeout(90000);
   const errors=[];page.on('pageerror',e=>errors.push(e.message));await blank(page);await source(page);
   const image=await page.evaluate(()=>{const c=document.createElement('canvas');c.width=6000;c.height=3000;const ctx=c.getContext('2d');const gradient=ctx.createLinearGradient(0,0,6000,3000);gradient.addColorStop(0,'#16324f');gradient.addColorStop(1,'#5b8e7d');ctx.fillStyle=gradient;ctx.fillRect(0,0,6000,3000);window.__workspaceOriginalBackground=c.toDataURL();return window.__workspaceOriginalBackground.split(',')[1];});
   const originalSrc='data:image/png;base64,'+image,originalSha256=createHash('sha256').update(originalSrc).digest('hex');

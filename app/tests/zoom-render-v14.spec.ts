@@ -1,15 +1,7 @@
 // @ts-nocheck
 import {test,expect} from '@playwright/test';
-async function blank(page){
- // CI311 lost only the main module connection while HTML/Vite loaded. Retry
- // that exact transport failure once, never an application error or slow boot.
- let mainTransportFailed=false;
- const failed=request=>{if(new URL(request.url()).pathname==='/src/main.ts'&&request.failure()?.errorText==='net::ERR_CONNECTION_FAILED')mainTransportFailed=true;};
- page.on('requestfailed',failed);
- try{await page.goto('/');}finally{page.off('requestfailed',failed);}
- if(mainTransportFailed){console.log('BOOT_TRANSPORT_RETRY /src/main.ts net::ERR_CONNECTION_FAILED');await page.reload();}
- await page.waitForFunction(()=>window.__board?.booted);await page.getByRole('button',{name:'Criar board',exact:true}).click();await page.getByRole('dialog',{name:'Criar board',exact:true}).getByRole('button',{name:'Criar board',exact:true}).click();await expect(page.locator('#board-home')).toBeHidden();await expect(page.locator('#board-transition')).toBeHidden();
-}
+import {gotoBoardWithModuleRetry} from './helpers/boot';
+async function blank(page){await gotoBoardWithModuleRetry(page);await page.waitForFunction(()=>window.__board?.booted);await page.getByRole('button',{name:'Criar board',exact:true}).click();await page.getByRole('dialog',{name:'Criar board',exact:true}).getByRole('button',{name:'Criar board',exact:true}).click();await expect(page.locator('#board-home')).toBeHidden();await expect(page.locator('#board-transition')).toBeHidden();}
 async function settle(page){await page.evaluate(()=>new Promise(r=>requestAnimationFrame(()=>requestAnimationFrame(r))));}
 
 for(const dpr of [1,1.25,2,3])test.describe(`native DPR ${dpr}`,()=>{

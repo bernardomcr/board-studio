@@ -24,6 +24,8 @@ test('a GPU-limited image preserves a one-pixel crop through zoom, rotation, fli
 });
 
 test('bounded viewport textures follow source regions and release owned GPU resources on replacement and removal',async({page})=>{
+ // The 16 ROI checks plus replacement/removal completed in 30.84s on CI's emulated GPU; keep every lifecycle assertion.
+ if(process.env.CI)test.setTimeout(90000);
  await blank(page);await forceLimit(page);
  try{
   const src=await page.evaluate(async()=>{const b=window.__board,{createWidget}=await import('/src/core/model.ts'),canvas=document.createElement('canvas');canvas.width=512;canvas.height=256;const g=canvas.getContext('2d');for(const [i,color]of ['#ef3344','#25a96f','#2961e7','#f6c344'].entries()){g.fillStyle=color;g.fillRect(i*128,0,128,256);}const src=canvas.toDataURL();b.camera.x=-3072;b.bus.exec({op:'WIDGET_CREATE',payload:{...createWidget('image',{x:-4096,y:-2048,width:8192,height:4096}),id:'limited-image',src,naturalWidth:512,naturalHeight:256}});b.bus.exec({op:'SELECTION_SET',payload:[]});return src;});
