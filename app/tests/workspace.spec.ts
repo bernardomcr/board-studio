@@ -1,6 +1,7 @@
 // @ts-nocheck
 import {test,expect} from '@playwright/test';
 import {readFile} from 'node:fs/promises';
+import {createHash} from 'node:crypto';
 
 async function create(page,title='Composição'){
   await page.getByRole('button',{name:'Criar board',exact:true}).click();
@@ -58,7 +59,8 @@ test('background colors, grid and independent boards survive reload and history'
 
 test('large background image is scenery, scales proportionally and round-trips through project and SVG',async({page})=>{
   const errors=[];page.on('pageerror',e=>errors.push(e.message));await blank(page);await source(page);
-  const image=await page.evaluate(()=>{const c=document.createElement('canvas');c.width=6000;c.height=3000;const ctx=c.getContext('2d');const gradient=ctx.createLinearGradient(0,0,6000,3000);gradient.addColorStop(0,'#16324f');gradient.addColorStop(1,'#5b8e7d');ctx.fillStyle=gradient;ctx.fillRect(0,0,6000,3000);return c.toDataURL().split(',')[1];});
+  const image=await page.evaluate(()=>{const c=document.createElement('canvas');c.width=6000;c.height=3000;const ctx=c.getContext('2d');const gradient=ctx.createLinearGradient(0,0,6000,3000);gradient.addColorStop(0,'#16324f');gradient.addColorStop(1,'#5b8e7d');ctx.fillStyle=gradient;ctx.fillRect(0,0,6000,3000);window.__workspaceOriginalBackground=c.toDataURL();return window.__workspaceOriginalBackground.split(',')[1];});
+  const originalSrc='data:image/png;base64,'+image,originalSha256=createHash('sha256').update(originalSrc).digest('hex');
   await page.getByRole('button',{name:'Fundo do board',exact:true}).click();const panel=page.getByRole('dialog',{name:'Fundo do board',exact:true});
   const chooser=page.waitForEvent('filechooser');await panel.getByRole('button',{name:'Usar imagem como fundo',exact:true}).click();await(await chooser).setFiles({name:'grande.png',mimeType:'image/png',buffer:Buffer.from(image,'base64')});
   await expect.poll(()=>page.evaluate(()=>window.__board.state.background.image?.width)).toBe(6000);
@@ -66,14 +68,16 @@ test('large background image is scenery, scales proportionally and round-trips t
   expect(await page.evaluate(()=>window.__board.state.widgets.size)).toBe(1);
   const width=panel.getByRole('spinbutton',{name:'Largura da imagem de fundo',exact:true});await width.fill('12000');await width.press('Tab');
   expect(await page.evaluate(()=>({w:window.__board.state.background.image.width,h:window.__board.state.background.image.height,x:window.__board.camera.x,wx:window.__board.state.widgets.get('source').x}))).toEqual({w:12000,h:6000,x:0,wx:-80});
-  const result=await page.evaluate(async()=>{const b=window.__board,{boardToSvg}=await import('/src/core/exportSvg.ts');return {src:b.state.background.image.src,svg:boardToSvg(b.state),transparent:boardToSvg(b.state,{background:'none'}),white:boardToSvg(b.state,{background:'#ffffff'})};});
-  expect(result.src).toBe('data:image/png;base64,'+image);expect(result.svg).toContain('<image');expect(result.svg).toContain('width="12000"');expect(result.transparent).not.toContain('<image');expect(result.white).not.toContain('<image');
+  // Keep this real 18MP PNG and the exact-content checks without serializing
+  // its 18MB data URL/SVG repeatedly through Playwright and the trace recorder.
+  const result=await page.evaluate(async()=>{const b=window.__board,{boardToSvg}=await import('/src/core/exportSvg.ts'),svg=boardToSvg(b.state),transparent=boardToSvg(b.state,{background:'none'}),white=boardToSvg(b.state,{background:'#ffffff'}),svgImage=new DOMParser().parseFromString(svg,'image/svg+xml').querySelector('image');return {srcMatchesOriginal:b.state.background.image.src===window.__workspaceOriginalBackground,normalImage:svg.includes('<image'),normalWidth:svg.includes('width="12000"'),svgSrcMatchesOriginal:(svgImage?.getAttribute('href')??svgImage?.getAttribute('xlink:href'))===window.__workspaceOriginalBackground,transparentImage:transparent.includes('<image'),whiteImage:white.includes('<image')};});
+  expect(result).toEqual({srcMatchesOriginal:true,normalImage:true,normalWidth:true,svgSrcMatchesOriginal:true,transparentImage:false,whiteImage:false});
   await page.keyboard.press('Escape');const download=page.waitForEvent('download');await page.getByRole('button',{name:'Salvar arquivo',exact:true}).click();const path=await(await download).path(),data=await readFile(path);
-  expect(JSON.parse(data.toString()).background.image.width).toBe(12000);
+  const exported=JSON.parse(data.toString());expect(exported.background.image.width).toBe(12000);expect(exported.background.image.src===originalSrc,'Exported PNG data is byte-for-byte identical to the original').toBe(true);
   await page.getByRole('button',{name:'Fundo do board',exact:true}).click();await panel.getByRole('button',{name:'Remover imagem de fundo',exact:true}).click();expect(await page.evaluate(()=>window.__board.state.background.image)).toBeUndefined();
   await page.keyboard.press('Escape');const open=page.waitForEvent('filechooser');await page.getByRole('button',{name:'Abrir arquivo',exact:true}).click();await(await open).setFiles({name:'composicao.board.json',mimeType:'application/json',buffer:data});
   await expect.poll(()=>page.evaluate(()=>window.__board.state.background.image?.width)).toBe(12000);await page.evaluate(()=>window.__board.saveNow());await page.reload();await page.waitForFunction(()=>window.__board?.booted);
-  expect(await page.evaluate(()=>({w:window.__board.state.background.image.width,src:window.__board.state.background.image.src,widgets:window.__board.state.widgets.size}))).toEqual({w:12000,src:'data:image/png;base64,'+image,widgets:1});
+  expect(await page.evaluate(async()=>{const image=window.__board.state.background.image,digest=await crypto.subtle.digest('SHA-256',new TextEncoder().encode(image.src));return {w:image.width,srcSha256:Array.from(new Uint8Array(digest),byte=>byte.toString(16).padStart(2,'0')).join(''),widgets:window.__board.state.widgets.size};})).toEqual({w:12000,srcSha256:originalSha256,widgets:1});
   await expect.poll(()=>page.evaluate(()=>window.__board.app.stage.children[1].children.find(c=>c.label==='board-background')?.children[0]?.visible)).toBe(true);
   await page.getByRole('button',{name:'Fundo do board',exact:true}).click();await page.screenshot({path:'../work/workspace-image-background.png'});expect(errors).toEqual([]);
 });
