@@ -6,6 +6,7 @@ Nova identidade visual em cinza escuro e roxo, com o logo da marca.
 - Sem instalação: arquivo com final `portable.exe`.
 - Perfil local com nome, boards salvos no perfil do Windows e fontes locais.
 - Camadas de trabalho, pincel contextual, conectores, imagens, texto, tabelas e áudio.
+- Melhorias de fluidez e renderização de fotos e fundos de alta resolução, preservando os originais.
 
 Esta versão ainda não inclui login online nem sincronização com Google Drive. Eles ficaram para uma próxima etapa. O aplicativo funciona offline; exporte seus arquivos `.board.json` para transportar os boards ou guardar cópias.
 

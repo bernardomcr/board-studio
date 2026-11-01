@@ -2,6 +2,7 @@ app/node_modules/
 app/dist/
 app/.vite/
 app/test-results/
+/test-results/
 app/playwright-report/
 desktop/node_modules/
 desktop/dist/

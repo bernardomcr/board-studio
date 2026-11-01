@@ -4,6 +4,7 @@ import type { Camera } from './core/camera';
 import { BACKGROUND_MAX_BYTES, DEFAULT_BACKGROUND, type BackgroundImage, type BackgroundPatch, type BoardBackground } from './core/background';
 import { icon } from './icons';
 import {configureRasterSampling} from './render/raster-quality';
+import {imageRasterLimit,needsViewportImage,ViewportImageRaster} from './render/viewport-image-raster';
 import {boardGridPattern,type GridPattern} from './render/grid-paint';
 
 const gridPatterns:Array<[GridPattern,string]>= [['dots','Malha pontilhada'],['lines','Malha quadriculada'],['crosses','Malha de cruzetas'],['none','Sem malha']];
@@ -29,6 +30,8 @@ export function installBackground(api: BackgroundAPI) {
   const sprite = new Sprite(Texture.WHITE); sprite.eventMode = 'none'; sprite.visible = false; layer.addChild(sprite);
   let source = '', loadedSource = '', lastBackground: BoardBackground | undefined, renderedBackground: BoardBackground | undefined;
   let importError = '', importing = false;
+  let raster:ViewportImageRaster|undefined,rasterLimit:number|undefined,loadGeneration=0,lastBoardKey=api.getBoardKey?.();
+  const releaseImage=()=>{loadGeneration++;sprite.texture=Texture.WHITE;raster?.destroy();raster=undefined;source='';loadedSource='';sprite.visible=false;};
   const current = () => state.background ?? DEFAULT_BACKGROUND;
   const css = document.createElement('style');
   css.textContent = `
@@ -100,27 +103,37 @@ body.home-visible #board-background-controls{display:none!important}
   }
 
   function sync() {
+    const boardKey=api.getBoardKey?.();if(boardKey!==lastBoardKey){lastBoardKey=boardKey;releaseImage();lastBackground=undefined;}
     const background = current();
     app.renderer.background.color = background.color;
     if (background !== lastBackground) {
       lastBackground = background;
       const image = background.image;
-      if (!image) { layer.removeFromParent(); source = ''; loadedSource = ''; sprite.visible = false; }
+      if (!image) { layer.removeFromParent(); releaseImage(); }
       else {
         if (layer.parent !== world) world.addChildAt(layer, 0);
         sprite.position.set(image.x, image.y); sprite.width = image.width; sprite.height = image.height; sprite.alpha = image.opacity;
         if (source !== image.src) {
-          source = image.src; sprite.visible = false;
-          const requested = source;
+          releaseImage();source=image.src;
+          const requested=source,generation=loadGeneration,requestedBoard=boardKey;
           void Assets.load<Texture>(requested).then(texture => {
-            if (source !== requested || !current().image || sprite.destroyed) return;
-            configureRasterSampling(texture);
-            sprite.texture = texture; loadedSource = requested; lastBackground = undefined; sync(); api.onChange?.();
-          }).catch(() => { if (source === requested) { importError = 'Não foi possível abrir a imagem de fundo.'; renderedBackground = undefined; render(); } });
+            if(source!==requested||generation!==loadGeneration||!current().image||sprite.destroyed)return;
+            if(api.getBoardKey&&api.getBoardKey()!==requestedBoard){sync();return;}
+            const limit=rasterLimit??=imageRasterLimit(app.renderer);
+            if(needsViewportImage(texture,limit))raster=new ViewportImageRaster(texture,limit);
+            else{configureRasterSampling(texture);sprite.texture=texture;}
+            loadedSource=requested;lastBackground=undefined;sync();api.onChange?.();
+          }).catch(() => {if(source!==requested||generation!==loadGeneration)return;if(api.getBoardKey&&api.getBoardKey()!==requestedBoard){sync();return;}importError='Não foi possível abrir a imagem de fundo.';renderedBackground=undefined;render();});
         }
-        sprite.visible = loadedSource === image.src;
       }
     }
+    // Camera movement and DPR changes need a new visible source region even
+    // when the immutable scenery metadata has not changed.
+    const image=background.image;
+    if(image&&loadedSource===image.src){
+      if(raster){const texture=raster.update({x:image.x,y:image.y,width:image.width,height:image.height,rotation:0},camera);sprite.visible=!!texture;if(texture)sprite.texture=texture;}
+      else sprite.visible=true;
+    }else sprite.visible=false;
     render();
   }
 

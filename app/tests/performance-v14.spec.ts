@@ -1,11 +1,11 @@
 // @ts-nocheck
 import {test,expect} from '@playwright/test';
+import {nativeFling} from './helpers/native-fling';
+
 async function blank(page){await page.goto('/');await page.waitForFunction(()=>window.__board?.booted);await page.getByRole('button',{name:'Criar board',exact:true}).click();await page.getByRole('dialog',{name:'Criar board',exact:true}).getByRole('button',{name:'Criar board',exact:true}).click();await expect(page.locator('#board-home')).toBeHidden();}
 
 test('Space autorepeat preserves fling velocity and restores the original tool',async({page})=>{
- await blank(page);const before=await page.evaluate(()=>window.__board.bus.undoStack.length);await page.keyboard.down('Space');await page.mouse.move(1050,650);await page.mouse.down();
- for(let i=1;i<=8;i++){await page.waitForTimeout(16);await page.mouse.move(1050+i*20,650+i*3);await page.keyboard.down('Space');}
- await page.mouse.up();expect(await page.evaluate(()=>window.__board.navigation.active())).toBe(true);const x=await page.evaluate(()=>window.__board.camera.x);await page.keyboard.up('Space');await page.waitForTimeout(90);expect(await page.evaluate(()=>window.__board.camera.x)).toBeLessThan(x);expect(await page.evaluate(()=>window.__board.bus.undoStack.length)).toBe(before);await expect(page.locator('#toolbar [data-tool=select]')).toHaveClass(/active/);await page.keyboard.press('Escape');expect(await page.evaluate(()=>window.__board.navigation.active())).toBe(false);
+ await blank(page);const before=await page.evaluate(()=>window.__board.bus.undoStack.length);await page.keyboard.down('Space');await nativeFling(page,{x:1050,y:650,dx:20,dy:3,repeatSpace:true});expect(await page.evaluate(()=>window.__board.navigation.active())).toBe(true);const x=await page.evaluate(()=>window.__board.camera.x);await page.keyboard.up('Space');await page.waitForTimeout(90);expect(await page.evaluate(()=>window.__board.camera.x)).toBeLessThan(x);expect(await page.evaluate(()=>window.__board.bus.undoStack.length)).toBe(before);await expect(page.locator('#toolbar [data-tool=select]')).toHaveClass(/active/);await page.keyboard.press('Escape');expect(await page.evaluate(()=>window.__board.navigation.active())).toBe(false);
 });
 
 test('moving rich text and boxed labels preserves local geometry and style through undo and replay',async({page})=>{

@@ -1,5 +1,7 @@
 // @ts-nocheck
 import {test,expect} from '@playwright/test';
+import {nativeFling} from './helpers/native-fling';
+
 import {openDrawingPalette} from './helpers/drawing-palette';
 async function blank(page){await page.goto('/');await page.waitForFunction(()=>window.__board?.booted);await page.getByRole('button',{name:'Criar board',exact:true}).click();await page.getByRole('dialog',{name:'Criar board',exact:true}).getByRole('button',{name:'Criar board',exact:true}).click();await expect(page.locator('#board-home')).toBeHidden();}
 async function shape(page,extra={}){await page.evaluate(async extra=>{const b=window.__board,{createWidget}=await import('/src/core/model.ts');b.bus.exec({op:'WIDGET_CREATE',payload:{...createWidget('shape',{x:-160,y:-100,width:320,height:200,content:''}),...extra,id:'navigation-shape'}});b.bus.exec({op:'SELECTION_SET',payload:['navigation-shape']});},extra);}
@@ -10,12 +12,12 @@ test('pan inertia decays in screen space at every zoom and rejects paused releas
 });
 
 test('native background drag continues after release and a new gesture stops momentum without editing content',async({page})=>{
- await blank(page);await shape(page);await page.locator('#toolbar [data-tool=select]').click();const before=await page.evaluate(()=>({w:structuredClone(window.__board.state.widgets.get('navigation-shape')),undo:window.__board.bus.undoStack.length}));await page.mouse.move(1100,700);await page.mouse.down();for(let i=1;i<=8;i++){await page.waitForTimeout(16);await page.mouse.move(1100+i*15,700+i*3);}await page.mouse.up();await expect.poll(()=>page.evaluate(()=>window.__board.navigation.active())).toBe(true);const released=await page.evaluate(()=>window.__board.camera.x);await page.waitForTimeout(85);expect(await page.evaluate(()=>window.__board.camera.x)).toBeLessThan(released);
+ await blank(page);await shape(page);await page.locator('#toolbar [data-tool=select]').click();const before=await page.evaluate(()=>({w:structuredClone(window.__board.state.widgets.get('navigation-shape')),undo:window.__board.bus.undoStack.length}));await nativeFling(page,{x:1100,y:700,dx:15,dy:3});await expect.poll(()=>page.evaluate(()=>window.__board.navigation.active())).toBe(true);const released=await page.evaluate(()=>window.__board.camera.x);await page.waitForTimeout(85);expect(await page.evaluate(()=>window.__board.camera.x)).toBeLessThan(released);
  await page.mouse.down();await page.mouse.up();expect(await page.evaluate(()=>window.__board.navigation.active())).toBe(false);const stopped=await page.evaluate(()=>window.__board.camera.x);await page.waitForTimeout(85);expect(await page.evaluate(()=>window.__board.camera.x)).toBe(stopped);expect(await page.evaluate(()=>window.__board.state.widgets.get('navigation-shape'))).toEqual(before.w);expect(await page.evaluate(()=>window.__board.bus.undoStack.length)).toBe(before.undo);
 });
 
 test('zoom controls interrupt a fling before changing the camera',async({page})=>{
- await blank(page);await page.locator('#toolbar [data-tool="select"]').click();await page.mouse.move(1000,650);await page.mouse.down();for(let i=1;i<=6;i++){await page.waitForTimeout(16);await page.mouse.move(1000+i*20,650);}await page.mouse.up();await expect.poll(()=>page.evaluate(()=>window.__board.navigation.active())).toBe(true);await page.locator('#zoombar [data-zoom="in"]').click();expect(await page.evaluate(()=>window.__board.navigation.active())).toBe(false);const camera=await page.evaluate(()=>({x:window.__board.camera.x,y:window.__board.camera.y,scale:window.__board.camera.scale}));await page.waitForTimeout(100);expect(await page.evaluate(()=>({x:window.__board.camera.x,y:window.__board.camera.y,scale:window.__board.camera.scale}))).toEqual(camera);
+ await blank(page);await page.locator('#toolbar [data-tool="select"]').click();await nativeFling(page,{x:1000,y:650,dx:20,steps:6});await expect.poll(()=>page.evaluate(()=>window.__board.navigation.active())).toBe(true);await page.locator('#zoombar [data-zoom="in"]').click();expect(await page.evaluate(()=>window.__board.navigation.active())).toBe(false);const camera=await page.evaluate(()=>({x:window.__board.camera.x,y:window.__board.camera.y,scale:window.__board.camera.scale}));await page.waitForTimeout(100);expect(await page.evaluate(()=>({x:window.__board.camera.x,y:window.__board.camera.y,scale:window.__board.camera.scale}))).toEqual(camera);
 });
 
 test('all eight resize cursors follow rotated handles and rotation has a distinct cursor',async({page})=>{

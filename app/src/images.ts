@@ -8,6 +8,7 @@ import { borderPattern, patternedContour, shapeContours } from "./core/shapes";
 import {resolvedWidgetStyle,borderWidthFor} from './core/style-scale';
 import {screenStroke,screenDot,screenStrokeKey} from './render/screen-coverage';
 import {configureRasterSampling} from './render/raster-quality';
+import {imageRasterLimit,needsViewportImage,ViewportImageRaster} from './render/viewport-image-raster';
 import {installClipboardImages} from './clipboard-images';
 import {openImageCrop} from './image-crop';
 
@@ -39,8 +40,9 @@ export function installImages(api: ImageAPI) {
   const layer = new Container();
   layer.sortableChildren = true;
   if (!api.nodeAt) world.addChild(layer);
-  const nodes = new Map<string, { container: Container; sprite: Sprite; mask: Graphics; border: Graphics; src: string; sig:string }>();
+  const nodes = new Map<string, { container: Container; sprite: Sprite; mask: Graphics; border: Graphics; src: string; sig:string;raster?:ViewportImageRaster }>();
   const textures = new Map<string, Promise<Texture>>();
+  let rasterLimit:number|undefined;
   let cropEditor: ReturnType<typeof openImageCrop> | null = null;
   let croppingId: string | null = null;
   const selected = () => state.selection.size === 1 ? asImage(state.widgets.get([...state.selection][0]!)) : undefined;
@@ -57,7 +59,7 @@ export function installImages(api: ImageAPI) {
 
   function sync() {
     for (const [id, node] of nodes) {
-      if (!asImage(state.widgets.get(id)) || node.container.destroyed) { if (!node.container.destroyed) destroyDisplayTree(node.container); nodes.delete(id); }
+      if (!asImage(state.widgets.get(id)) || node.container.destroyed) { node.raster?.destroy();if (!node.container.destroyed) destroyDisplayTree(node.container); nodes.delete(id); }
     }
     for (const item of state.widgets.values()) {
       const w = asImage(item); if (!w) continue;
@@ -82,6 +84,8 @@ export function installImages(api: ImageAPI) {
         node.container.zIndex = w.z;
       }
       const crop = w.crop ?? FULL;
+      if(node.raster){const texture=node.raster.update(w,camera);node.sprite.visible=!!texture;if(texture)node.sprite.texture=texture;}
+      else node.sprite.visible=true;
       if(node.src!==w.src)node.sig='';
       const sig=[w.width,w.height,crop.x,crop.y,crop.width,crop.height,w.maskShape,w.flipX,w.flipY,w.opacity,w.style.borderWidth,w.style.borderScale,w.style.borderColor,w.style.borderStyle,w.style.borderOpacity,w.style.cornerRadius,Math.round(Math.log2(Math.max(.02,camera.scale))*2),screenStrokeKey(borderWidthFor(w),camera.scale)].join('|');
       if(node.sig!==sig){
@@ -137,8 +141,11 @@ export function installImages(api: ImageAPI) {
         const current = node, source = w.src;
         pending.then(texture => {
           if (current.container.destroyed || nodes.get(w.id) !== current || current.src !== source) return;
-          configureRasterSampling(texture);
-          current.sprite.texture = texture; current.sprite.tint = 0xffffff; current.sig='';
+          current.sprite.texture=Texture.WHITE;current.raster?.destroy();current.raster=undefined;
+          const limit=rasterLimit??=imageRasterLimit(api.app.renderer);
+          if(needsViewportImage(texture,limit))current.raster=new ViewportImageRaster(texture,limit);
+          else{configureRasterSampling(texture);current.sprite.texture=texture;}
+          current.sprite.tint = 0xffffff; current.sig='';
           sync(); api.onChange?.();
         }).catch(() => notice("Não foi possível abrir esta imagem."));
       }

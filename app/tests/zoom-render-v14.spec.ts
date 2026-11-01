@@ -29,9 +29,31 @@ test('thin vector lines retain continuous proportional coverage at macro zoom wi
   for(const zoom of [.02,.1,.25,1])for(const width of [.08,.4]){
    const target=new Container(),g=new Graphics(),legacy=new Graphics();target.addChild(g);g.scale.set(zoom);const points=[{x:25.25/zoom,y:35.35/zoom},{x:250.75/zoom,y:135.65/zoom}],line={id:'hairline',type:'connector',shape:'straight',start:{kind:'point',...points[0]},end:{kind:'point',...points[1]},style:{strokeColor:'#000000',strokeWidth:width/zoom,startCap:'none',endCap:'none'},z:0};paintConnector(g,line,{points},true,zoom);legacy.moveTo(25.25,35.35).lineTo(250.75,135.65).stroke({width,color:'#000000',cap:'round'});
    const resolution=Math.min(3,devicePixelRatio),frame=new Rectangle(0,0,280,180),extract=node=>b.app.renderer.extract.pixels({target:node,frame,resolution,antialias:true}).pixels,actual=extract(target),old=extract(legacy),canvas=document.createElement('canvas');canvas.width=280*resolution;canvas.height=180*resolution;const ctx=canvas.getContext('2d');ctx.scale(resolution,resolution);ctx.lineWidth=width;ctx.lineCap='round';ctx.beginPath();ctx.moveTo(25.25,35.35);ctx.lineTo(250.75,135.65);ctx.stroke();const ref=ctx.getImageData(0,0,canvas.width,canvas.height).data;let nextError=0,oldError=0,ink=0,referenceInk=0;for(let i=3;i<ref.length;i+=4){nextError+=Math.abs(actual[i]-ref[i]);oldError+=Math.abs(old[i]-ref[i]);ink+=actual[i];referenceInk+=ref[i];}
-   results.push({zoom,width,nextError,oldError,ink,referenceInk,modelWidth:line.style.strokeWidth,svg:connectorSvgContent(line,{points})});target.destroy({children:true});legacy.destroy();
+   // The integral of a round-capped line is L*w + pi*(w/2)^2 in
+   // physical pixels. Canvas2D/legacy differences remain diagnostics, not an
+   // approval oracle: verified CI artifact 13066907184 gave
+   // GPU=4990, Canvas=4086 at .08px, against analytical ink=5036.01.
+   // Its Canvas reference underfilled by 18.9%; the GPU was within 1%.
+   // Another software backend made Canvas and legacy identical (oldError=0)
+   // while both underfilled further. Geometry must win over backend agreement.
+   const length=Math.hypot(250.75-25.25,135.65-35.35)*resolution,physicalWidth=width*resolution,analyticalInk=255*(length*physicalWidth+Math.PI*(physicalWidth/2)**2);
+   let gapCount=0;const probes=Math.ceil(length);for(let i=0;i<=probes;i++){const t=i/probes,x=Math.floor((25.25+(250.75-25.25)*t)*resolution),y=Math.floor((35.35+(135.65-35.35)*t)*resolution);let covered=false;for(let dy=-1;dy<=1;dy++)for(let dx=-1;dx<=1;dx++)if(actual[((y+dy)*canvas.width+x+dx)*4+3]>0)covered=true;if(!covered)gapCount++;}
+   const startX=25.25*resolution,startY=35.35*resolution,dx=(250.75-25.25)*resolution,dy=(135.65-35.35)*resolution,lengthSquared=dx*dx+dy*dy;
+   // A proportional hairline may occupy one physical pixel with reduced alpha.
+   // Its AA support cannot extend beyond that capsule plus a pixel's half
+   // diagonal. This catches displaced lines and diffuse halos independently of
+   // the native Canvas implementation, alongside mass and gap checks.
+   const envelope=Math.max(1,physicalWidth)/2+Math.SQRT1_2+1e-3;let outsideInk=0,weightedX=0,weightedY=0;
+   for(let offset=3;offset<actual.length;offset+=4){const alpha=actual[offset];if(!alpha)continue;const index=(offset-3)/4,x=index%canvas.width+.5,y=Math.floor(index/canvas.width)+.5,t=Math.max(0,Math.min(1,((x-startX)*dx+(y-startY)*dy)/lengthSquared)),distance=Math.hypot(x-startX-t*dx,y-startY-t*dy);if(distance>envelope)outsideInk+=alpha;weightedX+=x*alpha;weightedY+=y*alpha;}
+   const centroidX=weightedX/ink,centroidY=weightedY/ink,expectedX=startX+dx/2,expectedY=startY+dy/2;
+   results.push({zoom,width,resolution,nextError,oldError,ink,referenceInk,analyticalInk,gapCount,outsideInk,centroidX,centroidY,expectedX,expectedY,modelWidth:line.style.strokeWidth,svg:connectorSvgContent(line,{points})});target.destroy({children:true});legacy.destroy();
   }return results;
- });for(const result of results){expect(result.nextError,JSON.stringify(result)).toBeLessThan(result.oldError*.8);expect(result.ink/result.referenceInk).toBeGreaterThan(.85);expect(result.ink/result.referenceInk).toBeLessThan(1.15);expect(result.modelWidth).toBe(result.width/result.zoom);expect(result.svg).toContain(`stroke-width="${Math.round(result.modelWidth*10000)/10000}"`);}
+ });for(const result of results){expect(result.gapCount,JSON.stringify(result)).toBe(0);expect(result.outsideInk,JSON.stringify(result)).toBe(0);expect(Math.abs(result.centroidX-result.expectedX),JSON.stringify(result)).toBeLessThanOrEqual(.5);expect(Math.abs(result.centroidY-result.expectedY),JSON.stringify(result)).toBeLessThanOrEqual(.5);
+  // At .08px, half an 8-bit alpha step is about 2.5% of the coverage.
+  // A 5% area budget leaves room for AA/cap integration while remaining
+  // stricter than the former +/-15% comparison to a backend-biased oracle.
+  expect(result.ink/result.analyticalInk,JSON.stringify(result)).toBeGreaterThan(.95);expect(result.ink/result.analyticalInk,JSON.stringify(result)).toBeLessThan(1.05);expect(result.modelWidth).toBe(result.width/result.zoom);expect(result.svg).toContain(`stroke-width="${Math.round(result.modelWidth*10000)/10000}"`);}
+ for(const width of [.08,.4]){const samples=results.filter(result=>result.width===width),baseline=samples[0];for(const sample of samples)expect(Math.abs(sample.ink-baseline.ink)/sample.analyticalInk,JSON.stringify({baseline,sample})).toBeLessThan(.01);}
 });
 
 test('translucent brush and precision holes inherit antialiasing and physical pixel density',async({page})=>{

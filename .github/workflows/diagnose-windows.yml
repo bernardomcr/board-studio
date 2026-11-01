@@ -13,7 +13,7 @@ concurrency:
 jobs:
   diagnose:
     runs-on: windows-latest
-    timeout-minutes: 12
+    timeout-minutes: 18
     steps:
       - name: Report diagnostics started
         shell: pwsh
@@ -32,9 +32,9 @@ jobs:
         timeout-minutes: 5
         run: npx playwright install chromium --only-shell
         working-directory: app
-      - name: Long native brush gestures
-        timeout-minutes: 7
-        run: npm test -- brush-precision.spec.ts brush-ui.spec.ts --grep "native precision at two percent|a long real brush gesture" --max-failures=1 --reporter=line,./tests/reporters/github-status.cjs
+      - name: Image limits, native momentum and subpixel rendering
+        timeout-minutes: 12
+        run: npm test -- tests/motion-v17.spec.ts tests/navigation-v13.spec.ts tests/performance-v14.spec.ts tests/crop-inline-v16.spec.ts tests/zoom-render-v14.spec.ts tests/images-gpu-limit-v18.spec.ts tests/background-gpu-limit-v18.spec.ts --reporter=line,./tests/reporters/github-status.cjs
         working-directory: app
         env:
           CI: 'true'
