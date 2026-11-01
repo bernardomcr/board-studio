@@ -11,9 +11,9 @@ concurrency:
   group: windows-release
   cancel-in-progress: true
 jobs:
-  package:
-    runs-on: windows-latest
-    timeout-minutes: 90
+  release_started:
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
     steps:
       - name: Report release started
         shell: pwsh
@@ -22,6 +22,72 @@ jobs:
         run: |
           gh api "repos/$env:GITHUB_REPOSITORY/statuses/$env:GITHUB_SHA" -f state=pending -f context=board-studio/windows-release -f description='Building and checking Windows executables' -f "target_url=$env:GITHUB_SERVER_URL/$env:GITHUB_REPOSITORY/actions/runs/$env:GITHUB_RUN_ID" --silent
           if ($LASTEXITCODE -ne 0) { throw 'Release status could not be registered' }
+  browser_tests:
+    name: Browser shard ${{ matrix.shard }} / 4
+    needs: release_started
+    runs-on: windows-latest
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      max-parallel: 4
+      matrix:
+        shard: [1, 2, 3, 4]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: app/package-lock.json
+      - run: npm ci --no-audit --no-fund
+        working-directory: app
+      - name: Prepare matched browser
+        timeout-minutes: 5
+        run: npx playwright install chromium --only-shell
+        working-directory: app
+      - name: Browser preflight
+        timeout-minutes: 3
+        run: npm test -- profile-v18.spec.ts --max-failures=1 --reporter=line,./tests/reporters/github-status.cjs
+        working-directory: app
+        env:
+          CI: 'true'
+          GH_TOKEN: ${{ github.token }}
+          BOARD_TEST_STATUS_CONTEXT: board-studio/browser-preflight/shard-${{ matrix.shard }}-of-4
+          PLAYWRIGHT_BUNDLED_BROWSER: 'true'
+          BOARD_TEST_PAUSE_RENDERER: 'false'
+      - name: Browser regression suite
+        run: npm test -- --shard=${{ matrix.shard }}/4 --workers=1 --reporter=line,./tests/reporters/github-status.cjs
+        working-directory: app
+        env:
+          CI: 'true'
+          GH_TOKEN: ${{ github.token }}
+          BOARD_TEST_STATUS_CONTEXT: board-studio/browser-tests/shard-${{ matrix.shard }}-of-4
+          PLAYWRIGHT_BUNDLED_BROWSER: 'true'
+          BOARD_TEST_PAUSE_RENDERER: 'false'
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: windows-browser-shard-${{ matrix.shard }}-of-4-${{ github.run_id }}-${{ github.run_attempt }}
+          path: app/test-results
+          retention-days: 3
+          if-no-files-found: ignore
+      - name: Report shard infrastructure or timeout failure
+        if: always()
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+          SHARD_JOB_STATUS: ${{ job.status }}
+        run: |
+          # Successful runs keep the reporter's exact done/total result.
+          # A setup failure or hard test timeout may never invoke onEnd.
+          if ($env:SHARD_JOB_STATUS -eq 'success') { exit 0 }
+          gh api "repos/$env:GITHUB_REPOSITORY/statuses/$env:GITHUB_SHA" -f state=failure -f context=board-studio/browser-tests/shard-${{ matrix.shard }}-of-4 -f "description=Browser shard ${{ matrix.shard }}/4: $env:SHARD_JOB_STATUS" -f "target_url=$env:GITHUB_SERVER_URL/$env:GITHUB_REPOSITORY/actions/runs/$env:GITHUB_RUN_ID" --silent
+          if ($LASTEXITCODE -ne 0) { throw 'Shard failure status could not be registered' }
+  package:
+    needs: browser_tests
+    runs-on: windows-latest
+    timeout-minutes: 90
+    steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
@@ -36,29 +102,6 @@ jobs:
         working-directory: desktop
       - run: node node_modules/electron/install.js
         working-directory: desktop
-      - name: Prepare matched browser
-        timeout-minutes: 5
-        run: npx playwright install chromium --only-shell
-        working-directory: app
-      - name: Browser preflight
-        timeout-minutes: 3
-        run: npm test -- profile-v18.spec.ts --max-failures=1 --reporter=line,./tests/reporters/github-status.cjs
-        working-directory: app
-        env:
-          CI: 'true'
-          GH_TOKEN: ${{ github.token }}
-          BOARD_TEST_STATUS_CONTEXT: board-studio/browser-preflight
-          PLAYWRIGHT_BUNDLED_BROWSER: 'true'
-          BOARD_TEST_PAUSE_RENDERER: 'false'
-      - name: Browser regression suite
-        run: npm test -- --max-failures=1 --reporter=line,./tests/reporters/github-status.cjs
-        working-directory: app
-        env:
-          CI: 'true'
-          GH_TOKEN: ${{ github.token }}
-          BOARD_TEST_STATUS_CONTEXT: board-studio/browser-tests
-          PLAYWRIGHT_BUNDLED_BROWSER: 'true'
-          BOARD_TEST_PAUSE_RENDERER: 'false'
       - run: npm run package
         working-directory: desktop
         env:
@@ -120,19 +163,28 @@ jobs:
       - uses: actions/upload-artifact@v4
         if: failure()
         with:
-          name: windows-release-diagnostics-${{ github.run_id }}
+          name: windows-release-diagnostics-${{ github.run_id }}-${{ github.run_attempt }}
           path: |
             app/test-results
             desktop/test-results
           retention-days: 3
           if-no-files-found: ignore
-      - name: Report release result
-        if: always()
+  release_result:
+    needs: [release_started, browser_tests, package]
+    if: ${{ always() }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    steps:
+      - name: Report final release result even when browser shards failed
         shell: pwsh
         env:
           GH_TOKEN: ${{ github.token }}
-          RELEASE_JOB_STATUS: ${{ job.status }}
+          START_STATUS: ${{ needs.release_started.result }}
+          BROWSER_STATUS: ${{ needs.browser_tests.result }}
+          PACKAGE_STATUS: ${{ needs.package.result }}
         run: |
-          $state = if ($env:RELEASE_JOB_STATUS -eq 'success') { 'success' } else { 'failure' }
-          gh api "repos/$env:GITHUB_REPOSITORY/statuses/$env:GITHUB_SHA" -f "state=$state" -f context=board-studio/windows-release -f "description=Windows release: $env:RELEASE_JOB_STATUS" -f "target_url=$env:GITHUB_SERVER_URL/$env:GITHUB_REPOSITORY/actions/runs/$env:GITHUB_RUN_ID" --silent
+          $ok = $env:START_STATUS -eq 'success' -and $env:BROWSER_STATUS -eq 'success' -and $env:PACKAGE_STATUS -eq 'success'
+          $state = if ($ok) { 'success' } else { 'failure' }
+          $description = "Windows release: browsers=$env:BROWSER_STATUS; package=$env:PACKAGE_STATUS"
+          gh api "repos/$env:GITHUB_REPOSITORY/statuses/$env:GITHUB_SHA" -f "state=$state" -f context=board-studio/windows-release -f "description=$description" -f "target_url=$env:GITHUB_SERVER_URL/$env:GITHUB_REPOSITORY/actions/runs/$env:GITHUB_RUN_ID" --silent
           if ($LASTEXITCODE -ne 0) { throw 'Release result could not be registered' }
