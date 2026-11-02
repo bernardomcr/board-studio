@@ -17,7 +17,7 @@ async function blank(page){
 async function current(page){return page.evaluate(()=>[...window.__board.state.widgets.values()][0]);}
 async function menu(page,id){const details=page.locator(`#selection-properties details[data-menu="${id}"]`);if(!await details.evaluate(node=>node.open))await details.locator(':scope > summary').click();return details;}
 
-test('image toolbar downloads original source bytes without mutation and locked images only offer hold to unlock',async({page})=>{
+test('image toolbar downloads original source bytes without mutation and locked images offer hold-to-unlock only in context',async({page})=>{
  const original=await blank(page),toolbar=page.locator('#selection-properties');
  expect(await toolbar.locator(':scope > button[data-action]').evaluateAll(nodes=>nodes.map(node=>node.dataset.action))).toEqual(['download-image','crop','lock']);
  expect(await toolbar.locator(':scope > details').evaluateAll(nodes=>nodes.map(node=>node.dataset.menu))).toEqual(['image-opacity','border','more']);
@@ -28,9 +28,11 @@ test('image toolbar downloads original source bytes without mutation and locked 
  const pending=page.waitForEvent('download');await page.getByRole('button',{name:'Baixar original',exact:true}).click();const download=await pending;
  expect(download.suggestedFilename()).toBe('imagem-original.png');expect(await readFile(await download.path())).toEqual(Buffer.from(original.src.split(',')[1],'base64'));
  expect(await current(page)).toEqual(cropped);
- await page.getByRole('button',{name:'Bloquear',exact:true}).click();const locked=await current(page),history=await page.evaluate(()=>window.__board.bus.undoStack.length),unlock=toolbar.locator('[data-hold-unlock]');
- await expect(unlock).toBeVisible();await expect(toolbar.getByRole('button')).toHaveCount(1);await expect(toolbar.locator('[data-action="download-image"],[data-action="crop"],input,select,details')).toHaveCount(0);
- await unlock.click();expect(await current(page)).toEqual(locked);expect(await page.evaluate(()=>window.__board.bus.undoStack.length)).toBe(history);
+ await page.getByRole('button',{name:'Bloquear',exact:true}).click();const locked=await current(page),history=await page.evaluate(()=>window.__board.bus.undoStack.length),selection=await page.evaluate(()=>[...window.__board.state.selection]);
+ await expect(toolbar).toBeHidden();await expect(toolbar.locator('[data-hold-unlock]')).toHaveCount(0);await expect(toolbar.locator('button,input,select,details')).toHaveCount(0);
+ const point=await page.evaluate(id=>{const b=window.__board,w=b.state.widgets.get(id),r=b.app.canvas.getBoundingClientRect(),p=b.camera.worldToScreen({x:w.x+w.width/2,y:w.y+w.height/2});return {x:p.x+r.left,y:p.y+r.top};},locked.id);await page.mouse.click(point.x,point.y,{button:'right'});
+ const context=page.locator('#editor-context'),unlock=context.locator('[data-hold-unlock]');await expect(context).toBeVisible();await expect(unlock).toBeVisible();await expect(context.locator('button')).toHaveCount(1);await expect(page.locator('[data-hold-unlock]:visible')).toHaveCount(1);await expect(context.locator('input,select,details,[data-action]')).toHaveCount(0);await expect(toolbar).toBeHidden();expect(await current(page)).toEqual(locked);
+ await unlock.click();expect(await current(page)).toEqual(locked);expect(await page.evaluate(()=>window.__board.bus.undoStack.length)).toBe(history);expect(await page.evaluate(()=>[...window.__board.state.selection])).toEqual(selection);
  const after=await current(page);expect(after.src).toBe(original.src);expect(after.crop.width).toBeLessThan(1);expect(after.maskShape).toBe('ellipse');expect(after.locked).toBe(true);
 });
 

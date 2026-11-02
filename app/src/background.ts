@@ -6,6 +6,7 @@ import { icon } from './icons';
 import {configureRasterSampling} from './render/raster-quality';
 import {imageRasterLimit,needsViewportImage,ViewportImageRaster} from './render/viewport-image-raster';
 import {boardGridPattern,type GridPattern} from './render/grid-paint';
+import {positionToolPanel} from './context-position';
 
 const gridPatterns:Array<[GridPattern,string]>= [['dots','Malha pontilhada'],['lines','Malha quadriculada'],['crosses','Malha de cruzetas'],['none','Sem malha']];
 function patternIcon(pattern:GridPattern):string{
@@ -81,8 +82,11 @@ body.home-visible #board-background-controls{display:none!important}
   controls.addEventListener('pointerdown',event=>{if((event.target as Element).closest('[data-background-input="gridOpacity"]')&&!gridOpacityGesture){gridOpacityGesture=true;bus.beginTransaction('Opacidade da malha');}},true);
   window.addEventListener('pointerup',endOpacityGesture,true);window.addEventListener('pointercancel',endOpacityGesture,true);window.addEventListener('blur',endOpacityGesture);
 
+  function positionPanel(){if(panel.hidden)return;panel.style.position='fixed';panel.style.bottom='auto';positionToolPanel(panel,button);}
+  window.addEventListener('resize',positionPanel);
   function render() {
     if(pointerInteraction){pendingRender=true;return;}
+    positionPanel();
     const background = current(), image = background.image;
     const gridRange=panel.querySelector<HTMLInputElement>('[data-background-input="gridOpacity"]');
     if(gridRange){gridRange.value=String(Math.round((background.gridOpacity??1)*100));gridRange.disabled=!background.grid;panel.querySelector('label.background-grid-opacity output')!.textContent=`${gridRange.value}%`;}
@@ -100,6 +104,7 @@ body.home-visible #board-background-controls{display:none!important}
     panel.innerHTML = `<header><span>Fundo do board</span><button data-background-close aria-label="Fechar fundo do board">${icon('close',17)}</button></header><div class="background-themes"><button data-background-color="#fbfaf7" aria-label="Fundo claro" aria-pressed="${background.color === '#fbfaf7'}"><span style="background:#fbfaf7"></span>Claro</button><button data-background-color="#16181d" aria-label="Fundo escuro" aria-pressed="${background.color === '#16181d'}"><span style="background:#16181d"></span>Escuro</button></div><label>Cor personalizada<input type="color" aria-label="Cor de fundo" data-background-input="color" value="${background.color}"></label><span class="background-grid-label">Malha</span><div class="background-grid-options" role="group" aria-label="Malha do fundo">${gridPatterns.map(([pattern,label])=>`<button type="button" data-background-grid="${pattern}" aria-label="${label}" title="${label}" aria-pressed="${boardGridPattern(background)===pattern}">${patternIcon(pattern)}</button>`).join('')}</div><hr><button class="background-action" data-background-import ${importing ? 'disabled' : ''}>${icon('image',17)}${importing ? 'Abrindo imagem…' : image ? 'Substituir imagem de fundo' : 'Usar imagem como fundo'}</button>${image ? `<label>Largura<input type="number" aria-label="Largura da imagem de fundo" data-background-input="width" value="${Math.round(image.width * 100) / 100}" min="1"></label><label>Altura<input type="number" aria-label="Altura da imagem de fundo" data-background-input="height" value="${Math.round(image.height * 100) / 100}" min="1"></label><label>Opacidade<input type="number" aria-label="Opacidade da imagem de fundo" data-background-input="opacity" value="${Math.round(image.opacity * 100)}" min="0" max="100"></label><button class="background-action" data-background-fit>${icon('size',17)}Ajustar à tela</button><button class="background-action" data-background-center>${icon('align',17)}Centralizar na tela</button><button class="background-action" data-background-remove>${icon('trash',17)}Remover imagem de fundo</button>` : ''}<p class="background-note">${image ? 'A imagem acompanha o board e mantém a proporção ao mudar o tamanho.' : 'PNG, JPEG ou WebP de até 25 MB. A imagem fica atrás dos objetos.'}</p>${importError ? '<p role="alert"></p>' : ''}`;
     panel.querySelector('.background-grid-options')?.insertAdjacentHTML('afterend',`<label class="background-grid-opacity">Opacidade da malha<output>${Math.round((background.gridOpacity??1)*100)}%</output><input type="range" min="0" max="100" step="1" aria-label="Opacidade da malha" data-background-input="gridOpacity" value="${Math.round((background.gridOpacity??1)*100)}" ${background.grid?'':'disabled'}></label>`);
     const error = panel.querySelector('[role=alert]'); if (error) error.textContent = importError;
+    positionPanel();
   }
 
   function sync() {

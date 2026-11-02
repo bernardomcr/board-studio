@@ -2,6 +2,10 @@
 // @ts-nocheck
 import {test,expect} from '@playwright/test';
 
+let browserErrors:string[]=[];
+test.beforeEach(async({page})=>{browserErrors=[];page.on('pageerror',error=>browserErrors.push(error.message));page.on('console',message=>{if(message.type()==='error')browserErrors.push(message.text());});});
+test.afterEach(()=>expect(browserErrors).toEqual([]));
+
 async function fixture(page,count,locked=false){
   await page.goto('/');await page.waitForFunction(()=>window.__board?.booted);
   await page.getByRole('button',{name:'Criar board',exact:true}).click();
@@ -42,11 +46,14 @@ for(const count of [2,3])test(`restoring paths of ${count} selected connectors a
   await page.keyboard.press('Control+Shift+z');const redone=await state(page,ids);expect(redone.connectors).toEqual(after.connectors);expect(redone.history).toBe(after.history);expect(redone.selection).toEqual(ids);await expect(menu.getByRole('button',{name:'Remover ponto',exact:true})).toBeDisabled();
 });
 
-for(const action of ['captions','route'])test(`${action} stays absent from mixed locked-selection controls, which only offer hold to unlock`,async({page})=>{
-  const ids=await fixture(page,3,true),before=await state(page,ids),toolbar=page.locator('#selection-properties'),unlock=toolbar.locator('[data-hold-unlock]');
-  await expect(toolbar).toBeVisible();await expect(unlock).toBeVisible();await expect(toolbar.getByRole('button')).toHaveCount(1);
+for(const action of ['captions','route'])test(`${action} stays absent from a mixed locked selection, with hold-to-unlock only in its context menu`,async({page})=>{
+  const ids=await fixture(page,3,true),before=await state(page,ids),toolbar=page.locator('#selection-properties');
+  await expect(toolbar).toBeHidden();await expect(toolbar.locator('[data-hold-unlock]')).toHaveCount(0);
   await expect(toolbar.locator(`[data-menu="${action}"]`)).toHaveCount(0);await expect(toolbar.locator('input,select,details')).toHaveCount(0);
   await expect(toolbar.getByRole('button',{name:action==='captions'?'Adicionar rótulo':'Restaurar caminho',exact:true})).toHaveCount(0);
+  const point=await page.evaluate(()=>{const b=window.__board,r=b.app.canvas.getBoundingClientRect(),p=b.camera.worldToScreen({x:6500,y:6000});return {x:p.x+r.left,y:p.y+r.top};});
+  await page.mouse.click(point.x,point.y,{button:'right'});
+  const context=page.locator('#editor-context'),unlock=context.locator('[data-hold-unlock]');await expect(context).toBeVisible();await expect(unlock).toBeVisible();await expect(context.locator('button')).toHaveCount(1);await expect(page.locator('[data-hold-unlock]:visible')).toHaveCount(1);await expect(context.locator('input,select,details,[data-action]')).toHaveCount(0);await expect(toolbar).toBeHidden();expect(await state(page,ids)).toEqual(before);
   // A simple click must neither unlock nor format the editable peers in a
   // mixed selection; only the deliberate hold may change the locked member.
   await unlock.click();expect(await state(page,ids)).toEqual(before);
