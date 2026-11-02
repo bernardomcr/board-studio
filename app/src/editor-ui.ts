@@ -1,5 +1,5 @@
 import { FONT_OPTIONS, loadBoardFont } from './fonts';
-import { compactContextPanel, positionContextPanel, installContextStyles, workspaceTop } from './context-position';
+import { compactContextPanel, positionContextPanel, installContextStyles, positionToolPanel } from './context-position';
 import type { BoardState, CommandBus, Command } from './core/commands';
 import type { Camera } from './core/camera';
 import type { Connector, ConnectorShape,ConnectorCaptionStyle } from './core/connectors';
@@ -18,6 +18,8 @@ import {uiPalette,UI_COLORS} from './ui-palette';
 import {isFreeText,naturalText} from './core/text-layout';
 import {brandColorRevision} from './brand-colors';
 import {connectorDefaults,rememberConnectorDefaults} from './connector-defaults';
+import {ensureBoardLayers,boardLayerFlags} from './core/board-layers';
+import {installHoldAction} from './hold-action';
 
 interface EditorUIApi {
   state: BoardState; bus: CommandBus; camera: Camera;
@@ -78,6 +80,10 @@ export function installEditorUI(api: EditorUIApi) {
   const selected = () => [...state.selection].map(id => state.widgets.get(id)).filter((w): w is Widget => !!w);
   const connectors = () => [...state.selection].map(id => state.connectors.get(id)).filter((c): c is Connector => !!c);
   const groupIds = () => selectionRoots(state).filter(id => state.groups.has(id));
+  const unlockable=()=>[...state.selection].filter(id=>{const item=state.widgets.get(id)??state.connectors.get(id)??state.strokes.get(id);return !!item?.locked&&!boardLayerFlags(ensureBoardLayers(state),item.layerId??ensureBoardLayers(state).activeId).locked;});
+  const unlockControl=()=>unlockable().length?`<button class="toolbar-button hold-unlock" data-hold-unlock title="Mantenha pressionado para desbloquear" aria-label="Mantenha pressionado para desbloquear">${icon('lock',18)}<span>Desbloquear</span></button>`:`<button class="toolbar-button" disabled title="Desbloqueie a camada no painel Camadas" aria-label="Camada bloqueada">${icon('lock',18)}<span>Camada bloqueada</span></button>`;
+  const completeUnlock=()=>{const ids=unlockable();if(ids.length)bus.exec({op:'ENTITY_LOCK',payload:{ids,locked:false}});context.hidden=true;renderKey='';refresh();};
+  installHoldAction(properties,completeUnlock);installHoldAction(context,completeUnlock);
   let renderKey = '', displayedSelection = '', copiedStyle: CopiedStyle | null = null,forceHistoryRefresh=false;
   const strokeWidths=new WeakMap<object,number>();
   const strokeWidth=(points:Array<{r:number}>)=>{let width=strokeWidths.get(points);if(width===undefined){width=points.reduce((sum,p)=>sum+p.r*2,0)/Math.max(1,points.length);strokeWidths.set(points,width);}return width;};
@@ -150,7 +156,7 @@ export function installEditorUI(api: EditorUIApi) {
       const c=connectorChoices[Number(b.dataset.connectorChoice)]!;b.setAttribute('aria-pressed',String(c.shape===defaults.shape&&c.arrow===(defaults.style.endCap!=='none')));
     }
   }
-  function positionToolPicker(panel:HTMLElement){const toolbar=document.getElementById('toolbar')?.getBoundingClientRect(),button=document.querySelector<HTMLElement>(`[data-tool="${panel===picker?'shape':panel===stickyPicker?'sticky_note':'connector'}"]`)?.getBoundingClientRect(),top=workspaceTop();Object.assign(panel.style,{top:`${top}px`,transform:'none',maxWidth:`${innerWidth-24}px`,maxHeight:`${Math.max(100,innerHeight-top-18)}px`});panel.style.left=`${Math.max(12,Math.min(innerWidth-panel.offsetWidth-12,button?.left??toolbar?.left??12))}px`;}
+  function positionToolPicker(panel:HTMLElement){positionToolPanel(panel,document.querySelector<HTMLElement>(`[data-tool="${panel===picker?'shape':panel===stickyPicker?'sticky_note':'connector'}"]`));}
   window.addEventListener('resize',()=>{for(const panel of [picker,connectorPicker,stickyPicker])if(!panel.hidden)positionToolPicker(panel);});
   function chooseConnector(index:number) {
     const choice=connectorChoices[index];if(!choice)return;
@@ -259,7 +265,7 @@ export function installEditorUI(api: EditorUIApi) {
     if(name==='duplicate')duplicateSnapshot(state,bus,captureSelection(state));
     if(name==='delete'){bus.beginTransaction('Excluir seleção');for(const id of unlocked)bus.exec({op:state.connectors.has(id)?'CONNECTOR_REMOVE':state.strokes.has(id)?'STROKE_REMOVE':'WIDGET_REMOVE',payload:id});bus.endTransaction();}
     if(name==='front'||name==='back')bus.exec({op:'WIDGET_REORDER',payload:{ids:unlocked,direction:name}});
-    if(name==='lock'){const locked=!ids.every(id=>itemLocked(state,id));bus.beginTransaction(locked?'Bloquear':'Desbloquear');for(const id of ids)bus.exec({op:state.connectors.has(id)?'CONNECTOR_UPDATE':state.strokes.has(id)?'STROKE_UPDATE':'WIDGET_UPDATE',payload:{id,patch:{locked}}});bus.endTransaction();}
+    if(name==='lock'&&!ids.some(id=>itemLocked(state,id)))bus.exec({op:'ENTITY_LOCK',payload:{ids,locked:true}});
     if(name==='copy-style'&&ids.length===1){const w=selected()[0],c=connectors()[0],s=state.strokes.get(ids[0]!);copiedStyle=w?{kind:'widget',style:structuredClone(w.style),...(w.type==='image'?{imageOpacity:w.opacity??1}:{})}:c?{kind:'connector',style:structuredClone(c.style)}:s?{kind:'stroke',color:s.color,opacity:s.opacity??(s.tool==='highlighter'?.35:1),width:strokeWidth(s.points)}:null;}
     if(name==='paste-style'&&copiedStyle){
       const appearance=copiedStyle,commands:Command[]=[];
@@ -348,14 +354,14 @@ export function installEditorUI(api: EditorUIApi) {
   }
   function arrangeMenu(widgets:Widget[],locked:boolean) {
     const alignments=[['left','Alinhar à esquerda','align-left-edge'],['hcenter','Centralizar horizontalmente','align-center-x'],['right','Alinhar à direita','align-right-edge'],['top','Alinhar ao topo','align-top'],['vcenter','Centralizar verticalmente','align-center-y'],['bottom','Alinhar à base','align-bottom'],['dist-x','Distribuir horizontalmente','distribute-x'],['dist-y','Distribuir verticalmente','distribute-y']];
-    const count=arrangementRoots(state,api.getGroupScope?.()).length,allWidgets=widgets.length===state.selection.size;
-    return menu('arrange','Organizar',icon('arrange'),(allWidgets?`<div class="icon-choices">${button('front','Trazer para frente','front',locked?'disabled':'')}${button('back','Enviar para trás','back',locked?'disabled':'')}</div><hr>`:'')+(count>1?`<div class="icon-choices arrange-choices">${alignments.map(([mode,label,symbol])=>`<button title="${label}" aria-label="${label}" data-align="${mode}" ${locked||mode!.startsWith('dist')&&count<3?'disabled':''}>${icon(symbol!,20)}</button>`).join('')}</div><hr>`:'')+menuAction('frame','Criar quadro','frame','',locked));
+    const count=arrangementRoots(state,api.getGroupScope?.()).length;
+    return menu('arrange','Organizar',icon('arrange'),(`<div class="icon-choices">${button('front','Trazer para frente','front',locked?'disabled':'')}${button('back','Enviar para trás','back',locked?'disabled':'')}</div><hr>`)+(count>1?`<div class="icon-choices arrange-choices">${alignments.map(([mode,label,symbol])=>`<button title="${label}" aria-label="${label}" data-align="${mode}" ${locked||mode!.startsWith('dist')&&count<3?'disabled':''}>${icon(symbol!,20)}</button>`).join('')}</div><hr>`:'')+menuAction('frame','Criar quadro','frame','',locked));
   }
   function commonMenus(widgets:Widget[]) {
     const ids=[...state.selection],locked=ids.some(id=>itemLocked(state,id)),allLocked=ids.every(id=>itemLocked(state,id)),w=widgets[0];
     const pad=w?.type==='sticky_note'&&w.stickyPad;
     const link=w&&ids.length===1&&!pad?`<hr><label>Link do objeto<input type="url" aria-label="Link do objeto" data-field="link" placeholder="https://" value="${escapeHtml(w.link)}"></label>`:'';
-    const advanced=(widgets.length||ids.length>1?arrangeMenu(widgets,locked):'')+(w&&ids.length===1?sizeMenu(w):'');
+    const advanced=(ids.length?arrangeMenu(widgets,locked):'')+(w&&ids.length===1?sizeMenu(w):'');
     const structured=w&&ids.length===1&&!pad&&(w.type==='text'||w.type==='shape')&&!w.mind&&!w.audio&&!w.checklist?'<hr>'+menuAction('create-table',w.table?'Editar tabela':'Converter em tabela','grid','',locked):'';
     return `${separator}${selectionRoots(state).length>=2?button('group','Agrupar','group',locked?'disabled':''):''}${groupIds().length?button('ungroup','Desagrupar','ungroup',locked?'disabled':''):''}${button('lock',allLocked?'Desbloquear':'Bloquear',allLocked?'unlock':'lock')}${menu('more','Mais',icon('more'),menuAction('duplicate','Duplicar','duplicate','Ctrl+D')+menuAction('copy-image','Copiar como imagem','image')+'<hr>'+advanced+'<hr>'+menuAction('copy-style','Copiar estilo','stroke','',ids.length!==1)+menuAction('paste-style','Colar estilo','fill','',!canPasteStyle()||locked)+structured+(widgets.some(w=>w.type!=='image'&&!(w.type==='sticky_note'&&w.stickyPad))?menuAction('clear','Limpar conteúdo','eraser','',locked):'')+link+'<hr>'+menuAction('delete','Excluir','trash','Del',locked))}`;
   }
@@ -468,11 +474,11 @@ export function installEditorUI(api: EditorUIApi) {
     if((event as MouseEvent).altKey){event.preventDefault();return;}
     event.preventDefault();const e=event as MouseEvent,rect=(event.currentTarget as HTMLElement).getBoundingClientRect(),p=api.camera.screenToWorld({x:e.clientX-rect.left,y:e.clientY-rect.top});
     const hit=api.entityAt?.(p);
-    if(hit&&!state.selection.has(hit))bus.exec({op:'SELECTION_SET',payload:memberSelection(state,hit,api.getGroupScope?.())});
+    if(hit&&!state.selection.has(hit))bus.exec({op:'SELECTION_SET',payload:itemLocked(state,hit)?[hit]:memberSelection(state,hit,api.getGroupScope?.()).filter(id=>!itemLocked(state,id))});
     const locked=[...state.selection].some(id=>itemLocked(state,id));
     const w=selected()[0];
-    context.innerHTML=state.selection.size?
-      menuAction('duplicate','Duplicar','duplicate','Ctrl+D')+(selectionRoots(state).length>=2?menuAction('group','Agrupar','group','Ctrl+G',locked):'')+(groupIds().length?menuAction('ungroup','Desagrupar','ungroup','Ctrl+Shift+G',locked):'')+'<hr>'+menuAction('front','Trazer para frente','front','',locked)+menuAction('back','Enviar para trás','back','',locked)+menuAction('lock',[...state.selection].every(id=>itemLocked(state,id))?'Desbloquear':'Bloquear','lock')+(w?.type==='image'?'<hr>'+menuAction('crop','Recortar','crop','',locked)+menuAction('circle-crop','Recortar em círculo','crop-circle','',locked):'')+'<hr>'+menuAction('copy-style','Copiar estilo','stroke','',state.selection.size!==1)+menuAction('paste-style','Colar estilo','fill','',!canPasteStyle()||locked)+menuAction('copy-image','Copiar como imagem','image')+'<hr>'+menuAction('delete','Excluir','trash','Del',locked):menuAction('image','Inserir imagem','image')+menuAction('undo','Desfazer','undo','Ctrl+Z')+menuAction('redo','Refazer','redo','Ctrl+Shift+Z');
+    context.innerHTML=locked?unlockControl():state.selection.size?
+      menuAction('duplicate','Duplicar','duplicate','Ctrl+D')+(selectionRoots(state).length>=2?menuAction('group','Agrupar','group','Ctrl+G',locked):'')+(groupIds().length?menuAction('ungroup','Desagrupar','ungroup','Ctrl+Shift+G',locked):'')+'<hr>'+menuAction('front','Trazer para frente','front','',locked)+menuAction('back','Enviar para trás','back','',locked)+menuAction('lock',[...state.selection].every(id=>itemLocked(state,id))?'Desbloquear':'Bloquear','lock')+(w?.type==='image'?'<hr>'+menuAction('crop','Recortar','crop','',locked):'')+'<hr>'+menuAction('copy-style','Copiar estilo','stroke','',state.selection.size!==1)+menuAction('paste-style','Colar estilo','fill','',!canPasteStyle()||locked)+menuAction('copy-image','Copiar como imagem','image')+'<hr>'+menuAction('delete','Excluir','trash','Del',locked):menuAction('image','Inserir imagem','image')+menuAction('undo','Desfazer','undo','Ctrl+Z')+menuAction('redo','Refazer','redo','Ctrl+Shift+Z');
     for(const b of context.querySelectorAll('button'))b.setAttribute('role','menuitem');context.hidden=false;context.style.left=`${Math.max(8,Math.min(innerWidth-250,e.clientX))}px`;context.style.top=`${Math.max(8,Math.min(innerHeight-context.offsetHeight-8,e.clientY))}px`;
   });
 
@@ -494,6 +500,7 @@ export function installEditorUI(api: EditorUIApi) {
     const strokeKeys=strokes.map(s=>[s.id,s.locked,s.color,s.opacity,s.tool,strokes.length===ids.length?strokeWidth(s.points):undefined]);
     const key=JSON.stringify([widgetKeys,connectorKeys,strokeKeys,selectionRoots(state),groupIds(),arrangementRoots(state,scope).length,scope,ids,!!copiedStyle,brandColorRevision()]);if(key===renderKey)return;renderKey=key;
     const w=widgets[0],single=ids.length===1,locked=ids.some(id=>itemLocked(state,id)),allWidgets=widgets.length===ids.length,allText=allWidgets&&widgets.every(w=>w.type!=='image');
+    if(locked){properties.innerHTML=unlockControl();positionContextPanel(properties,state,api.camera);return;}
     let html=scope?button('exit-group','Sair do grupo','arrow-left')+separator:'';
     if(!single)html+=`<span class="selection-count">${groupIds().length===1&&selectionRoots(state).length===1?'Grupo':`${ids.length} objetos`}</span>`;
     if(cs.length===ids.length&&cs[0])html+=connectorToolbar(cs[0]);

@@ -41,7 +41,7 @@ test('nested layer groups collapse, toggle visibility and locking as one undoabl
   await page.keyboard.press('Control+z');expect(await page.evaluate(()=>['a','b','ink'].every(id=>!(window.__board.state.widgets.get(id)??window.__board.state.strokes.get(id)).hidden))).toBe(true);
   await row(page,'outer').getByRole('button',{name:'Bloquear Grupo',exact:true}).click();
   expect(await page.evaluate(()=>['a','b','ink'].every(id=>(window.__board.state.widgets.get(id)??window.__board.state.strokes.get(id)).locked))).toBe(true);
-  await row(page,'outer').getByRole('button',{name:'Desbloquear Grupo',exact:true}).click();await row(page,'outer').getByRole('button',{name:'Expandir grupo',exact:true}).click();
+  await row(page,'outer').getByRole('button',{name:'Desbloquear Grupo',exact:true}).click({delay:760});await row(page,'outer').getByRole('button',{name:'Expandir grupo',exact:true}).click();
   await row(page,'a').getByRole('button',{name:'Selecionar objeto Alpha',exact:true}).click();expect(await page.evaluate(()=>[...window.__board.state.selection])).toEqual(['a']);
   await row(page,'c').getByRole('button',{name:'Selecionar objeto Gamma',exact:true}).click({modifiers:['Control']});expect(await page.evaluate(()=>[...window.__board.state.selection].sort())).toEqual(['a','c']);
 });

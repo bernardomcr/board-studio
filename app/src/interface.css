@@ -95,8 +95,8 @@ html body #board-home{grid-template-columns:220px minmax(0,1fr)}
 html body #board-home :is(.bh-side,.bh-top,.bh-card,.bh-view){background:var(--studio-surface);border-color:var(--studio-line);color:var(--studio-ink)}
 html body #board-home .bh-side{padding-top:30px}
 html body #board-home .bh-main{background:var(--cloud-50)}
-html body #board-home .bh-top{padding-right:94px}
-html body #board-home .bh-heading h1{letter-spacing:-.055em;font-size:32px;font-weight:650}
+html body #board-home .bh-top{height:66px;padding-right:94px}
+html body #board-home .bh-heading h1{letter-spacing:-.03em;font-size:22px;font-weight:650}
 html body #board-home .bh-avatar{color:var(--studio-accent);background:var(--studio-tint)}
 html body #board-home :is(.bh-nav button,.bh-project){color:var(--cloud-600)!important;border-radius:10px!important}
 html body #board-home :is(.bh-nav button,.bh-project):hover{background:var(--studio-soft)!important}
@@ -109,8 +109,8 @@ html body #board-home .bh-cover{background:var(--studio-soft);color:var(--studio
 html body #board-home .bh-card:hover{border-color:var(--studio-accent);box-shadow:var(--studio-shadow)}
 html body #board-home .bh-card-star{background:var(--studio-raised)!important;border-color:var(--studio-line)!important}
 html body #board-home :is(.bh-card-actions button:hover,.bh-project-more:hover){background:var(--studio-tint)!important;color:var(--studio-accent)!important}
-html body #board-home :is(.bh-subtitle,.bh-card-meta,.bh-offline,.bh-empty,.bh-workspace small,.bh-local-note){color:var(--studio-muted)}
-html body #board-home :is(.bh-empty h2,.bh-local-note strong){color:var(--cloud-600)}
+html body #board-home :is(.bh-card-meta,.bh-empty){color:var(--studio-muted)}
+html body #board-home .bh-empty h2{color:var(--cloud-600)}
 html body #board-home .bh-empty{border-color:var(--studio-line);background:var(--studio-surface);border-radius:16px}
 html body :is(.bh-modal-card,.bh-menu){background:var(--studio-surface);border-color:var(--studio-line);color:var(--studio-ink);border-radius:16px}
 html body :is(.bh-modal,.bh-menu) :is(input,select,.bh-secondary){background:var(--studio-raised)!important;color:var(--studio-ink);border-color:var(--studio-line)!important}
@@ -149,7 +149,7 @@ html body.home-visible #interface-controls{right:24px;top:20px;z-index:120}
    when their available width is small. No canvas hit area can cover chrome. */
 :root{--studio-dock-height:48px}
 html body.studio-dock-ready::before{content:none}
-#studio-dock{position:fixed;inset:0 0 auto;z-index:50;display:grid;grid-template-columns:minmax(0,1fr) auto minmax(0,1fr);align-items:center;gap:6px;width:100%;height:48px;padding:0 8px;background:var(--studio-surface);color:var(--studio-ink);border-bottom:1px solid var(--studio-line);isolation:isolate}
+#studio-dock{position:fixed;inset:0 0 auto;z-index:50;display:grid;grid-template-columns:minmax(0,1fr) auto;align-items:center;gap:6px;width:100%;height:48px;padding:0 8px;background:var(--studio-surface);color:var(--studio-ink);border-bottom:1px solid var(--studio-line);isolation:isolate}
 html body #studio-dock #topbar{position:static;inset:auto;display:flex;gap:2px;width:auto;height:48px;padding:0;min-width:0;max-width:none;align-items:center}
 html body #studio-dock #board-title{margin:0;flex:1;min-width:0;max-width:180px;height:36px;line-height:36px;font-size:12px;padding:0 6px}
 html body #studio-dock #topbar .chip{height:36px;padding:0 2px;gap:0;border:0;flex:none}
@@ -159,11 +159,12 @@ html body #studio-dock #topbar button{flex:none;width:28px;height:32px;padding:0
 html body #studio-dock #project-file-controls{padding:0 2px;gap:0}
 html body #studio-dock #project-file-controls button{display:flex;align-items:center;justify-content:center;width:28px!important;height:32px;min-width:0;padding:0!important;gap:5px}
 html body #studio-dock #topbar .studio-command-label{display:none}
-html body #studio-dock #toolbar{position:static;inset:auto;transform:none;grid-column:2;grid-row:1;display:flex;width:max-content;max-width:none;height:48px;gap:2px;padding:0 2px;border:0;background:transparent;box-shadow:none}
-html body #studio-dock #toolbar button{width:36px;height:36px}
-html body #studio-dock #toolbar .sep{margin:0 3px;height:22px}
+html body #studio-dock #toolbar{position:fixed;inset:48px auto 0 0;transform:none;display:flex;flex-direction:column;align-items:center;justify-content:flex-start;width:56px;max-width:none;height:calc(100dvh - 48px);gap:3px;padding:10px 6px;border:0;border-right:1px solid var(--studio-line);border-radius:0;background:var(--studio-surface);box-shadow:none;overflow:visible}
+html body #studio-dock #toolbar button{flex:none;width:40px;height:40px}
+html body #studio-dock #toolbar .sep{flex:none;width:26px;min-width:0;margin:4px 0;height:1px}
+html body #studio-dock #toolbar button::after{left:calc(100% + 15px);right:auto;top:50%;transform:translateY(-50%)}
 html body #studio-dock #interface-controls,html body #studio-dock #layers-controls{position:static;inset:auto;display:block;width:auto;z-index:auto}
-#studio-dock-actions{grid-column:3;grid-row:1;display:flex;align-items:center;justify-content:flex-end;gap:3px;min-width:0}
+#studio-dock-actions{grid-column:2;grid-row:1;display:flex;align-items:center;justify-content:flex-end;gap:3px;min-width:0}
 html body #studio-dock #theme-toggle,html body #studio-dock #layers-toggle,#studio-more{flex:none;width:36px;height:36px;padding:7px;border:0;border-radius:7px;background:transparent;color:var(--studio-ink);box-shadow:none;cursor:pointer}
 html body #studio-dock #layers-toggle{width:auto}
 html body #studio-dock #profile-open{max-width:112px;min-width:0}
@@ -182,21 +183,22 @@ html body #studio-command-menu #project-file-controls{display:flex;flex-directio
 html body #studio-command-menu .studio-command-label{display:inline}
 html body.home-visible #studio-dock,html body.home-visible #studio-dock-actions{display:contents}
 html body.home-visible #studio-dock #interface-controls{position:fixed;right:24px;top:20px;z-index:120}
-html body.home-visible #studio-command-menu,html body.home-visible #studio-more,html body.home-visible #studio-dock #profile-open{display:none!important}
+html body.home-visible #studio-command-menu,html body.home-visible #studio-more{display:none!important}
+html body.home-visible #studio-dock #profile-open{position:fixed;right:72px;top:18px;z-index:120;width:32px;min-width:32px;padding:0;justify-content:center}
+html body.home-visible #studio-dock #profile-open .profile-name{display:none}
+html body.home-visible #board-home .bh-top{padding-right:116px}
 @media(min-width:1441px){html body #studio-dock #topbar #project-file-controls button{width:auto!important;padding:0 5px!important}html body #studio-dock #topbar #project-file-controls .studio-command-label{display:inline}}
 @media(max-width:1440px){html body #studio-dock #layers-toggle{width:36px}html body #studio-dock #layers-toggle :is(.layers-label,.layers-total){display:none}}
-@media(max-width:1100px){html body #studio-dock #toolbar button{width:32px;height:34px}html body #studio-dock #toolbar .sep{margin:0 2px}html body #studio-dock #toolbar{gap:1px}html body #studio-dock #profile-open{width:32px;max-width:32px;min-width:32px;padding:0;gap:0;justify-content:center}html body #studio-dock #profile-open .profile-name{display:none}html body #studio-dock #theme-toggle,html body #studio-dock #layers-toggle,#studio-more{width:32px;height:32px;padding:6px}}
+@media(max-width:1100px){html body #studio-dock #profile-open{width:32px;max-width:32px;min-width:32px;padding:0;gap:0;justify-content:center}html body #studio-dock #profile-open .profile-name{display:none}html body #studio-dock #theme-toggle,html body #studio-dock #layers-toggle,#studio-more{width:32px;height:32px;padding:6px}}
 @media(max-width:740px){
- :root{--studio-dock-height:88px}
- #studio-dock{height:88px;grid-template-columns:minmax(0,1fr) auto;grid-template-rows:44px 44px;gap:0 6px}
- html body #studio-dock #toolbar{grid-column:1/-1;grid-row:1;width:100%;height:44px;justify-content:center}
- html body #studio-dock #topbar{grid-column:1;grid-row:2;height:44px}
- #studio-dock-actions{grid-column:2;grid-row:2}
+ html body #studio-dock #topbar{grid-column:1;grid-row:1}
  html body #studio-dock #topbar .chip:has(#export){display:none}
  html body #studio-dock #board-title{max-width:none;font-size:12px}
  html body.home-visible #studio-dock #interface-controls{right:18px;top:12px}
 }
-@media(max-width:560px){html body #studio-dock #toolbar button{width:clamp(24px,7.3vw,32px);height:34px}html body #studio-dock #toolbar .sep{margin:0 2px}}
+@media(max-height:650px){html body #studio-dock #toolbar{gap:1px;padding-top:5px}html body #studio-dock #toolbar button{width:36px;height:34px}html body #studio-dock #toolbar .sep{margin:2px 0}}
+@media(max-height:520px){html body #studio-dock #toolbar{display:grid;grid-template-columns:repeat(2,34px);grid-template-rows:repeat(7,34px);grid-auto-flow:column;align-content:start;justify-content:center;gap:3px;width:82px;padding:7px 4px}html body #studio-dock #toolbar button{width:34px;height:34px}html body #studio-dock #toolbar .sep{display:none}}
+html body.home-visible #studio-dock #toolbar{display:none}
 
 /* Every floating surface follows the theme, including selected icon states. */
 html[data-theme=dark] body :is(#editor-context,#link-dialog,#connector-completion,.brand-dialog,.image-crop-toolbar,#help-panel .card,#studio-command-menu){background:var(--studio-surface);color:var(--studio-ink);border-color:var(--studio-line)}
@@ -218,18 +220,14 @@ html[data-theme=dark] body .image-crop-toolbar button[data-crop-apply]{color:var
 html[data-theme=dark] body #audio-record-dialog button[data-stop]{background:var(--studio-tint);color:var(--studio-accent);border-color:var(--studio-line)}
 html[data-theme=dark] body .font-picker-upload:hover{background:var(--studio-soft);color:var(--studio-accent)}
 
-/* The supplied wordmark lives on charcoal in both interface themes. */
-html body #board-home .studio-mark{gap:10px;margin:0 6px 28px;letter-spacing:-.025em}
-html body #board-home .studio-mark .studio-symbol{display:block;flex:none;width:36px;height:36px;object-fit:contain}
-html body #board-home .studio-name{font-size:15px;line-height:1.2;font-weight:750;max-width:132px;color:var(--studio-ink)}
-html body #board-home .bh-identity{position:relative;display:flex;align-items:center;justify-content:flex-start;height:180px;margin:0 0 30px;padding:18px 32px;overflow:hidden;border:1px solid #3a3447;border-radius:20px;background:radial-gradient(ellipse at 94% 8%,#8050ba35,transparent 66%),#1b1a21;box-shadow:0 12px 30px #1b152211}
-html body #board-home .bh-identity:after{content:'';position:absolute;width:240px;height:240px;right:-94px;top:-110px;border:1px solid #b68aff24;border-radius:50%;pointer-events:none}
-html body #board-home .bh-identity img{position:relative;z-index:1;display:block;width:min(100%,440px);height:100%;object-fit:contain;object-position:left center}
+/* Compact library identity; the canvas and board cards keep the focus. */
+html body #board-home .studio-mark{gap:8px;margin:0 6px 24px;letter-spacing:-.025em}
+html body #board-home .studio-mark .studio-symbol{display:block;flex:none;width:28px;height:28px;object-fit:contain}
+html body #board-home .studio-name{font-size:13px;line-height:1.2;font-weight:750;white-space:nowrap;color:var(--studio-ink)}
 html body #board-home .bh-search{border-color:var(--studio-line);color:var(--studio-muted)}
-html body #board-home .bh-offline i{background:var(--studio-vivid);box-shadow:0 0 0 3px color-mix(in srgb,var(--studio-vivid) 13%,transparent)}
 html body #board-home .bh-project-card{background:var(--studio-surface);color:var(--studio-ink);border-color:var(--studio-line)}
 html body #board-home .bh-project-card:hover{border-color:var(--studio-accent);box-shadow:var(--studio-shadow)}
-@media(max-width:740px){html body #board-home .studio-mark{margin:0 6px 28px}html body #board-home .studio-mark .studio-symbol{width:36px;height:36px}html body #board-home .bh-identity{height:132px;padding:16px 22px;margin-bottom:24px;border-radius:16px}}
+@media(max-width:740px){html body #board-home .studio-mark{margin:0 6px 24px;gap:0}html body #board-home .studio-mark .studio-symbol{width:28px;height:28px}}
 
 /* Library secondary actions override the legacy white button/card surfaces. */
 html body :is(#board-home,.bh-modal) :is(.bh-secondary,.bh-import,.bh-btn:not(.bh-primary)){background:var(--studio-raised)!important;color:var(--studio-ink)!important;border-color:var(--studio-line)!important}

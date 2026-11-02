@@ -1,4 +1,4 @@
-import {connectorCapSegment,type Connector,type ConnectorCubic,type ConnectorGeometry} from '../core/connectors';
+import {connectorCapSegment,connectorDecorationInset,connectorShaftBoundaryInset,type Connector,type ConnectorCubic,type ConnectorGeometry} from '../core/connectors';
 import type {Vec} from '../core/geometry';
 
 /** Filled decorations own the tip. Finish the rounded shaft inside their body,
@@ -10,7 +10,7 @@ function recess(cap:Connector['style']['endCap'],width:number):number{
 interface Plane{tip:Vec;unit:Vec;distance:number}
 function plane(connector:Connector,geometry:ConnectorGeometry,which:'start'|'end'):Plane{
   const tangent=connectorCapSegment(geometry,which),dx=tangent.to.x-tangent.from.x,dy=tangent.to.y-tangent.from.y,length=Math.hypot(dx,dy)||1;
-  return {tip:tangent.to,unit:{x:dx/length,y:dy/length},distance:recess(connector.style[which==='start'?'startCap':'endCap'],connector.style.strokeWidth)};
+  return {tip:tangent.to,unit:{x:dx/length,y:dy/length},distance:Math.max(recess(connector.style[which==='start'?'startCap':'endCap'],connector.style.strokeWidth)+connectorDecorationInset(connector,geometry,which),connectorShaftBoundaryInset(connector,geometry,which))};
 }
 const inward=(point:Vec,p:Plane)=>-((point.x-p.tip.x)*p.unit.x+(point.y-p.tip.y)*p.unit.y);
 function trimPoints(points:Vec[],p:Plane,reverse=false):Vec[]{
@@ -49,7 +49,7 @@ const retained=new WeakMap<ConnectorGeometry,{key:string;geometry:ConnectorGeome
  * attached to the original endpoints. SVG and GPU share this same trimming. */
 export function connectorShaftGeometry(connector:Connector,geometry:ConnectorGeometry):ConnectorGeometry{
   const {strokeWidth,startCap,endCap}=connector.style;
-  if(!recess(startCap,strokeWidth)&&!recess(endCap,strokeWidth))return geometry;
+  if(!geometry.boundaries&&!recess(startCap,strokeWidth)&&!recess(endCap,strokeWidth))return geometry;
   const key=[strokeWidth,startCap,endCap].join('|'),cached=retained.get(geometry);if(cached?.key===key)return cached.geometry;
   const start=plane(connector,geometry,'start'),end=plane(connector,geometry,'end'),points=trimPoints(trimPoints(geometry.points,start),end,true),curves=geometry.cubics??(geometry.cubic?[geometry.cubic]:undefined);
   const trimmed:ConnectorGeometry={points,...(curves?{cubics:trimCurves(trimCurves(curves,start),end,true)}:{})};retained.set(geometry,{key,geometry:trimmed});return trimmed;

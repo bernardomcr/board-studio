@@ -1,7 +1,7 @@
 import type { Camera } from './core/camera';
 import type { Widget } from './core/model';
 import { rotate, worldToLocal, widgetAABB, type Vec } from './core/geometry';
-import {workspaceTop} from './context-position';
+import {workspaceTop,workspaceLeft} from './context-position';
 
 export type ImageCrop = {x:number;y:number;width:number;height:number};
 export type ImageMask = 'rectangle'|'ellipse'|'round_rectangle';
@@ -84,8 +84,9 @@ export function openImageCrop(options:{
       handle.style.cursor=`${directions[((base+Math.round(frame.rotation/(Math.PI/4)))%8+8)%8]}-resize`;
     }
     const bounds=widgetAABB(frame as Widget),top=camera.worldToScreen({x:bounds.minX,y:bounds.minY}).y+origin.top,bottom=camera.worldToScreen({x:bounds.maxX,y:bounds.maxY}).y+origin.top;
-    const safeTop=workspaceTop();editor.style.clipPath=`inset(${Math.max(0,safeTop-10)}px 0 0 0)`;
-    const bar=toolbar.getBoundingClientRect(),left=clamp(center.x+origin.left-bar.width/2,8,Math.max(8,innerWidth-bar.width-8));
+    const safeTop=workspaceTop(),safeLeft=workspaceLeft();editor.style.clipPath=`inset(${Math.max(0,safeTop-10)}px 0 0 ${Math.max(0,safeLeft-10)}px)`;
+    toolbar.style.maxWidth=`${Math.max(120,innerWidth-safeLeft-12)}px`;
+    const bar=toolbar.getBoundingClientRect(),left=clamp(center.x+origin.left-bar.width/2,safeLeft,Math.max(safeLeft,innerWidth-bar.width-12));
     Object.assign(toolbar.style,{left:`${left}px`,top:`${clamp(top-bar.height-22>=safeTop?top-bar.height-22:bottom+22,safeTop,Math.max(safeTop,innerHeight-bar.height-16))}px`});
     element.dataset.crop=JSON.stringify(crop);element.dataset.frame=JSON.stringify(frame);element.dataset.mask=mask;
   }

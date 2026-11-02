@@ -8,7 +8,7 @@ import {MAX_AUDIO_BYTES,createAudioWidget,audioWaveform,formatAudioTime,type Aud
 import {audioCardLayout} from './render/audio-paint';
 import {audioDefaults} from './audio-defaults';
 import {icon} from './icons';
-import {workspaceTop} from './context-position';
+import {positionToolPanel} from './context-position';
 
 interface AudioAPI{
   state:BoardState;bus:CommandBus;camera:Camera;
@@ -79,11 +79,11 @@ export function installAudio(api:AudioAPI){
   #audio-record-dialog [role=alert]{color:#bb3543;min-height:18px}
   `;document.head.append(style);
   const overlays=document.createElement('div');overlays.id='audio-overlays';document.body.append(overlays);
-  const toolbarButton=document.createElement('button');toolbarButton.type='button';toolbarButton.dataset.tool='audio';toolbarButton.dataset.label='Áudio';toolbarButton.setAttribute('aria-label','Áudio');toolbarButton.title='Áudio';toolbarButton.innerHTML=icon('audio',22);
+  const toolbarButton=document.createElement('button');toolbarButton.type='button';toolbarButton.dataset.tool='audio';toolbarButton.dataset.label='Áudio';toolbarButton.setAttribute('aria-label','Áudio');toolbarButton.setAttribute('aria-haspopup','menu');toolbarButton.setAttribute('aria-expanded','false');toolbarButton.setAttribute('aria-controls','audio-create-menu');toolbarButton.title='Áudio';toolbarButton.innerHTML=icon('audio',22);
   const toolbar=document.getElementById('toolbar')!;toolbar.querySelector('[data-tool="image"]')?.after(toolbarButton);if(!toolbarButton.parentElement)toolbar.append(toolbarButton);
   const picker=document.createElement('input');picker.type='file';picker.accept='audio/*,.mp3,.wav,.ogg,.opus,.webm,.m4a,.aac,.flac';picker.multiple=true;picker.hidden=true;document.body.append(picker);
   function notice(text:string){const toast=document.createElement('div');toast.setAttribute('role','status');toast.textContent=text;toast.style.cssText='position:fixed;bottom:64px;left:50%;transform:translateX(-50%);max-width:min(600px,90vw);padding:12px 16px;background:#303746;color:#fff;border-radius:8px;z-index:110;font:13px Inter,Segoe UI,sans-serif';document.body.append(toast);setTimeout(()=>toast.remove(),6500);}
-  function closeMenu(){popup?.remove();popup=null;}
+  function closeMenu(restoreFocus=false){const closed=popup;popup=null;closed?.remove();toolbarButton.setAttribute('aria-expanded','false');if(restoreFocus&&closed&&toolbarButton.isConnected&&toolbarButton.getClientRects().length)toolbarButton.focus({preventScroll:true});}
   function insert(metadata:AudioMetadata,point:Vec){const node=createAudioWidget(metadata,point);node.style={...node.style,...audioDefaults()};bus.exec({op:'BATCH',payload:{label:'Inserir áudio',commands:[{op:'WIDGET_CREATE',payload:node},{op:'SELECTION_SET',payload:[node.id]}]}});api.setTool?.('select');refresh();api.onChange?.();return node.id;}
   async function importFiles(files:FileList|File[]){
     closeMenu();const boardKey=api.getBoardKey?.(),point={x:camera.x,y:camera.y};let index=0;
@@ -98,14 +98,25 @@ export function installAudio(api:AudioAPI){
   function openMenu(){
     if(popup){closeMenu();return;}const menu=document.createElement('div');popup=menu;menu.id='audio-create-menu';menu.setAttribute('role','menu');menu.setAttribute('aria-label','Adicionar áudio');
     menu.innerHTML=`<button type="button" role="menuitem" data-record>${icon('mic',18)}Gravar áudio</button><button type="button" role="menuitem" data-import>${icon('upload',18)}Importar áudio</button>`;
-    document.body.append(menu);positionMenu();
+    document.body.append(menu);toolbarButton.setAttribute('aria-expanded','true');positionMenu();
     menu.querySelector<HTMLButtonElement>('[data-record]')!.onclick=()=>openRecorder();menu.querySelector<HTMLButtonElement>('[data-import]')!.onclick=()=>{closeMenu();picker.click();};
+    menu.addEventListener('keydown',event=>{
+      event.stopPropagation();
+      if(event.key==='Escape'){event.preventDefault();closeMenu(true);return;}
+      if(!['ArrowDown','ArrowUp','Home','End'].includes(event.key))return;
+      event.preventDefault();
+      const items=[...menu.querySelectorAll<HTMLButtonElement>('[role="menuitem"]:not(:disabled)')];if(!items.length)return;
+      const current=items.indexOf(document.activeElement as HTMLButtonElement);
+      const next=event.key==='Home'?0:event.key==='End'?items.length-1:event.key==='ArrowDown'?(current+1)%items.length:(current<0?items.length-1:(current-1+items.length)%items.length);
+      items[next]!.focus({preventScroll:true});
+    });
+    menu.querySelector<HTMLButtonElement>('[role="menuitem"]:not(:disabled)')?.focus({preventScroll:true});
   }
-  function positionMenu(){if(!popup)return;const rect=toolbarButton.getBoundingClientRect();popup.style.left=`${Math.max(12,Math.min(innerWidth-226,rect.left))}px`;popup.style.top=`${Math.max(workspaceTop(),Math.min(innerHeight-popup.offsetHeight-16,rect.bottom+10))}px`;}
+  function positionMenu(){if(popup)positionToolPanel(popup,toolbarButton);}
   window.addEventListener('resize',positionMenu);
   toolbarButton.addEventListener('click',event=>{event.stopPropagation();openMenu();});
   document.addEventListener('pointerdown',event=>{if(popup&&!popup.contains(event.target as Node)&&!toolbarButton.contains(event.target as Node))closeMenu();});
-  window.addEventListener('keydown',event=>{if(event.key==='Escape')closeMenu();});
+  window.addEventListener('keydown',event=>{if(event.key==='Escape'&&popup){event.preventDefault();event.stopPropagation();closeMenu(true);}});
 
   function download(id:string){const node=state.widgets.get(id);if(!node?.audio)return;const link=document.createElement('a');link.href=node.audio.src;const extension=node.audio.mime.split(';')[0]!.split('/')[1]?.replace('mpeg','mp3').replace('x-wav','wav')||'webm',title=(node.type==='frame'?node.title:node.content||node.audio.name).replace(/[<>:"/\\|?*]/g,'-');link.download=/\.[a-z0-9]{2,5}$/i.test(title)?title:`${title}.${extension}`;link.click();}
   function pauseOthers(id:string){for(const [other,player]of players)if(other!==id)player.audio.pause();}

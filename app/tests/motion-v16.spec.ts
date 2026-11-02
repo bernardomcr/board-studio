@@ -41,7 +41,7 @@ test('moving and rotating a widget reuses its local paint while content, style a
   const state={widgets:new Map(),order:[],connectors:new Map(),connectorOrder:[],strokes:new Map(),strokeOrder:[],groups:new Map(),selection:new Set()},bus=new CommandBus(state,()=>{}),stage=new Container(),scene=new BoardScene(stage);
   bus.exec({op:'WIDGET_CREATE',payload:{...createWidget('shape',{x:0,y:0,width:300,height:200,content:'Texto estável'}),id:'box'}});scene.sync(state,undefined,1);
   const node=scene.nodeAt('box'),children=[...node.children[1].children],graphics=node.children[0].context.instructions,original=scene.layoutText.bind(scene);let layouts=0;scene.layoutText=(...args)=>{layouts++;original(...args);};
-  for(let i=1;i<=100;i++){bus.exec({op:'WIDGET_UPDATE',payload:{id:'box',patch:{x:i*2,y:i*3,rotation:i*.001,name:'Nome '+i,locked:!!(i%2)}}});scene.sync(state,undefined,1);}
+  for(let i=1;i<=100;i++){bus.exec({op:'ENTITY_LOCK',payload:{ids:['box'],locked:false}});bus.exec({op:'WIDGET_UPDATE',payload:{id:'box',patch:{x:i*2,y:i*3,rotation:i*.001,name:'Nome '+i}}});bus.exec({op:'ENTITY_LOCK',payload:{ids:['box'],locked:!!(i%2)}});scene.sync(state,undefined,1);}
   const transformLayouts=layouts,sameChildren=children.every((child,i)=>child===node.children[1].children[i]),sameGraphics=graphics===node.children[0].context.instructions,transform={x:node.x,y:node.y,rotation:node.rotation};
   bus.exec({op:'WIDGET_UPDATE',payload:{id:'box',patch:{content:'Conteúdo novo',style:{fontSize:40}}}});scene.sync(state,undefined,1);const afterContent=layouts;
   scene.sync(state,undefined,2);const afterZoom=layouts;return {transformLayouts,sameChildren,sameGraphics,transform,afterContent,afterZoom};

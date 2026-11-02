@@ -215,6 +215,7 @@ export function moveMindSubtree(state:BoardState,bus:CommandBus,id:string,dx:num
 }
 export function deleteMindSubtree(state:BoardState,bus:CommandBus,id:string):boolean{
   const node=state.widgets.get(id),ids=mindSubtree(state,id),removed=new Set(ids);if(!node?.mind||!ids.length||ids.some(id=>state.widgets.get(id)?.locked))return false;
+  if([...state.connectors.values()].some(connector=>connector.locked&&connector.mindBranch&&removed.has(connector.mindBranch)))return false;
   const copy=staged(state),commands:Command[]=[];
   for(const connector of copy.connectors.values())if(connector.mindBranch&&removed.has(connector.mindBranch)){commands.push({op:'CONNECTOR_REMOVE',payload:connector.id});copy.connectors.delete(connector.id);}
   for(const nodeId of [...ids].reverse()){commands.push({op:'WIDGET_REMOVE',payload:nodeId});copy.widgets.delete(nodeId);}

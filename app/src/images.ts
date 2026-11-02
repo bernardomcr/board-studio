@@ -18,6 +18,7 @@ type ImageItem = Omit<Widget, "type"> & { type: "image"; src: string; naturalWid
 interface ImageAPI {
   state: BoardState; bus: CommandBus; camera: Camera; app: Application;
   world: Container; nodeAt?: (id: string) => Container | undefined; onChange?: () => void;
+  onInserted?(ids: string[]): void;
   getBoardKey?(): string | null;
 }
 export interface ImageImportOptions{point?:Vec;zoom?:number;viewport?:{width:number;height:number};label?:string;afterCreate?(ids:string[]):void;canInsert?():boolean}
@@ -204,6 +205,8 @@ export function installImages(api: ImageAPI) {
       bus.exec({ op: "SELECTION_SET", payload: ids });
     }finally{bus.endTransaction();}
     }
+    const inserted=ids.filter(id=>state.widgets.get(id)?.type==='image');
+    if(inserted.length&&sameBoard(boardKey))api.onInserted?.(inserted);
     sync(); api.onChange?.();
     return ids;
   }

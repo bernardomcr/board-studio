@@ -1,5 +1,5 @@
 import type { Graphics } from 'pixi.js';
-import { connectorCapSegment, type Connector, type ConnectorGeometry } from '../core/connectors';
+import { connectorDecorationSegment, type Connector, type ConnectorGeometry } from '../core/connectors';
 import {connectorCaptionLayout,captionCutCubics,captionCutSegments,captionDotVisible} from '../core/connector-captions';
 import { capGeometry, patternedLineSegments } from '../core/line-decoration';
 import type { Vec } from '../core/geometry';
@@ -19,7 +19,7 @@ export function paintConnector(graphics:Graphics,connector:Connector,geometry:Co
   }else for(const source of line.segments)for(const segment of captionCutSegments(source,captions)){if(segment.length<2)continue;graphics.moveTo(segment[0]!.x,segment[0]!.y);for(const point of segment.slice(1))graphics.lineTo(point.x,point.y);graphics.stroke(stroke);}
   for(const dot of line.dots)if(captionDotVisible(dot,dot.radius,captions)){const coverage=screenDot(dot.radius,zoom);graphics.circle(dot.x,dot.y,coverage.radius).fill({color,alpha:coverage.alpha});}
   for(const which of ['start','end'] as const){
-    const tangent=connectorCapSegment(geometry,which),cap=capGeometry(connector.style[which==='start'?'startCap':'endCap'],tangent.from,tangent.to,width);
+    const tangent=connectorDecorationSegment(connector,geometry,which),cap=capGeometry(connector.style[which==='start'?'startCap':'endCap'],tangent.from,tangent.to,width);
     for(const polygon of cap.polygons)graphics.poly(polygon).fill(color);
     for(const segment of cap.lines){graphics.moveTo(segment[0]!.x,segment[0]!.y);for(const point of segment.slice(1))graphics.lineTo(point.x,point.y);graphics.stroke(stroke);}
     for(const circle of cap.circles)graphics.circle(circle.x,circle.y,circle.radius).fill(color);
@@ -44,7 +44,7 @@ export function connectorSvgContent(connector:Connector,geometry:ConnectorGeomet
     for(const source of line.segments)for(const segment of captionCutSegments(source,captions))pieces.push(`<polyline points="${polyline(segment)}" ${stroke}/>`);
     for(const dot of line.dots)if(captionDotVisible(dot,dot.radius,captions))pieces.push(`<circle cx="${n(dot.x)}" cy="${n(dot.y)}" r="${n(dot.radius)}" fill="${color}"/>`);
   }
-  for(const which of ['start','end'] as const){const tangent=connectorCapSegment(geometry,which),cap=capGeometry(connector.style[which==='start'?'startCap':'endCap'],tangent.from,tangent.to,width);
+  for(const which of ['start','end'] as const){const tangent=connectorDecorationSegment(connector,geometry,which),cap=capGeometry(connector.style[which==='start'?'startCap':'endCap'],tangent.from,tangent.to,width);
     for(const polygon of cap.polygons)pieces.push(`<polygon points="${polygon.map(n).join(' ')}" fill="${color}"/>`);
     for(const segment of cap.lines)pieces.push(`<polyline points="${polyline(segment)}" ${stroke}/>`);
     for(const circle of cap.circles)pieces.push(`<circle cx="${n(circle.x)}" cy="${n(circle.y)}" r="${n(circle.radius)}" fill="${color}"/>`);

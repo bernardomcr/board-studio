@@ -15,13 +15,15 @@ async function selectionPixels(page,x,y){return page.evaluate(({x,y})=>{const b=
 async function paintedEndpoint(page){return page.evaluate(()=>{const b=window.__board,instruction=b.app.stage.children[2].context.instructions.find(i=>i.action==='stroke'&&i.data?.path?.instructions.some(p=>p.action==='bezierCurveTo'));const curve=instruction.data.path.instructions.filter(p=>p.action==='bezierCurveTo').at(-1);return curve.data.slice(4,6);});}
 
 test('connector ports advertise nearby targets and magnetize without a crosshair or snap flicker',async({page})=>{
-  await fixture(page);await page.mouse.move(390,395);await page.mouse.move(500,395);await expect(page.locator('#app canvas')).toHaveCSS('cursor','pointer');
+  await fixture(page);expect(await page.evaluate(()=>window.__board.state.widgets.get('target').style.borderWidth)).toBe(2);await page.mouse.move(390,395);await page.mouse.move(500,395);await expect(page.locator('#app canvas')).toHaveCSS('cursor','pointer');
   await page.mouse.down();await expect(page.locator('#app canvas')).toHaveCSS('cursor','default');await page.mouse.move(700,560,{steps:15});
   // The visible destination port is ahead of the wire, not merely its end marker.
   expect(await selectionPixels(page,800,595)).toBeGreaterThan(12);expect(await selectionPixels(page,760,810)).toBe(0);expect(await selectionPixels(page,600,805)).toBe(0);
   await page.screenshot({path:'../work/v9-connector-target-ports.png'});
-  await page.mouse.move(790,595,{steps:6});let end=await paintedEndpoint(page);expect(end[0]).toBeCloseTo(800,5);expect(end[1]).toBeCloseTo(595,5);
-  await page.mouse.move(780,595);end=await paintedEndpoint(page);expect(end[0]).toBeCloseTo(800,5);expect(end[1]).toBeCloseTo(595,5);
+  // The logical port remains at 800; its 2px centered border begins at 799.
+  // The attached wire reaches that visible edge instead of covering the border.
+  await page.mouse.move(790,595,{steps:6});let end=await paintedEndpoint(page);expect(end[0]).toBeCloseTo(799,5);expect(end[1]).toBeCloseTo(595,5);
+  await page.mouse.move(780,595);end=await paintedEndpoint(page);expect(end[0]).toBeCloseTo(799,5);expect(end[1]).toBeCloseTo(595,5);
   await page.mouse.move(776,595);end=await paintedEndpoint(page);expect(end[0]).toBeCloseTo(776,5);expect(end[1]).toBeCloseTo(595,5);
   await page.mouse.move(790,595);await page.mouse.up();const connector=await page.evaluate(()=>[...window.__board.state.connectors.values()][0]);expect(connector).toMatchObject({shape:'curved',end:{kind:'anchor',widgetId:'target',x:0,y:.5}});
   await page.mouse.move(800,595);await expect(page.locator('#app canvas')).toHaveCSS('cursor','grab');

@@ -13,8 +13,9 @@ async function fixture(page){await page.evaluate(async()=>{
   b.bus.exec({op:'SELECTION_SET',payload:['original']});
 });}
 
-test('native image paste wins over an older in-app copy and accepts image items without a file list',async({page})=>{
+test('native image paste wins over an older in-app copy, accepts items without a file list and returns from brush to Select',async({page})=>{
   await blank(page);await fixture(page);
+  await page.locator('#toolbar [data-tool="brush"]').click();await expect(page.locator('#toolbar [data-tool="brush"]')).toHaveClass(/active/);
   const result=await page.evaluate(async()=>{
     const copied=new DataTransfer(),copy=new ClipboardEvent('copy',{clipboardData:copied,bubbles:true,cancelable:true});document.dispatchEvent(copy);
     const key=new KeyboardEvent('keydown',{key:'v',code:'KeyV',ctrlKey:true,bubbles:true,cancelable:true});document.body.dispatchEvent(key);
@@ -26,6 +27,7 @@ test('native image paste wins over an older in-app copy and accepts image items 
   });
   expect(result).toEqual({copyConsumed:true,copyToken:true,keyConsumed:false,pasteConsumed:true});
   await expect.poll(()=>page.evaluate(()=>[...window.__board.state.widgets.values()].filter(w=>w.type==='image').length)).toBe(1);
+  await expect(page.locator('#toolbar [data-tool="select"]')).toHaveClass(/active/);await expect(page.locator('#toolbar [data-tool="brush"]')).not.toHaveClass(/active/);
   const pasted=await page.evaluate(()=>{const b=window.__board,w=[...b.state.widgets.values()].find(w=>w.type==='image');return {count:b.state.widgets.size,naturalWidth:w.naturalWidth,naturalHeight:w.naturalHeight,center:{x:w.x+w.width/2,y:w.y+w.height/2},camera:{x:b.camera.x,y:b.camera.y},selected:[...b.state.selection]};});
   expect(pasted.count).toBe(2);expect(pasted.naturalWidth).toBe(240);expect(pasted.naturalHeight).toBe(120);expect(pasted.center).toEqual(pasted.camera);expect(pasted.selected).toHaveLength(1);
   await page.keyboard.press('Control+z');expect(await page.evaluate(()=>window.__board.state.widgets.size)).toBe(1);

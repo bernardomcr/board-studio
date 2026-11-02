@@ -90,5 +90,7 @@ export function reorderLayerCommands(state: BoardState, ids: string[], destinati
   }
   const next = [...remaining.slice(0, at), ...moved, ...remaining.slice(at)];
   if (next.every((id, index) => id === order[index])) return [];
-  return next.flatMap((id, index) => layerEntity(state, id)!.z === index + 1 ? [] : [layerUpdateCommand(state, id, { z: index + 1 })]);
+  // One reorder command authorizes only the moving objects. Renumbering the
+  // unchanged stack is bookkeeping and must not require editing locked peers.
+  return [{op:'WIDGET_REORDER',payload:{ids:[...selected],order:next}}];
 }

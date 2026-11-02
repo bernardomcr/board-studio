@@ -72,7 +72,11 @@ test('duplicate joins an existing transaction so one undo reverses both the prec
 test('native mixed-object paste at two percent zoom synchronizes the real scene once per paste, undo and redo',async({page})=>{
   await blank(page);
   const result=await page.evaluate(async()=>{
-    const b=window.__board,{createWidget}=await import('/src/core/model.ts'),{BoardScene}=await import('/src/render/scene.ts'),commands=[],ids=[];
+    // Vite may version the application's dependency URL after an HMR update.
+    // Import that first-loaded module so this hook observes the live prototype.
+    const appSceneURL=performance.getEntriesByType('resource').find(entry=>new URL(entry.name).pathname==='/src/render/scene.ts')?.name;
+    if(!appSceneURL)throw new Error('The application scene module was not found in loaded resources.');
+    const b=window.__board,{createWidget}=await import('/src/core/model.ts'),{BoardScene}=await import(appSceneURL),commands=[],ids=[];
     for(let i=0;i<104;i++){const id=`native-${i}`;ids.push(id);commands.push({op:'WIDGET_CREATE',payload:{...createWidget('shape',{x:(i%13)*420-2600,y:Math.floor(i/13)*300-1000,width:240,height:160,content:`Native ${i}`}),id}});}
     for(let i=0;i<10;i++){const id=`native-line-${i}`;ids.push(id);commands.push({op:'CONNECTOR_CREATE',payload:{id,type:'connector',shape:'curved',start:{kind:'anchor',widgetId:`native-${i}`,x:1,y:.5},end:{kind:'anchor',widgetId:`native-${i+1}`,x:0,y:.5},style:{strokeColor:'#3859ff',strokeWidth:4},z:0}});}
     ids.push('native-stroke');commands.push({op:'STROKE_CREATE',payload:{id:'native-stroke',type:'stroke',tool:'brush',color:'#e16c68',points:[{x:0,y:1800,r:7},{x:600,y:1900,r:9}],z:0}},{op:'GROUP_CREATE',payload:{id:'native-group',items:['native-0','native-1','native-line-0','native-stroke']}},{op:'SELECTION_SET',payload:ids});
@@ -84,6 +88,7 @@ test('native mixed-object paste at two percent zoom synchronizes the real scene 
     try{
       document.activeElement?.blur();const data=new DataTransfer(),copy=new ClipboardEvent('copy',{clipboardData:data,bubbles:true,cancelable:true});document.dispatchEvent(copy);
       const paste=new ClipboardEvent('paste',{clipboardData:data,bubbles:true,cancelable:true});document.dispatchEvent(paste);
+      if(calls===0)throw new Error('The live application scene sync hook was not invoked by native paste.');
       const pasteSyncs=calls,selected=[...b.state.selection],allSelectedExist=selected.every(id=>b.state.widgets.has(id)||b.state.connectors.has(id)||b.state.strokes.has(id)),after={widgets:b.state.widgets.size,connectors:b.state.connectors.size,strokes:b.state.strokes.size,groups:b.state.groups.size,selected:selected.length};
       calls=0;b.bus.undo();const undoSyncs=calls,undone={widgets:b.state.widgets.size,connectors:b.state.connectors.size,strokes:b.state.strokes.size,groups:b.state.groups.size};
       calls=0;b.bus.redo();const redoSyncs=calls;

@@ -17,12 +17,13 @@ import { DEFAULT_BACKGROUND, validateBoardBackground, copyBoardBackground, type 
 import { isFreeText,naturalText } from './text-layout';
 import { relativeBorderScale } from './style-scale';
 import { mindLayoutCommands, mindSubtree } from './mindmap';
-import {ensureBoardLayers,projectLayerItem,prepareLayerPatch,syncBoardLayers,validateBoardLayers,ownLayerFlags,boardLayerFlags,boardLayerOrder,LAYER_Z_STRIDE,type BoardLayers} from './board-layers';
+import {ensureBoardLayers,projectLayerItem,prepareLayerPatch,syncBoardLayers,validateBoardLayers,ownLayerFlags,boardLayerFlags,boardLayerOrder,layerDescendants,LAYER_Z_STRIDE,type BoardLayers} from './board-layers';
 
 export type CommandOp =
   | "BATCH"
   | "LAYERS_SET"
   | "LAYERS_ACTIVE"
+  | "LAYERS_LOCK"
   | "BACKGROUND_UPDATE"
   | "WIDGET_CREATE"
   | "WIDGET_UPDATE"
@@ -39,6 +40,7 @@ export type CommandOp =
   | "STROKE_UPDATE"
   | "GROUP_CREATE"
   | "GROUP_REMOVE"
+  | "ENTITY_LOCK"
   | "SELECTION_SET";
 
 export type AlignMode = "left" | "hcenter" | "right" | "top" | "vcenter" | "bottom";
@@ -149,10 +151,11 @@ export class CommandBus {
     // Every interactive creation belongs to the active layer, including paste,
     // imports and duplicates. Journal replay uses its recorded membership.
     let creationDocument=ensureBoardLayers(this.state),blockedCreation=false;
-    const assign=(c:Command)=>{if(c.op==='BATCH')for(const child of (c.payload as {commands:Command[]}).commands)assign(child);else if(c.op==='LAYERS_SET')creationDocument=validateBoardLayers((c.payload as {document:BoardLayers}).document);else if(c.op==='LAYERS_ACTIVE')creationDocument={...creationDocument,activeId:c.payload as string};else if(['WIDGET_CREATE','CONNECTOR_CREATE','STROKE_CREATE'].includes(c.op)){const flags=boardLayerFlags(creationDocument,creationDocument.activeId);blockedCreation||=flags.hidden||flags.locked;const own=ownLayerFlags(c.payload as Widget);c.payload={...own,layerId:creationDocument.activeId};}};assign(command);if(blockedCreation)return;
-    const executed = this.execute(command);
+    const assign=(c:Command)=>{if(c.op==='BATCH')for(const child of (c.payload as {commands:Command[]}).commands)assign(child);else if(c.op==='LAYERS_SET')creationDocument=validateBoardLayers((c.payload as {document:BoardLayers}).document);else if(c.op==='LAYERS_ACTIVE')creationDocument={...creationDocument,activeId:c.payload as string};else if(c.op==='LAYERS_LOCK'){const {ids,locked}=c.payload as {ids:string[];locked:boolean};creationDocument={...creationDocument,nodes:creationDocument.nodes.map(node=>ids.includes(node.id)?{...node,locked}:node)};}else if(['WIDGET_CREATE','CONNECTOR_CREATE','STROKE_CREATE'].includes(c.op)){const flags=boardLayerFlags(creationDocument,creationDocument.activeId);blockedCreation||=flags.hidden||flags.locked;const own=ownLayerFlags(c.payload as Widget);c.payload={...own,layerId:creationDocument.activeId};}};assign(command);if(blockedCreation)return;
+    const executed = this.execute(command,true);
     if (!executed) return;
     executed.redo();
+    if(command.op==='BATCH'&&!(command.payload as {commands:Command[]}).commands.length)return;
     if(affectsLayerOrder(command))syncBoardLayers(this.state);
     // Choosing an object must neither consume Undo nor discard content Redo.
     // Selection inside a content BATCH is still restored with that operation.
@@ -191,13 +194,65 @@ export class CommandBus {
   }
 
   /** Constrói o par redo/undo sem mutar o estado. Quem aplica é o chamador. */
-  private execute(command: Command): ExecutedCommand | null {
+  private execute(command: Command,respectLocks=false): ExecutedCommand | null {
     const s = this.state;
+    // Input/UI checks are not an authorization boundary: delayed editors,
+    // clipboard handlers and composite actions must respect the current lock.
+    // Journal replay and Undo/Redo use their recorded inverse without this
+    // interactive guard, preserving older files and exact history semantics.
+    const entity=(id:string)=>s.widgets.get(id)??s.connectors.get(id)??s.strokes.get(id);
+    const lockedTree=(id:string,seen=new Set<string>()):boolean=>{if(seen.has(id))return false;seen.add(id);return !!entity(id)?.locked||(s.groups.get(id)??[]).some(member=>lockedTree(member,seen));};
+    if(respectLocks){
+      if(['WIDGET_CREATE','CONNECTOR_CREATE','STROKE_CREATE','GROUP_CREATE'].includes(command.op)&&lockedTree((command.payload as {id:string}).id))return null;
+      if(['WIDGET_CREATE','CONNECTOR_CREATE','STROKE_CREATE'].includes(command.op)){const doc=ensureBoardLayers(s),flags=boardLayerFlags(doc,(command.payload as {layerId?:string}).layerId??doc.activeId);if(flags.hidden||flags.locked)return null;}
+      if(['WIDGET_UPDATE','CONNECTOR_UPDATE','STROKE_UPDATE'].includes(command.op)){
+        const {id,patch}=command.payload as {id:string;patch:Record<string,unknown>};
+        // Visibility is a view control, available from the layers panel. A
+        // locked object's content, geometry, style and lock cannot be patched.
+        if(lockedTree(id)&&!Object.keys(patch).every(key=>key==='hidden'))return null;
+      }
+      if(['WIDGET_REMOVE','CONNECTOR_REMOVE','STROKE_REMOVE','GROUP_REMOVE'].includes(command.op)&&lockedTree(command.payload as string))return null;
+      if(['WIDGET_TRANSLATE','WIDGET_REORDER','WIDGET_ALIGN','WIDGET_DISTRIBUTE'].includes(command.op)&&(command.payload as {ids:string[]}).ids.some(id=>lockedTree(id)))return null;
+      if(command.op==='GROUP_CREATE'&&(command.payload as {items:string[]}).items.some(id=>lockedTree(id)))return null;
+      if(command.op==='LAYERS_SET'){
+        const payload=command.payload as {document:BoardLayers;assignments?:Array<[string,string]>;moving?:string[]};
+        if(payload.assignments?.some(([id])=>lockedTree(id)))return null;
+        const before=ensureBoardLayers(s),after=validateBoardLayers(payload.document),retained=new Set(after.nodes.map(node=>node.id));
+        if([...s.widgets.values(),...s.connectors.values(),...s.strokes.values()].some(item=>item.locked&&item.layerId&&!retained.has(item.layerId)))return null;
+        const protectedNodes=before.nodes.filter(node=>boardLayerFlags(before,node.id).locked);
+        if(protectedNodes.length){
+          const oldById=new Map(before.nodes.map(node=>[node.id,node])),newById=new Map(after.nodes.map(node=>[node.id,node]));
+          const ancestry=(map:typeof oldById,id:string)=>{const ids:string[]=[];let node=map.get(id);while(node?.parentId){ids.push(node.parentId);node=map.get(node.parentId);}return ids;};
+          for(const node of protectedNodes){const next=newById.get(node.id);if(!next||next.kind!==node.kind||next.name!==node.name||next.locked!==node.locked||JSON.stringify(ancestry(oldById,node.id))!==JSON.stringify(ancestry(newById,node.id)))return null;}
+          // A locked group's descendants cannot escape by reparenting an
+          // ancestor or dissolving/reordering its document layer. Explicit
+          // ordering identifies editable subtrees; unchanged peers are bookkeeping.
+          const moving=new Set<string>();for(const id of payload.moving??[]){if(!oldById.has(id))return null;const descendants=layerDescendants(before,id);if(descendants.some(key=>boardLayerFlags(before,key).locked))return null;for(const key of descendants)moving.add(key);}
+          const stable=(ids:string[])=>ids.filter(id=>oldById.has(id)&&newById.has(id)&&!moving.has(id));
+          if(JSON.stringify(stable(before.nodes.map(node=>node.id)))!==JSON.stringify(stable(after.nodes.map(node=>node.id)))||JSON.stringify(stable(boardLayerOrder(before)))!==JSON.stringify(stable(boardLayerOrder(after))))return null;
+        }
+      }
+    }
 
     switch (command.op) {
       case 'LAYERS_ACTIVE': {
         const id=command.payload as string,doc=ensureBoardLayers(s);if(!doc.nodes.some(n=>n.id===id&&n.kind==='layer'))return null;const before=doc.activeId;
         return {command,label:'Ativar camada',redo:()=>{s.layers={...ensureBoardLayers(s),activeId:id};},undo:()=>{s.layers={...ensureBoardLayers(s),activeId:before};}};
+      }
+      case 'LAYERS_LOCK': {
+        const {ids,locked}=command.payload as {ids:string[];locked:boolean};if(!Array.isArray(ids)||typeof locked!=='boolean')return null;
+        const document=structuredClone(ensureBoardLayers(s)),selected=new Set(ids);let changed=false;
+        for(const node of document.nodes){if(!selected.has(node.id)||!!node.locked===locked)continue;let ancestor=node.parentId,blocked=false;while(ancestor){const parent=document.nodes.find(item=>item.id===ancestor);if(!parent)break;if(parent.locked&&!selected.has(parent.id))blocked=true;ancestor=parent.parentId;}if(!locked&&blocked)continue;node.locked=locked;changed=true;}
+        if(!changed)return null;const entry=this.execute({op:'LAYERS_SET',payload:{document}})!;
+        return {...entry,command,label:locked?'Bloquear camadas':'Desbloquear camadas'};
+      }
+      case 'ENTITY_LOCK': {
+        const {ids,locked}=command.payload as {ids:string[];locked:boolean};
+        if(typeof locked!=='boolean'||!Array.isArray(ids))return null;
+        const snapshots=[...new Set(ids)].flatMap(id=>{const before=entity(id);if(!before)return [];const layerLocked=boardLayerFlags(ensureBoardLayers(s),before.layerId??ensureBoardLayers(s).activeId).locked;if(!locked&&layerLocked)return [];const after=projectLayerItem(s,{...before,...prepareLayerPatch(before,{locked} as Partial<typeof before>)} as typeof before);return before.locked===after.locked&&before.layerOwnLocked===after.layerOwnLocked?[]:[{id,before,after}];});
+        if(!snapshots.length)return null;
+        const apply=(key:'before'|'after')=>{for(const snapshot of snapshots){const map=s.widgets.has(snapshot.id)?s.widgets:s.connectors.has(snapshot.id)?s.connectors:s.strokes;(map as Map<string,typeof snapshot.before>).set(snapshot.id,snapshot[key]);}};
+        return {command,label:locked?'Bloquear objetos':'Desbloquear objetos',redo:()=>apply('after'),undo:()=>apply('before')};
       }
       case 'LAYERS_SET': {
         const payload=command.payload as {document:BoardLayers;assignments?:Array<[string,string]>;rebalance?:boolean},after=validateBoardLayers(payload.document),before=structuredClone(ensureBoardLayers(s));
@@ -229,7 +284,7 @@ export class CommandBus {
             } else {
               entries = [];
               for (const child of commands) {
-                const entry = this.execute(child);
+                const entry = this.execute(child,respectLocks);
                 if (entry) { entry.redo(); retainGestureEntry(entries,entry); }
               }
               // Legacy journals contain one complete update per pointer frame.
@@ -273,6 +328,7 @@ export class CommandBus {
           const ids=mindSubtree(s,id),removed=new Set(ids);
           if(ids.some(nodeId=>s.widgets.get(nodeId)?.locked))return null;
           const branches=[...s.connectors.values()].filter(connector=>connector.mindBranch&&removed.has(connector.mindBranch));
+          if(respectLocks&&branches.some(branch=>branch.locked))return null;
           if(ids.length>1||branches.length){
             const copy={...s,widgets:new Map(s.widgets),order:s.order.filter(nodeId=>!removed.has(nodeId)),connectors:new Map(s.connectors)};
             for(const nodeId of ids)copy.widgets.delete(nodeId);
@@ -284,7 +340,7 @@ export class CommandBus {
               ...[...ids].reverse().map(nodeId=>({op:'WIDGET_REMOVE' as const,payload:nodeId})),
               ...mindLayoutCommands(copy,widget.mind.rootId),
             ];
-            const selectionBefore=[...s.selection],entry=this.execute({op:'BATCH',payload:{label:'Excluir ramo',commands}})!;
+            const selectionBefore=[...s.selection],entry=this.execute({op:'BATCH',payload:{label:'Excluir ramo',commands}},respectLocks)!;
             return {...entry,command,undo:()=>{entry.undo();s.selection=new Set(selectionBefore);}};
           }
         }
@@ -508,12 +564,14 @@ export class CommandBus {
       }
 
       case "WIDGET_REORDER": {
-        const { ids, direction } = command.payload as {
+        const { ids, direction, order:requestedOrder } = command.payload as {
           ids: string[];
-          direction: "front" | "back" | "forward" | "backward";
+          direction?: "front" | "back" | "forward" | "backward";
+          order?:string[];
         };
         const before = [...s.widgets.values(),...s.connectors.values(),...s.strokes.values()].sort((a,b)=>a.z-b.z).map(item=>item.id);
-        const after = reorder(before, ids, direction);
+        if(requestedOrder&&(requestedOrder.length!==before.length||new Set(requestedOrder).size!==before.length||requestedOrder.some(id=>!before.includes(id))))return null;
+        const after = requestedOrder??reorder(before, ids, direction??'front');
         const entity=(id:string)=>s.widgets.get(id)??s.connectors.get(id)??s.strokes.get(id);
         const beforeZ = new Map(before.map(id => [id, entity(id)?.z ?? 0]));
         const apply = (order: string[], restoreZ = false): void => {

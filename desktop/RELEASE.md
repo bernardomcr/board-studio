@@ -1,6 +1,13 @@
 No Teu Cu e Atiro para Windows 10/11 x64.
 
-Nova identidade visual em cinza escuro e roxo, com o logo da marca.
+Revisão de interação, seleção e menus, mantendo a identidade em cinza escuro e roxo.
+
+- Conectores terminam na borda visível de formas e imagens, incluindo máscaras e rotação.
+- Seleção por área considera o traçado do conector, evitando caixas invisíveis gigantes.
+- Objetos bloqueados são ignorados no canvas; botão direito permite manter pressionado para desbloquear, respeitando objetos por cima.
+- Bloqueios herdados de camadas e ramos de mapas mentais são preservados, com Undo e Redo.
+- Ferramentas na lateral, Home sem banner decorativo e menus de recorte e organização consistentes.
+- Ao criar um objeto, a ferramenta volta automaticamente a Selecionar (V).
 
 - Instalador: arquivo com final `setup.exe`.
 - Sem instalação: arquivo com final `portable.exe`.

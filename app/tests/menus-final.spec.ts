@@ -127,7 +127,7 @@ test('keyboard reorder and group shortcuts preserve the locks enforced by their 
   const order=await page.evaluate(()=>[...window.__board.state.widgets.values()].map(w=>[w.id,w.z]));await page.keyboard.press('Control+]');
   expect(await page.evaluate(()=>[...window.__board.state.widgets.values()].map(w=>[w.id,w.z]))).toEqual(order);
   await page.evaluate(()=>window.__board.bus.exec({op:'SELECTION_SET',payload:['locked','other']}));await page.keyboard.press('Control+g');expect(await page.evaluate(()=>window.__board.state.groups.size)).toBe(0);
-  await page.evaluate(()=>window.__board.bus.exec({op:'GROUP_CREATE',payload:{id:'locked-group',items:['locked','other']}}));await page.keyboard.press('Control+Shift+g');
+  await page.evaluate(()=>window.__board.bus.exec({op:'BATCH',payload:{commands:[{op:'ENTITY_LOCK',payload:{ids:['locked'],locked:false}},{op:'GROUP_CREATE',payload:{id:'locked-group',items:['locked','other']}},{op:'ENTITY_LOCK',payload:{ids:['locked'],locked:true}}]}}));await page.keyboard.press('Control+Shift+g');
   expect(await page.evaluate(()=>window.__board.state.groups.get('locked-group'))).toEqual(['locked','other']);
 });
 

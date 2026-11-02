@@ -1,9 +1,10 @@
 import type {LayerMembership} from './layer-model';
 /** Connector geometry reconstructed for the local editor; no cloud dependency. */
-import { rotate, widgetCenter, widgetAABB, worldToLocal, type Vec } from "./geometry";
+import { rotate, widgetCenter, widgetAABB, worldToLocal, type Vec, type Rect } from "./geometry";
 import { shapeContours,canonicalShape } from "./shapes";
 import type { Widget } from "./model";
 import {capGeometry,type CapGeometry} from './line-decoration';
+import {borderWidthFor} from './style-scale';
 export type Endpoint = { kind: "anchor"; widgetId: string; x: number; y: number } | { kind: "point"; x: number; y: number };
 export type ConnectorShape = "straight" | "elbowed" | "curved";
 export type CapStyle = "none" | "arrow" | "triangle" | "circle" | "diamond" | "bar";
@@ -32,18 +33,25 @@ export interface Connector extends LayerMembership {
   z: number;
 }
 export interface ConnectorCubic { p0: Vec; p1: Vec; p2: Vec; p3: Vec }
-export interface ConnectorGeometry { points: Vec[]; cubic?: ConnectorCubic; cubics?: ConnectorCubic[] }
+export interface ConnectorBoundary {point:Vec;normal:Vec}
+export interface ConnectorGeometry { points: Vec[]; cubic?: ConnectorCubic; cubics?: ConnectorCubic[]; boundaries?:{start?:ConnectorBoundary;end?:ConnectorBoundary} }
 const geometryCache=new WeakMap<Connector,{start?:Widget;end?:Widget;shape:ConnectorShape;mindBranch?:string;startEndpoint:Endpoint;endEndpoint:Endpoint;control?:Vec|null;waypoints?:Vec[]|null;geometry:ConnectorGeometry|null}>();
 const EPS = 1e-8;
 const mid = (a: Vec, b: Vec): Vec => ({ x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 });
 const length = (a: Vec, b: Vec) => Math.hypot(a.x - b.x, a.y - b.y);
 const unit = (v: Vec): Vec => { const size = Math.hypot(v.x, v.y); return size > EPS ? { x: v.x / size, y: v.y / size } : { x: 0, y: 0 }; };
 const outlineCache=new Map<string,Vec[]>();
+const elliptical=(w:Widget)=>w.type==='shape'&&canonicalShape(w.shape)==='circle'||w.type==='image'&&w.maskShape==='ellipse';
+function roundedRadius(w:Widget):number{
+  const shape=w.type==='shape'?canonicalShape(w.shape):undefined;
+  const rounded=w.type==='image'?w.maskShape==='round_rectangle':shape==='round_rectangle'||shape==='rectangle'&&(w.style.cornerRadius??0)>0;
+  return rounded?Math.max(0,Math.min(w.style.cornerRadius??(w.type==='image'?Math.min(w.width,w.height)*.12:16),Math.min(w.width,w.height)/2)):0;
+}
 function outline(w: Widget): Vec[] {
   const key=`${w.type}:${w.type==='shape'?w.shape:w.type==='image'?w.maskShape:''}:${w.width}:${w.height}:${w.style.cornerRadius??''}`;
   const retained=outlineCache.get(key);if(retained)return retained;
   const coords = w.type === "shape" ? shapeContours(w.shape, w.width, w.height, .3, w.style.cornerRadius)[0]
-    : w.type === "image" && w.maskShape && w.maskShape !== "rectangle" ? shapeContours(w.maskShape === "ellipse" ? "circle" : "round_rectangle",w.width,w.height,.3,w.style.cornerRadius)[0] : null;
+    : w.type === "image" && w.maskShape && w.maskShape !== "rectangle" ? shapeContours(w.maskShape === "ellipse" ? "circle" : "round_rectangle",w.width,w.height,.3,roundedRadius(w))[0] : null;
   if (!coords) return [{ x: 0, y: 0 }, { x: w.width, y: 0 }, { x: w.width, y: w.height }, { x: 0, y: w.height }];
   const points: Vec[] = []; for (let i = 0; i < coords.length; i += 2) points.push({ x: coords[i]!, y: coords[i + 1]! });
   if(points.length>1&&length(points[0]!,points.at(-1)!)<EPS)points.pop();
@@ -66,7 +74,9 @@ export function resolveEndpoint(ep: Endpoint, widgets: Map<string, Widget>): Vec
 export function anchorNormal(ep: Endpoint, widgets: Map<string, Widget>): Vec {
   if (ep.kind === "point") return { x: 0, y: 0 };
   const w = widgets.get(ep.widgetId); if (!w) return { x: 0, y: 0 };
-  if (w.type === "shape" && canonicalShape(w.shape) === "circle") return rotate(unit({ x: (ep.x - .5) / w.width, y: (ep.y - .5) / w.height }), w.rotation);
+  if (elliptical(w)) return rotate(unit({ x: (ep.x - .5) / w.width, y: (ep.y - .5) / w.height }), w.rotation);
+  const radius=roundedRadius(w);
+  if(radius){const p={x:ep.x*w.width,y:ep.y*w.height},center={x:Math.max(radius,Math.min(w.width-radius,p.x)),y:Math.max(radius,Math.min(w.height-radius,p.y))};return rotate(unit({x:p.x-center.x,y:p.y-center.y}),w.rotation);}
   const p = { x: ep.x * w.width, y: ep.y * w.height }, poly = outline(w);
   let distance = Infinity, normal: Vec = { x: 1, y: 0 };
   for (let i = 0; i < poly.length; i++) {
@@ -77,7 +87,18 @@ export function anchorNormal(ep: Endpoint, widgets: Map<string, Widget>): Vec {
 }
 export function nearestAnchor(w: Widget, world: Vec): Vec {
   const p = worldToLocal(w, world);
-  if (w.type === "shape" && canonicalShape(w.shape) === "circle") {
+  const radius=roundedRadius(w);
+  if(radius){
+    const candidates=[closestOnSegment(p,{x:radius,y:0},{x:w.width-radius,y:0}),closestOnSegment(p,{x:w.width,y:radius},{x:w.width,y:w.height-radius}),closestOnSegment(p,{x:w.width-radius,y:w.height},{x:radius,y:w.height}),closestOnSegment(p,{x:0,y:w.height-radius},{x:0,y:radius})];
+    for(const [cx,cy,sx,sy] of [[radius,radius,-1,-1],[w.width-radius,radius,1,-1],[w.width-radius,w.height-radius,1,1],[radius,w.height-radius,-1,1]]){
+      const dx=p.x-cx!,dy=p.y-cy!;
+      if(dx*sx!>=0&&dy*sy!>=0){const normal=unit({x:dx,y:dy});candidates.push({x:cx!+normal.x*radius,y:cy!+normal.y*radius});}
+      else candidates.push({x:cx!+sx!*radius,y:cy!},{x:cx!,y:cy!+sy!*radius});
+    }
+    let point=candidates[0]!,distance=Infinity;for(const candidate of candidates){const size=length(p,candidate);if(size<distance){distance=size;point=candidate;}}
+    return {x:point.x/w.width,y:point.y/w.height};
+  }
+  if (elliptical(w)) {
     // Find the nearest point on the ellipse, rather than its enclosing box.
     const rx = w.width / 2, ry = w.height / 2;
     const at = (t: number): Vec => ({ x: rx + rx * Math.cos(t), y: ry + ry * Math.sin(t) });
@@ -95,8 +116,14 @@ export function nearestAnchor(w: Widget, world: Vec): Vec {
 export function facingAnchor(w: Widget, towards: Vec): Vec {
   const p = worldToLocal(w, towards), c = { x: w.width / 2, y: w.height / 2 }, d = { x: p.x - c.x, y: p.y - c.y };
   if (Math.hypot(d.x, d.y) < EPS) return { x: 1, y: .5 };
-  if (w.type === "shape" && canonicalShape(w.shape) === "circle") {
+  if (elliptical(w)) {
     const t = 1 / Math.hypot(d.x / c.x, d.y / c.y); return { x: .5 + d.x * t / w.width, y: .5 + d.y * t / w.height };
+  }
+  const radius=roundedRadius(w);
+  if(radius){
+    let low=0,high=Math.min(Math.abs(d.x)>EPS?c.x/Math.abs(d.x):Infinity,Math.abs(d.y)>EPS?c.y/Math.abs(d.y):Infinity);
+    for(let i=0;i<56;i++){const t=(low+high)/2,qx=Math.abs(d.x*t)-(c.x-radius),qy=Math.abs(d.y*t)-(c.y-radius),outside=Math.hypot(Math.max(qx,0),Math.max(qy,0))+Math.min(Math.max(qx,qy),0)-radius;if(outside>0)high=t;else low=t;}
+    const t=(low+high)/2;return {x:.5+d.x*t/w.width,y:.5+d.y*t/w.height};
   }
   const poly = outline(w); let nearest = Infinity;
   for (let i = 0; i < poly.length; i++) {
@@ -135,11 +162,11 @@ function curveReach(connector:Connector,a:Vec,b:Vec):number{
   const vertical=connector.start.kind==='anchor'&&connector.end.kind==='anchor'&&connector.start.x===.5&&connector.end.x===.5;
   return Math.max(Math.abs(vertical?b.y-a.y:b.x-a.x)*.4,20);
 }
-function splineCubics(connector:Connector,knots:Vec[],widgets:Map<string,Widget>):ConnectorCubic[]{
+function splineCubics(connector:Connector,knots:Vec[],widgets:Map<string,Widget>,startNormal?:Vec,endNormal?:Vec):ConnectorCubic[]{
   const spans=knots.slice(1).map((end,index)=>curveReach(connector,knots[index]!,end));
   const directions:Vec[]=knots.map((point,index)=>{
-    if(index===0)return connector.start.kind==='anchor'?anchorNormal(connector.start,widgets):{x:0,y:0};
-    if(index===knots.length-1){const normal=connector.end.kind==='anchor'?anchorNormal(connector.end,widgets):{x:0,y:0};return {x:-normal.x,y:-normal.y};}
+    if(index===0)return startNormal??(connector.start.kind==='anchor'?anchorNormal(connector.start,widgets):{x:0,y:0});
+    if(index===knots.length-1){const normal=endNormal??(connector.end.kind==='anchor'?anchorNormal(connector.end,widgets):{x:0,y:0});return {x:-normal.x,y:-normal.y};}
     const incoming=unit({x:point.x-knots[index-1]!.x,y:point.y-knots[index-1]!.y}),outgoing=unit({x:knots[index+1]!.x-point.x,y:knots[index+1]!.y-point.y});
     return unit({x:incoming.x+outgoing.x,y:incoming.y+outgoing.y});
   });
@@ -166,8 +193,24 @@ export function connectorGeometry(connector: Connector, widgets: Map<string, Wid
   if(cached&&cached.start===start&&cached.end===end&&cached.shape===connector.shape&&cached.mindBranch===connector.mindBranch&&cached.startEndpoint===connector.start&&cached.endEndpoint===connector.end&&cached.control===connector.controlPoint&&cached.waypoints===connector.waypoints)return cached.geometry;
   const geometry=buildConnectorGeometry(connector,widgets);geometryCache.set(connector,{start,end,shape:connector.shape,mindBranch:connector.mindBranch,startEndpoint:connector.start,endEndpoint:connector.end,control:connector.controlPoint,waypoints:connector.waypoints,geometry});return geometry;
 }
+/** Render against the visible outer edge, while preserving the stored anchor.
+ * Old rectangular anchors on a masked/circular object are projected onto its
+ * real outline. The widget's centered border is part of its visible surface. */
+function endpointBoundary(ep:Endpoint,widgets:Map<string,Widget>):ConnectorBoundary|undefined{
+  if(ep.kind!=='anchor')return undefined;
+  const widget=widgets.get(ep.widgetId);if(!widget)return undefined;
+  const original=anchorWorld(widget,ep.x,ep.y),projected=nearestAnchor(widget,original),surface={...ep,...projected},normal=anchorNormal(surface,widgets),point=anchorWorld(widget,projected.x,projected.y);
+  const border=widget.style.borderColor==='transparent'||widget.style.borderOpacity===0?0:Math.max(0,borderWidthFor(widget))/2;
+  return {point:{x:point.x+normal.x*border,y:point.y+normal.y*border},normal};
+}
 function buildConnectorGeometry(connector:Connector,widgets:Map<string,Widget>):ConnectorGeometry|null{
-  const a = resolveEndpoint(connector.start, widgets), b = resolveEndpoint(connector.end, widgets); if (!a || !b) return null;
+  const startBoundary=endpointBoundary(connector.start,widgets),endBoundary=endpointBoundary(connector.end,widgets);
+  const a = startBoundary?.point??resolveEndpoint(connector.start, widgets), b = endBoundary?.point??resolveEndpoint(connector.end, widgets); if (!a || !b) return null;
+  const result=buildPath(connector,widgets,a,b,startBoundary?.normal,endBoundary?.normal);
+  if(startBoundary||endBoundary)result.boundaries={start:startBoundary,end:endBoundary};
+  return result;
+}
+function buildPath(connector:Connector,widgets:Map<string,Widget>,a:Vec,b:Vec,startNormal?:Vec,endNormal?:Vec):ConnectorGeometry{
   const waypoints = connector.waypoints?.filter(p => Number.isFinite(p.x) && Number.isFinite(p.y));
   if (waypoints?.length) {
     const knots = [a, ...waypoints, b];
@@ -184,11 +227,11 @@ function buildConnectorGeometry(connector:Connector,widgets:Map<string,Widget>):
       }
       return {points:clean(path)};
     }
-    return sampledSpline(splineCubics(connector,knots,widgets));
+    return sampledSpline(splineCubics(connector,knots,widgets,startNormal,endNormal));
   }
   const control = connector.controlPoint;
   if (connector.shape === "straight") return { points: clean(control ? [a, control, b] : [a, b]) };
-  let n1 = anchorNormal(connector.start, widgets), n2 = anchorNormal(connector.end, widgets);
+  let n1 = startNormal??anchorNormal(connector.start, widgets), n2 = endNormal??anchorNormal(connector.end, widgets);
   const fallback = unit({ x: b.x - a.x, y: b.y - a.y });
   if (Math.hypot(n1.x, n1.y) < EPS) n1 = fallback;
   if (Math.hypot(n2.x, n2.y) < EPS) n2 = { x: -fallback.x, y: -fallback.y };
@@ -233,7 +276,7 @@ function buildConnectorGeometry(connector:Connector,widgets:Map<string,Widget>):
   }
   // Regular cubic connectors use the observed 0.4 chord-length tangent. Keeping
   // it proportional also preserves the same bend on macro-scale layouts.
-  const curve=splineCubics(connector,[a,b],widgets)[0]!;
+  const curve=splineCubics(connector,[a,b],widgets,startNormal,endNormal)[0]!;
   let {p1,p2}=curve;
   if(connector.start.kind==='point'&&connector.end.kind==='point'){
     // A deliberately curved free line should retain a visible, gentle bow.
@@ -308,6 +351,32 @@ export function connectorCapSegment(geometry: ConnectorGeometry, which: "start" 
   const rest = which === "start" ? points.slice(1) : points.slice(0, -1).reverse();
   return { from: rest.find(p => length(p, to) > EPS) ?? { x: to.x - 1, y: to.y }, to };
 }
+/** A stroked open arrow/bar has a round cap extending past its model tip.
+ * At an attachment, move that decoration back by its actual support against
+ * the surface normal. Filled tips already terminate exactly at the edge. */
+export function connectorDecorationInset(connector:Connector,geometry:ConnectorGeometry,which:'start'|'end'):number{
+  const boundary=geometry.boundaries?.[which];if(!boundary)return 0;
+  const tangent=connectorCapSegment(geometry,which),direction=unit({x:tangent.to.x-tangent.from.x,y:tangent.to.y-tangent.from.y}),approach=-(direction.x*boundary.normal.x+direction.y*boundary.normal.y);
+  if(approach<=EPS)return 0;
+  const cap=capGeometry(connector.style[which==='start'?'startCap':'endCap'],tangent.from,tangent.to,connector.style.strokeWidth),radius=connector.style.strokeWidth/2;
+  const outward=(p:Vec)=>(p.x-boundary.point.x)*boundary.normal.x+(p.y-boundary.point.y)*boundary.normal.y;
+  let support=0;
+  for(const polygon of cap.polygons)for(let i=0;i<polygon.length;i+=2)support=Math.min(support,outward({x:polygon[i]!,y:polygon[i+1]!}));
+  for(const line of cap.lines)for(const point of line)support=Math.min(support,outward(point)-radius);
+  for(const circle of cap.circles)support=Math.min(support,outward(circle)-circle.radius);
+  return Math.max(0,-support/approach);
+}
+export function connectorDecorationSegment(connector:Connector,geometry:ConnectorGeometry,which:'start'|'end'):{from:Vec;to:Vec}{
+  const tangent=connectorCapSegment(geometry,which),inset=connectorDecorationInset(connector,geometry,which);if(!inset)return tangent;
+  const direction=unit({x:tangent.to.x-tangent.from.x,y:tangent.to.y-tangent.from.y}),move=(p:Vec)=>({x:p.x-direction.x*inset,y:p.y-direction.y*inset});
+  return {from:move(tangent.from),to:move(tangent.to)};
+}
+/** Rounded shaft endpoints also stop outside the attached object's surface. */
+export function connectorShaftBoundaryInset(connector:Connector,geometry:ConnectorGeometry,which:'start'|'end'):number{
+  const boundary=geometry.boundaries?.[which];if(!boundary)return 0;
+  const tangent=connectorCapSegment(geometry,which),direction=unit({x:tangent.to.x-tangent.from.x,y:tangent.to.y-tangent.from.y}),approach=-(direction.x*boundary.normal.x+direction.y*boundary.normal.y);
+  return approach>EPS?connector.style.strokeWidth/2/approach:0;
+}
 const boundsCache=new WeakMap<ConnectorGeometry,{minX:number;minY:number;maxX:number;maxY:number}>();
 export function connectorBounds(geometry: ConnectorGeometry) {
   const cached=boundsCache.get(geometry);if(cached)return cached;
@@ -329,7 +398,7 @@ function connectorVisual(connector:Connector,geometry:ConnectorGeometry){
   const cached=visualCache.get(connector);if(cached&&cached.geometry===geometry&&cached.style===connector.style)return cached;
   const base=connectorBounds(geometry),radius=connector.style.strokeWidth/2,bounds={minX:base.minX-radius,minY:base.minY-radius,maxX:base.maxX+radius,maxY:base.maxY+radius};
   const add=(x:number,y:number,padding=0)=>{bounds.minX=Math.min(bounds.minX,x-padding);bounds.minY=Math.min(bounds.minY,y-padding);bounds.maxX=Math.max(bounds.maxX,x+padding);bounds.maxY=Math.max(bounds.maxY,y+padding);};
-  const caps=(['start','end'] as const).map(which=>{const tangent=connectorCapSegment(geometry,which);return capGeometry(connector.style[which==='start'?'startCap':'endCap'],tangent.from,tangent.to,connector.style.strokeWidth);});
+  const caps=(['start','end'] as const).map(which=>{const tangent=connectorDecorationSegment(connector,geometry,which);return capGeometry(connector.style[which==='start'?'startCap':'endCap'],tangent.from,tangent.to,connector.style.strokeWidth);});
   for(const cap of caps){for(const polygon of cap.polygons)for(let i=0;i<polygon.length;i+=2)add(polygon[i]!,polygon[i+1]!);for(const line of cap.lines)for(const point of line)add(point.x,point.y,radius);for(const circle of cap.circles)add(circle.x,circle.y,circle.radius);}
   const result={geometry,style:connector.style,bounds,caps};visualCache.set(connector,result);return result;
 }
@@ -344,6 +413,41 @@ export function connectorContainsPoint(connector:Connector,geometry:ConnectorGeo
     for(const circle of cap.circles)if(Math.hypot(point.x-circle.x,point.y-circle.y)<=circle.radius+tolerance)return true;
     for(const line of cap.lines)for(let i=1;i<line.length;i++)if(distanceToSegment(point,line[i-1]!,line[i]!)<=connector.style.strokeWidth/2+tolerance)return true;
     for(const polygon of cap.polygons){let inside=false;for(let i=0,j=polygon.length-2;i<polygon.length;j=i,i+=2){const a={x:polygon[i]!,y:polygon[i+1]!},b={x:polygon[j]!,y:polygon[j+1]!};if(distanceToSegment(point,a,b)<=tolerance)return true;if((a.y>point.y)!==(b.y>point.y)&&point.x<(b.x-a.x)*(point.y-a.y)/(b.y-a.y)+a.x)inside=!inside;}if(inside)return true;}
+  }
+  return false;
+}
+const pointInRect=(point:Vec,rect:Rect)=>point.x>=rect.minX&&point.x<=rect.maxX&&point.y>=rect.minY&&point.y<=rect.maxY;
+function segmentCrossesRect(a:Vec,b:Vec,rect:Rect):boolean{
+  let low=0,high=1;const dx=b.x-a.x,dy=b.y-a.y;
+  for(const [p,q] of [[-dx,a.x-rect.minX],[dx,rect.maxX-a.x],[-dy,a.y-rect.minY],[dy,rect.maxY-a.y]]){
+    if(Math.abs(p!)<EPS){if(q!<0)return false;continue;}
+    const t=q!/p!;if(p!<0)low=Math.max(low,t);else high=Math.min(high,t);if(low>high)return false;
+  }
+  return true;
+}
+function thickSegmentCrossesRect(a:Vec,b:Vec,rect:Rect,radius:number):boolean{
+  if(segmentCrossesRect(a,b,rect))return true;
+  const nearest=(p:Vec)=>Math.hypot(p.x-Math.max(rect.minX,Math.min(rect.maxX,p.x)),p.y-Math.max(rect.minY,Math.min(rect.maxY,p.y)));
+  if(Math.min(nearest(a),nearest(b))<=radius)return true;
+  for(const p of [{x:rect.minX,y:rect.minY},{x:rect.maxX,y:rect.minY},{x:rect.maxX,y:rect.maxY},{x:rect.minX,y:rect.maxY}])if(distanceToSegment(p,a,b)<=radius)return true;
+  return false;
+}
+/** Narrow phase for area selection: an empty part of a curved connector's
+ * enclosing rectangle is never treated as ink. Captions are separate objects
+ * for hit testing and should be checked by the caller through their layout. */
+export function connectorIntersectsRect(connector:Connector,geometry:ConnectorGeometry,rect:Rect,tolerance=0):boolean{
+  const {bounds,caps}=connectorVisual(connector,geometry),padding=Math.max(0,tolerance),radius=connector.style.strokeWidth/2+padding;
+  if(rect.maxX<bounds.minX-padding||rect.minX>bounds.maxX+padding||rect.maxY<bounds.minY-padding||rect.minY>bounds.maxY+padding)return false;
+  for(let i=1;i<geometry.points.length;i++)if(thickSegmentCrossesRect(geometry.points[i-1]!,geometry.points[i]!,rect,radius))return true;
+  const corners=[{x:rect.minX,y:rect.minY},{x:rect.maxX,y:rect.minY},{x:rect.maxX,y:rect.maxY},{x:rect.minX,y:rect.maxY}];
+  for(const cap of caps){
+    for(const circle of cap.circles){const p={x:Math.max(rect.minX,Math.min(rect.maxX,circle.x)),y:Math.max(rect.minY,Math.min(rect.maxY,circle.y))};if(Math.hypot(p.x-circle.x,p.y-circle.y)<=circle.radius+padding)return true;}
+    for(const line of cap.lines)for(let i=1;i<line.length;i++)if(thickSegmentCrossesRect(line[i-1]!,line[i]!,rect,radius))return true;
+    for(const polygon of cap.polygons){
+      const vertices:Vec[]=[];for(let i=0;i<polygon.length;i+=2)vertices.push({x:polygon[i]!,y:polygon[i+1]!});
+      for(let i=0;i<vertices.length;i++)if(pointInRect(vertices[i]!,rect)||thickSegmentCrossesRect(vertices[i]!,vertices[(i+1)%vertices.length]!,rect,padding))return true;
+      for(const corner of corners){let inside=false;for(let i=0,j=vertices.length-1;i<vertices.length;j=i++){const a=vertices[i]!,b=vertices[j]!;if((a.y>corner.y)!==(b.y>corner.y)&&corner.x<(b.x-a.x)*(corner.y-a.y)/(b.y-a.y)+a.x)inside=!inside;}if(inside)return true;}
+    }
   }
   return false;
 }

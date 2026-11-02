@@ -42,6 +42,12 @@ for(const count of [2,3])test(`restoring paths of ${count} selected connectors a
   await page.keyboard.press('Control+Shift+z');const redone=await state(page,ids);expect(redone.connectors).toEqual(after.connectors);expect(redone.history).toBe(after.history);expect(redone.selection).toEqual(ids);await expect(menu.getByRole('button',{name:'Remover ponto',exact:true})).toBeDisabled();
 });
 
-for(const action of ['captions','route'])test(`${action} keeps the existing mixed locked-selection toolbar contract without mutating any connector`,async({page})=>{
-  const ids=await fixture(page,3,true),before=await state(page,ids),menu=await open(page,action);await expect(menu.getByRole('button',{name:action==='captions'?'Adicionar rótulo':'Restaurar caminho',exact:true})).toBeDisabled();expect(await state(page,ids)).toEqual(before);
+for(const action of ['captions','route'])test(`${action} stays absent from mixed locked-selection controls, which only offer hold to unlock`,async({page})=>{
+  const ids=await fixture(page,3,true),before=await state(page,ids),toolbar=page.locator('#selection-properties'),unlock=toolbar.locator('[data-hold-unlock]');
+  await expect(toolbar).toBeVisible();await expect(unlock).toBeVisible();await expect(toolbar.getByRole('button')).toHaveCount(1);
+  await expect(toolbar.locator(`[data-menu="${action}"]`)).toHaveCount(0);await expect(toolbar.locator('input,select,details')).toHaveCount(0);
+  await expect(toolbar.getByRole('button',{name:action==='captions'?'Adicionar rótulo':'Restaurar caminho',exact:true})).toHaveCount(0);
+  // A simple click must neither unlock nor format the editable peers in a
+  // mixed selection; only the deliberate hold may change the locked member.
+  await unlock.click();expect(await state(page,ids)).toEqual(before);
 });

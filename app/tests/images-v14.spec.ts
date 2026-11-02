@@ -17,16 +17,20 @@ async function blank(page){
 async function current(page){return page.evaluate(()=>[...window.__board.state.widgets.values()][0]);}
 async function menu(page,id){const details=page.locator(`#selection-properties details[data-menu="${id}"]`);if(!await details.evaluate(node=>node.open))await details.locator(':scope > summary').click();return details;}
 
-test('image toolbar exposes only image essentials and downloading keeps the original source bytes',async({page})=>{
+test('image toolbar downloads original source bytes without mutation and locked images only offer hold to unlock',async({page})=>{
  const original=await blank(page),toolbar=page.locator('#selection-properties');
  expect(await toolbar.locator(':scope > button[data-action]').evaluateAll(nodes=>nodes.map(node=>node.dataset.action))).toEqual(['download-image','crop','lock']);
  expect(await toolbar.locator(':scope > details').evaluateAll(nodes=>nodes.map(node=>node.dataset.menu))).toEqual(['image-opacity','border','more']);
  await expect(toolbar.locator('[data-menu="image"]')).toHaveCount(0);
  await expect(toolbar.locator('[data-action="replace-image"],[data-action="flip-x"],[data-action="flip-y"],[data-action="image-actual-size"],[data-action="circle-crop"],[data-action="add-link"]')).toHaveCount(0);
  await page.getByRole('button',{name:'Recortar',exact:true}).click();const crop=page.getByRole('region',{name:'Recortar imagem no quadro',exact:true});await crop.getByRole('combobox',{name:'Formato do recorte',exact:true}).selectOption('circle');await crop.getByRole('button',{name:'Aplicar recorte',exact:true}).click();
- await page.getByRole('button',{name:'Bloquear',exact:true}).click();
+ const cropped=await current(page);
  const pending=page.waitForEvent('download');await page.getByRole('button',{name:'Baixar original',exact:true}).click();const download=await pending;
  expect(download.suggestedFilename()).toBe('imagem-original.png');expect(await readFile(await download.path())).toEqual(Buffer.from(original.src.split(',')[1],'base64'));
+ expect(await current(page)).toEqual(cropped);
+ await page.getByRole('button',{name:'Bloquear',exact:true}).click();const locked=await current(page),history=await page.evaluate(()=>window.__board.bus.undoStack.length),unlock=toolbar.locator('[data-hold-unlock]');
+ await expect(unlock).toBeVisible();await expect(toolbar.getByRole('button')).toHaveCount(1);await expect(toolbar.locator('[data-action="download-image"],[data-action="crop"],input,select,details')).toHaveCount(0);
+ await unlock.click();expect(await current(page)).toEqual(locked);expect(await page.evaluate(()=>window.__board.bus.undoStack.length)).toBe(history);
  const after=await current(page);expect(after.src).toBe(original.src);expect(after.crop.width).toBeLessThan(1);expect(after.maskShape).toBe('ellipse');expect(after.locked).toBe(true);
 });
 

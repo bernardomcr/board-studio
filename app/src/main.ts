@@ -31,6 +31,7 @@ import {
   connectorBounds,
   connectorGeometry,
   connectorContainsPoint,
+  connectorIntersectsRect,
   facingAnchor,
   nearestAnchor,
   type Connector,
@@ -241,6 +242,7 @@ const state: BoardState = {
 const scene = new BoardScene(world);
 const bus = new CommandBus(state, () => {
   if(restoringBoard)return;
+  if(editingId&&state.widgets.get(editingId)?.locked)endEdit(false);
   syncScene(false);
   drawSelection();
   refreshChrome();
@@ -301,9 +303,9 @@ function drawGrid(): void {
 const HANDLE_HIT = 7; // px de tela
 const ROTATE_OFFSET = 46; // Clear of the connection dot above the shape.
 
-function connectorAt(p: Vec, tolerance: number): Connector | undefined {
+function connectorAt(p: Vec, tolerance: number,includeLocked=false): Connector | undefined {
   for (const connector of [...state.connectors.values()].sort((a,b)=>b.z-a.z)) {
-    if (connector.hidden||mindConnectorHidden(state,connector)) continue;
+    if (connector.hidden||!includeLocked&&connector.locked||mindConnectorHidden(state,connector)) continue;
     const geometry = connectorGeometry(connector, state.widgets);
     if (geometry && (connectorContainsPoint(connector,geometry,p,tolerance)||connectorCaptionAt(connector,geometry,p,tolerance)>=0)) return connector;
   }
@@ -443,6 +445,7 @@ function positionEditor(w: Widget): void {
 
 /** Editor WYSIWYG: mostra o texto formatado, não a marcação. */
 function beginEdit(w: Widget): void {
+  if(w.locked||state.widgets.get(w.id)?.locked)return;
   if(w.type==='sticky_note'&&w.stickyPad)return;
   if(structuredUI?.edit(w))return;
   if (w.type === "image") { images?.cropSelected(); return; }
@@ -586,11 +589,11 @@ function drawSelection(): void {
       }else for(const segment of captionCutSegments(geometry.points,captions)){
         if(segment.length<2)continue;const a=camera.worldToScreen(segment[0]!);overlay.moveTo(a.x,a.y);for(const point of segment.slice(1)){const p=camera.worldToScreen(point);overlay.lineTo(p.x,p.y);}overlay.stroke(stroke);
       }
-      for(const point of[geometry.points[0]!,geometry.points.at(-1)!])if(connectorControlVisible(selectedConnector,geometry,point,6)){
+      for(const point of[geometry.points[0]!,geometry.points.at(-1)!])if(!selectedConnector.locked&&connectorControlVisible(selectedConnector,geometry,point,6)){
         const p=camera.worldToScreen(point);overlay.circle(p.x, p.y, 5).fill({ color: 0xffffff }).stroke({ width: 1.5, color: blue });
       }
     }
-    if(geometry)for(const point of connectorEditPoints(selectedConnector,geometry))if(connectorControlVisible(selectedConnector,geometry,point)){const p=camera.worldToScreen(point);overlay.rect(p.x-4,p.y-4,8,8).fill(0xffffff).stroke({width:1.5,color:blue});}
+    if(geometry&&!selectedConnector.locked)for(const point of connectorEditPoints(selectedConnector,geometry))if(connectorControlVisible(selectedConnector,geometry,point)){const p=camera.worldToScreen(point);overlay.rect(p.x-4,p.y-4,8,8).fill(0xffffff).stroke({width:1.5,color:blue});}
     drawGuides();
     drawConnectPreview();
     return;
@@ -629,10 +632,10 @@ function drawSelection(): void {
   const a = camera.worldToScreen({ x: rect.minX, y: rect.minY });
   const b = camera.worldToScreen({ x: rect.maxX, y: rect.maxY });
   overlay.rect(a.x - 2, a.y - 2, b.x - a.x + 4, b.y - a.y + 4).stroke({ width: 1.5, color: blue });
-  for (const id of ["nw","n","ne","e","se","s","sw","w"] as HandleId[]) {
+  if(![...state.selection].some(id=>itemLocked(state,id)))for (const id of ["nw","n","ne","e","se","s","sw","w"] as HandleId[]) {
     const p = handleScreen(id); if(p) overlay.rect(p.x-4,p.y-4,8,8).fill(0xffffff).stroke({width:1.5,color:blue});
   }
-  const rotationPoint=rotateHandleScreen(),topPoint=handleScreen("n");if(rotationPoint&&topPoint){overlay.moveTo(topPoint.x,topPoint.y).lineTo(rotationPoint.x,rotationPoint.y).stroke({width:1.5,color:blue});overlay.circle(rotationPoint.x,rotationPoint.y,5).fill(0xffffff).stroke({width:1.5,color:blue});}
+  const rotationPoint=rotateHandleScreen(),topPoint=handleScreen("n");if(![...state.selection].some(id=>itemLocked(state,id))&&rotationPoint&&topPoint){overlay.moveTo(topPoint.x,topPoint.y).lineTo(rotationPoint.x,rotationPoint.y).stroke({width:1.5,color:blue});overlay.circle(rotationPoint.x,rotationPoint.y,5).fill(0xffffff).stroke({width:1.5,color:blue});}
   drawGuides();
   drawConnectPreview();
 }
@@ -1000,14 +1003,14 @@ function connectionHandles(w:Widget):Array<{point:Vec;anchor:Endpoint}> {
     return {point,anchor:{kind:"anchor" as const,widgetId:w.id,...anchor}};
   });
 }
-function topmostAt(p: Vec): Widget | undefined {
+function topmostAt(p: Vec,includeLocked=false): Widget | undefined {
   // The frame mask and the global layer order also govern canvas input.
   const frames=visibleFrames(state);
   let best: Widget | undefined;
   let bestZ = Number.NEGATIVE_INFINITY;
   for (const id of state.order) {
     const w = state.widgets.get(id);
-    if (!w || widgetHidden(w) || !pointInVisibleWidget(w,p,frames)) continue;
+    if (!w || !includeLocked&&w.locked || widgetHidden(w) || !pointInVisibleWidget(w,p,frames)) continue;
     const z = w.z;
     if (z > bestZ) {
       bestZ = z;
@@ -1018,10 +1021,10 @@ function topmostAt(p: Vec): Widget | undefined {
 }
 
 /** Canvas picking follows the same cross-type stack as the layers panel. */
-function frontmostEntityAt(p:Vec){
-  const widget=topmostAt(p),connector=connectorAt(p,6/camera.scale);
+function frontmostEntityAt(p:Vec,includeLocked=false){
+  const widget=topmostAt(p,includeLocked),connector=connectorAt(p,6/camera.scale,includeLocked);
   const tolerance=6/camera.scale;
-  const stroke=[...state.strokes.values()].filter(st=>{if(st.hidden)return false;const bounds=strokeBounds(st);return p.x>=bounds.minX-tolerance&&p.x<=bounds.maxX+tolerance&&p.y>=bounds.minY-tolerance&&p.y<=bounds.maxY+tolerance&&distanceToStroke(p,st)<tolerance;}).sort((a,b)=>b.z-a.z)[0];
+  const stroke=[...state.strokes.values()].filter(st=>{if(st.hidden||!includeLocked&&st.locked)return false;const bounds=strokeBounds(st);return p.x>=bounds.minX-tolerance&&p.x<=bounds.maxX+tolerance&&p.y>=bounds.minY-tolerance&&p.y<=bounds.maxY+tolerance&&distanceToStroke(p,st)<tolerance;}).sort((a,b)=>b.z-a.z)[0];
   return [widget,connector,stroke].filter(item=>!!item).sort((a,b)=>b!.z-a!.z)[0];
 }
 
@@ -1041,10 +1044,10 @@ function rotateHandleAtScreen(s: Vec): boolean {
   const p = rotateHandleScreen();
   return Boolean(p && Math.hypot(p.x - s.x, p.y - s.y) <= HANDLE_HIT + 2);
 }
-function selectionHandlesVisible():boolean{const box=selectionBox();return !!box&&box.width*camera.scale>=32&&box.height*camera.scale>=24;}
+function selectionHandlesVisible():boolean{const box=selectionBox();return ![...state.selection].some(id=>itemLocked(state,id))&&!!box&&box.width*camera.scale>=32&&box.height*camera.scale>=24;}
 /** Group membership is one selection unit across shapes, strokes and connectors. */
 function selectClickedEntity(id:string,event:PointerEvent):boolean{
-  const base=event.altKey?[id]:groupMembersOf(id);
+  const base=(event.altKey?[id]:groupMembersOf(id)).filter(member=>!itemLocked(state,member));
   if(event.shiftKey){
     const remove=base.every(member=>state.selection.has(member)),next=new Set(state.selection);
     for(const member of base)if(remove)next.delete(member);else next.add(member);
@@ -1367,7 +1370,7 @@ app.canvas.addEventListener("pointermove", (e) => {
     const selected=state.selection.size===1?state.connectors.get([...state.selection][0]!):undefined,geometry=selected&&!selected.locked?connectorGeometry(selected,state.widgets):null;
     const grab=geometry&&(connectorCaptionAt(selected!,geometry,p,4/camera.scale)>=0||[geometry.points[0]!,geometry.points.at(-1)!,...connectorEditPoints(selected!,geometry)].some(point=>{if(!connectorControlVisible(selected!,geometry,point))return false;const s=camera.worldToScreen(point);return Math.hypot(s.x-screen.x,s.y-screen.y)<=10;}));
     const locked=[...state.selection].some(id=>itemLocked(state,id)),handle=!locked?handleAtScreen(screen):null,rotating=!locked&&rotateHandleAtScreen(screen),box=state.selection.size===1?state.widgets.get([...state.selection][0]!):selectionBox();
-    app.canvas.style.cursor=handle?resizeCursor(handle,box?.rotation??0):rotating?ROTATE_CURSOR:atDot?'pointer':grab?'grab':hoveredLink?'pointer':hoveredWidget?.locked?'not-allowed':hoveredWidget?(hoveredWidget.type==='sticky_note'&&hoveredWidget.stickyPad?'grab':isFreeText(hoveredWidget)&&state.selection.has(hoveredWidget.id)?'text':'move'):tool==='shape'?'crosshair':'default';
+    app.canvas.style.cursor=handle?resizeCursor(handle,box?.rotation??0):rotating?ROTATE_CURSOR:atDot?'pointer':grab?'grab':hoveredLink?'pointer':hoveredWidget?(hoveredWidget.type==='sticky_note'&&hoveredWidget.stickyPad?'grab':isFreeText(hoveredWidget)&&state.selection.has(hoveredWidget.id)?'text':'move'):tool==='shape'?'crosshair':'default';
   }
   if(gesture.kind==='none'&&tool==='connector'){const hover=hoverConnectionTarget(p),nextHover=hover?.id??null;if(nextHover!==hoveredConnectionWidget){hoveredConnectionWidget=nextHover;drawSelection();}app.canvas.style.cursor=!pendingConnection&&hover&&connectionHandles(hover).some(h=>Math.hypot(h.point.x-screen.x,h.point.y-screen.y)<=10)?'pointer':pendingConnection?'default':'crosshair';}
 
@@ -1550,6 +1553,7 @@ function endGesture(e: PointerEvent): void {
       const {widget,start,current}=gesture;creationPreview.clear();
       if(Math.hypot(current.x-start.x,current.y-start.y)*camera.scale>4){
         bus.exec({op:'BATCH',payload:{label:'Puxar nota do bloco',commands:[{op:'WIDGET_CREATE',payload:{...widget,x:widget.x+current.x-start.x,y:widget.y+current.y-start.y}},{op:'SELECTION_SET',payload:[widget.id]}]}});
+        if(state.widgets.has(widget.id))setTool('select');
       }
       break;
     }
@@ -1560,8 +1564,9 @@ function endGesture(e: PointerEvent): void {
       const {widget,start,current} = gesture;
       const next=creationWidgetAt(widget,start,current,camera.scale);creationPreview.clear();
       bus.exec({op:'BATCH',payload:{label:'Criar objeto',commands:[{op:'WIDGET_CREATE',payload:next},{op:'SELECTION_SET',payload:[next.id]}]}});
-      setTool(next.type==='shape'?'shape':'select');
-      if (next.type === "text") beginEdit(state.widgets.get(next.id)!);
+      setTool('select');
+      const created=state.widgets.get(next.id);
+      if (created?.type === "text") beginEdit(created);
       break;
     }
     case "pan":
@@ -1633,10 +1638,11 @@ function endGesture(e: PointerEvent): void {
       lastMarqueeRect = r;
       const ids = state.order.filter((id) => {
         const w = state.widgets.get(id);
-        return w&&!widgetHidden(w) ? rectIntersectsWidget(r, w) : false;
+        return w&&!w.locked&&!widgetHidden(w) ? rectIntersectsWidget(r, w) : false;
       });
-      for(const id of [...state.connectorOrder,...state.strokeOrder]){const bounds=selectedBounds(state,[id]);if(bounds&&bounds.minX<=r.maxX&&bounds.maxX>=r.minX&&bounds.minY<=r.maxY&&bounds.maxY>=r.minY)ids.push(id);}
-      bus.exec({ op: "SELECTION_SET", payload: [...new Set(ids.flatMap(id=>memberSelection(state,id,isolatedGroup)))] });
+      for(const id of state.connectorOrder){const connector=state.connectors.get(id);if(!connector||connector.locked||connector.hidden||mindConnectorHidden(state,connector))continue;const geometry=connectorGeometry(connector,state.widgets);if(geometry&&connectorIntersectsRect(connector,geometry,r))ids.push(id);}
+      for(const id of state.strokeOrder){const stroke=state.strokes.get(id);if(!stroke||stroke.locked||stroke.hidden)continue;const bounds=selectedBounds(state,[id]);if(bounds&&bounds.minX<=r.maxX&&bounds.maxX>=r.minX&&bounds.minY<=r.maxY&&bounds.maxY>=r.minY)ids.push(id);}
+      bus.exec({ op: "SELECTION_SET", payload: [...new Set(ids.flatMap(id=>memberSelection(state,id,isolatedGroup)))].filter(id=>!itemLocked(state,id)) });
       break;
     }
     default:
@@ -1744,7 +1750,7 @@ window.addEventListener("keydown", (e) => {
   }
   if (mod && key === "a") {
     e.preventDefault();
-    bus.exec({ op: "SELECTION_SET", payload: [...state.order,...state.connectorOrder,...state.strokeOrder].filter(id=>!entityHidden(id)) });
+    bus.exec({ op: "SELECTION_SET", payload: [...state.order,...state.connectorOrder,...state.strokeOrder].filter(id=>!entityHidden(id)&&!itemLocked(state,id)) });
     return;
   }
   if(mod&&key==="g"){e.preventDefault();if([...state.selection].some(id=>itemLocked(state,id)))return;if(e.shiftKey)ungroupSelection(state,bus);else groupSelection(state,bus);return;}
@@ -1879,7 +1885,7 @@ async function copySelectionImage(){
   try{const img=new Image();img.src=url;await img.decode();const canvas=document.createElement("canvas"),scale=Math.min(2,4096/Math.max(img.width,img.height));canvas.width=Math.max(1,Math.ceil(img.width*scale));canvas.height=Math.max(1,Math.ceil(img.height*scale));canvas.getContext("2d")!.drawImage(img,0,0,canvas.width,canvas.height);const blob=await new Promise<Blob|null>(resolve=>canvas.toBlob(resolve));if(blob){try{await navigator.clipboard.write([new ClipboardItem({"image/png":blob})]);}catch{downloadBlob(blob,"selecao.png");}}}finally{URL.revokeObjectURL(url);}
 }
 // Local editor controls
-images = installImages({state,bus,camera,app,world,getBoardKey:mediaBoardKey,nodeAt:id=>scene.nodeAt(id),onChange:()=>{syncScene();drawSelection();refreshChrome();}});
+images = installImages({state,bus,camera,app,world,getBoardKey:mediaBoardKey,nodeAt:id=>scene.nodeAt(id),onInserted:()=>setTool('select'),onChange:()=>{syncScene();drawSelection();refreshChrome();}});
 backgroundUI=installBackground({state,bus,camera,app,world,getBoardKey:mediaBoardKey,onChange:()=>{gridDirty=true;syncScene();refreshChrome();}});
 layersUI=installLayers({state,bus,camera,getBoardKey:mediaBoardKey,onSelect:()=>{isolatedGroup=null;setTool('select');},onChange:()=>{syncScene();drawSelection();refreshChrome();}});
 const mindImagePicker=document.createElement('input');mindImagePicker.type='file';mindImagePicker.accept='image/*';mindImagePicker.multiple=true;
@@ -1895,7 +1901,7 @@ let imagePickerBoardKey:string|null=null;
 imagePicker.type="file"; imagePicker.accept="image/*"; imagePicker.multiple=true;
 imagePicker.addEventListener("change",()=>{const boardKey=imagePickerBoardKey;if(imagePicker.files) void images?.importFiles(imagePicker.files,{canInsert:()=>boardKey===mediaBoardKey()}); imagePicker.value="";});
 editorUI = installEditorUI({state,bus,camera,setTool:t=>setTool(t as Tool),getTool:()=>tool,
-  entityAt:p=>frontmostEntityAt(p)?.id,
+  entityAt:p=>frontmostEntityAt(p,true)?.id,
   isTransforming:()=>['drag','resize','multi-resize','rotate','multi-rotate','bend','reconnect','caption-drag'].includes(gesture.kind),
   onNewConnectorCaption:()=>{const c=state.selection.size===1?state.connectors.get([...state.selection][0]!):undefined;if(c)openCaptionDraft(c);},
   canInsertConnectorObject:choice=>{const c=state.selection.size===1?state.connectors.get([...state.selection][0]!):undefined;return !!c&&canInsertConnectorObject(state,c,choice,camera.scale);},
