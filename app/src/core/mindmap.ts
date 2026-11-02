@@ -1,7 +1,7 @@
 import type {BoardState,Command,CommandBus} from './commands';
 import {createWidget,nextId,type Widget,type ShapeWidget,type MindMetadata,type MindAttachment} from './model';
 import {validateMindAttachments,validateMindAttachmentBoardBudget} from './mind-attachments';
-import type {Connector} from './connectors';
+import {anchorWorld,type Connector} from './connectors';
 import type {Vec} from './geometry';
 import {naturalTextSize} from './text-layout';
 
@@ -62,6 +62,42 @@ function childIndex(state:BoardState):Map<string,Widget[]>{
   for(const node of state.widgets.values())if(node.mind?.parentId){const siblings=index.get(node.mind.parentId)??[];siblings.push(node);index.set(node.mind.parentId,siblings);}
   for(const siblings of index.values())siblings.sort((a,b)=>a.mind!.order-b.mind!.order||a.id.localeCompare(b.id));
   return index;
+}
+
+export interface MindResizeSnapshot {topic:Widget;branches:Array<{anchor:Vec;nodes:Widget[]}>}
+/** Retain immutable records, not embedded media copies, once per resize gesture. */
+export function captureMindTopicResize(state:BoardState,id:string):MindResizeSnapshot|undefined{
+  const topic=state.widgets.get(id),root=mindRoot(state,id);if(!topic?.mind||!root?.mind||topic.locked)return;
+  const index=childIndex(state),layout=root.mind.layout??'balanced',seen=new Set([id]),branches:MindResizeSnapshot['branches']=[];
+  for(const child of index.get(id)??[]){
+    const side=layout==='left'||layout==='right'?layout:child.mind!.side,anchor=layout==='org'?{x:.5,y:1}:layout==='list'?{x:0,y:1}:{x:side==='left'?0:1,y:.5},nodes:Widget[]=[],pending=[child];
+    while(pending.length){const node=pending.pop()!;if(seen.has(node.id)||node.mind?.rootId!==topic.mind.rootId)continue;seen.add(node.id);nodes.push(node);pending.push(...(index.get(node.id)??[]));}
+    branches.push({anchor,nodes});
+  }
+  return {topic,branches};
+}
+/** Resize only this box; retain every descendant's offset from its parent edge. */
+export function mindTopicResizeCommands(state:BoardState,snapshot:MindResizeSnapshot,geometry:Pick<Widget,'x'|'y'|'width'|'height'>&{style?:Widget['style']}):Command[]{
+  const current=state.widgets.get(snapshot.topic.id);if(!current?.mind||current.locked||current.mind.rootId!==snapshot.topic.mind?.rootId||![geometry.x,geometry.y,geometry.width,geometry.height].every(Number.isFinite)||geometry.width<=0||geometry.height<=0)return [];
+  const next={...snapshot.topic,...geometry} as Widget,commands:Command[]=[{op:'WIDGET_UPDATE',payload:{id:current.id,patch:geometry}}];
+  for(const branch of snapshot.branches){const before=anchorWorld(snapshot.topic,branch.anchor.x,branch.anchor.y),after=anchorWorld(next,branch.anchor.x,branch.anchor.y),dx=after.x-before.x,dy=after.y-before.y;
+    for(const node of branch.nodes){const live=state.widgets.get(node.id);if(!live?.mind||node.locked||live.locked||live.mind.rootId!==current.mind.rootId)continue;commands.push({op:'WIDGET_UPDATE',payload:{id:node.id,patch:{x:node.x+dx,y:node.y+dy}}});}
+  }
+  return commands;
+}
+
+/** Repair legacy collapsed boxes that grew over their old manual anchors.
+ * An unrelated, freely placed branch outside the parent is left untouched. */
+function revealMindChildren(state:BoardState,id:string):Command[]{
+  const parent=state.widgets.get(id),root=mindRoot(state,id);if(!parent?.mind||!root?.mind)return [];
+  const layout=root.mind.layout??'balanced',unit=root.mind.layoutScale??1,commands:Command[]=[];
+  for(const child of mindChildren(state,id)){
+    if(!child.mind?.manualPosition||child.x+child.width<=parent.x||child.x>=parent.x+parent.width||child.y+child.height<=parent.y||child.y>=parent.y+parent.height)continue;
+    const side=layout==='left'||layout==='right'?layout:child.mind.side,dx=layout==='org'||layout==='list'?0:side==='left'?parent.x-GAP_X*unit-child.x-child.width:parent.x+parent.width+GAP_X*unit-child.x,dy=layout==='org'?parent.y+parent.height+ORG_GAP_Y*unit-child.y:layout==='list'?parent.y+parent.height+(parent.id===root.id?LIST_FIRST_GAP:TREE_GAP)*unit-child.y:0;
+    const ids=mindSubtree(state,child.id);if(ids.some(nodeId=>state.widgets.get(nodeId)?.locked))continue;
+    for(const nodeId of ids){const node=state.widgets.get(nodeId)!,patch={x:node.x+dx,y:node.y+dy};state.widgets.set(nodeId,{...node,...patch});commands.push({op:'WIDGET_UPDATE',payload:{id:nodeId,patch}});}
+  }
+  return commands;
 }
 
 /** Build a deterministic variable-size tree layout without mutating the live board. */
@@ -191,7 +227,7 @@ export function addMindSibling(state:BoardState,bus:CommandBus,id:string,content
 }
 export function toggleMindBranch(state:BoardState,bus:CommandBus,id:string):boolean{
   const node=state.widgets.get(id);if(!node?.mind||node.locked||!mindChildren(state,id).length)return false;
-  const copy=staged(state),command=changedMind(copy,id,{collapsed:!node.mind.collapsed});return run(bus,node.mind.collapsed?'Expandir ramo':'Recolher ramo',[command!,...mindLayoutCommands(copy,id),{op:'SELECTION_SET',payload:[id]}]);
+  const copy=staged(state),command=changedMind(copy,id,{collapsed:!node.mind.collapsed});return run(bus,node.mind.collapsed?'Expandir ramo':'Recolher ramo',[command!,...(node.mind.collapsed?revealMindChildren(copy,id):[]),...mindLayoutCommands(copy,id),{op:'SELECTION_SET',payload:[id]}]);
 }
 /** Reveal relative descendant levels without changing explicit layer visibility. */
 export function showMindLevels(state:BoardState,bus:CommandBus,id:string,level:number):boolean{
@@ -201,7 +237,7 @@ export function showMindLevels(state:BoardState,bus:CommandBus,id:string,level:n
     const current=pending.pop()!;if(seen.has(current.id))continue;seen.add(current.id);
     const topic=copy.widgets.get(current.id),children=index.get(current.id)??[];if(!topic?.mind)continue;
     const collapsed=level>0&&current.depth>=level&&children.length>0;
-    if(!topic.locked&&!!topic.mind.collapsed!==collapsed)commands.push(changedMind(copy,current.id,{collapsed})!);
+    if(!topic.locked&&!!topic.mind.collapsed!==collapsed){commands.push(changedMind(copy,current.id,{collapsed})!);if(!collapsed)commands.push(...revealMindChildren(copy,current.id));}
     pending.push(...children.map(child=>({id:child.id,depth:current.depth+1})));
   }
   if(!commands.length)return false;

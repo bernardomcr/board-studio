@@ -72,7 +72,7 @@ import {boundedSvgBitmap} from './render/svg-bitmap';
 import {installLayers} from './layers';
 import {migrateFrameCommands,migrateFrameSnapshots} from './core/layer-migration';
 import {installMindmapUI} from './mindmap-ui';
-import {mindNodeHidden,mindConnectorHidden,mindLayoutCommands,deleteMindSubtree,attachMindWidget} from './core/mindmap';
+import {mindNodeHidden,mindConnectorHidden,mindLayoutCommands,deleteMindSubtree,attachMindWidget,captureMindTopicResize,mindTopicResizeCommands,type MindResizeSnapshot} from './core/mindmap';
 import {installLinkUI} from './link-ui';
 import {installAudio} from './audio';
 import {installStructuredTextUI} from './structured-text-ui';
@@ -855,7 +855,7 @@ type Gesture =
   | { kind: "drag"; ids: string[]; start: Vec; delta: Vec; initial:EntitySnapshot; bounds:Rect|null;snapTargets?:Rect[] }
   | {kind:'sticky-pull';start:Vec;current:Vec;widget:Extract<Widget,{type:'sticky_note'}>}
   | { kind: "marquee"; start: Vec; current: Vec }
-  | { kind: "resize"; id: string; handle: HandleId; startWidget: Widget; moved: boolean }
+  | { kind: "resize"; id: string; handle: HandleId; startWidget: Widget; moved: boolean;mindResize?:MindResizeSnapshot }
   | { kind: "rotate"; id: string; startWidget: Widget; grabAngle: number; moved: boolean }
   | { kind: "connect"; fromWidget: string; fromAnchor: Endpoint; current: Vec; fixed?: boolean; startedAt?:Vec;shape?:ConnectorShape;arrow?:boolean;snapDisabled?:boolean }
   | { kind: "bend"; id:string; index:number; points:Vec[] }
@@ -1291,7 +1291,7 @@ if (state.selection.size > 1) {
       const handle = handleAtScreen(screen);
       if (handle) {
         bus.beginTransaction("Redimensionar");
-        gesture = { kind: "resize", id: only, handle, startWidget: { ...w }, moved: false };
+        gesture = { kind: "resize", id: only, handle, startWidget: { ...w }, moved: false,mindResize:captureMindTopicResize(state,only) };
         return;
       }
     }
@@ -1504,7 +1504,7 @@ app.canvas.addEventListener("pointermove", (e) => {
       const geometry = isFreeText(start)?resizeFreeText(start,gesture.handle,p):resizeWidget(start, gesture.handle, p, e.shiftKey);
       const next=start.audio||start.table||start.checklist?{...geometry,style:scaledWidgetStyle(start,geometry.width/start.width,geometry.height/start.height)}:geometry;
       gesture.moved = true;
-      const resizingId=gesture.id;queueGestureUpdate(()=>bus.exec({ op: "WIDGET_UPDATE", payload: { id: resizingId, patch: next } }));
+      const resizingId=gesture.id,mindResize=gesture.mindResize;queueGestureUpdate(()=>{if(mindResize){const commands=mindTopicResizeCommands(state,mindResize,next);if(commands.length)bus.exec({op:'BATCH',payload:{label:'Redimensionar tópico',commands}});}else bus.exec({ op: "WIDGET_UPDATE", payload: { id: resizingId, patch: next } });});
 
       return;
     }

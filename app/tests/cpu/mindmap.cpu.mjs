@@ -136,3 +136,35 @@ test('scalar scaling rejects invalid values and locked hidden-only bypasses; mix
     assert.equal(state.widgets.get(root).mind.layoutScale,sequence==='scalar-full'?7:sequence==='scalar-position'?2:4);assert.deepEqual(state.widgets.get(root).mind.attachments,[attachedFile()]);
   }
 });
+
+test('resizing a collapsed root or branch transports absolute descendant anchors at every zoom and keeps one undo',()=>{
+  for(const unit of [50,1,.05])for(const layout of ['right','left','org','list'])for(const internal of [false,true]){
+    const {state,bus,root}=fixture(unit),branch=m.addMindChild(state,bus,root,'Branch'),leaf=m.addMindChild(state,bus,branch,'Leaf'),other=m.addMindChild(state,bus,root,'Other');m.setMindLayout(state,bus,root,layout);m.markMindManualPosition(state,bus,root);
+    const id=internal?branch:root,childId=internal?leaf:branch;m.toggleMindBranch(state,bus,id);const initial=m.captureMindTopicResize(state,id),before=modelSnapshot(state),parent=state.widgets.get(id),child=state.widgets.get(childId),otherBefore=JSON.stringify(state.widgets.get(other)),depth=bus.undoStack.length;
+    const originals=new Map(m.mindSubtree(state,id).map(nodeId=>[nodeId,state.widgets.get(nodeId)]));bus.beginTransaction('Resize topic');
+    for(let frame=1;frame<=120;frame++){const t=frame/120;bus.exec({op:'BATCH',payload:{commands:m.mindTopicResizeCommands(state,initial,{x:parent.x-30*unit*t,y:parent.y-20*unit*t,width:parent.width+500*unit*t,height:parent.height+240*unit*t})}});}
+    bus.endTransaction();assert.equal(bus.undoStack.length,depth+1);assert.equal(m.mindNodeHidden(state,childId),true);assert.equal(state.widgets.get(id).mind.collapsed,true);
+    const resized=state.widgets.get(id),moved=state.widgets.get(childId);
+    if(layout==='right')close(moved.x-resized.x-resized.width,child.x-parent.x-parent.width);
+    if(layout==='left')close(resized.x-moved.x-moved.width,parent.x-child.x-child.width);
+    if(layout==='org'){close(moved.x+moved.width/2-resized.x-resized.width/2,child.x+child.width/2-parent.x-parent.width/2);close(moved.y-resized.y-resized.height,child.y-parent.y-parent.height);}
+    if(layout==='list'){close(moved.x-resized.x,child.x-parent.x);close(moved.y-resized.y-resized.height,child.y-parent.y-parent.height);}
+    for(const [nodeId,old] of originals){const current=state.widgets.get(nodeId);assert.deepEqual(current.mind,old.mind);assert.deepEqual(current.style,old.style);if(nodeId!==id){close(current.width,old.width);close(current.height,old.height);}}
+    if(internal)assert.equal(JSON.stringify(state.widgets.get(other)),otherBefore);const after=modelSnapshot(state);bus.undo();assert.equal(modelSnapshot(state),before);bus.redo();assert.equal(modelSnapshot(state),after);m.toggleMindBranch(state,bus,id);const revealed=state.widgets.get(childId),box=state.widgets.get(id);assert.equal(m.mindNodeHidden(state,childId),false);assert.ok(revealed.x+revealed.width<=box.x||revealed.x>=box.x+box.width||revealed.y+revealed.height<=box.y||revealed.y>=box.y+box.height,`${layout}: child outside resized parent`);if(internal)assert.equal(JSON.stringify(state.widgets.get(other)),otherBefore);
+  }
+});
+
+test('expansion repairs already-saved colliding manual anchors without reorganizing unrelated free topics',()=>{
+  for(const layout of ['right','left','org','list'])for(const internal of [false,true]){
+    const {state,bus,root}=fixture(),branch=m.addMindChild(state,bus,root,'Branch'),leaf=m.addMindChild(state,bus,branch,'Leaf'),other=m.addMindChild(state,bus,root,'Other');m.setMindLayout(state,bus,root,layout);m.markMindManualPosition(state,bus,root);const otherNode=state.widgets.get(other);bus.exec({op:'WIDGET_UPDATE',payload:{id:other,patch:{x:otherNode.x+2000,y:otherNode.y-2000}}});const otherBefore=JSON.stringify(state.widgets.get(other)),id=internal?branch:root,childId=internal?leaf:branch;m.toggleMindBranch(state,bus,id);const parent=state.widgets.get(id);
+    // Simulate an old saved board: only the collapsed parent's box grew.
+    bus.exec({op:'WIDGET_UPDATE',payload:{id,patch:{x:parent.x-(layout==='left'?500:0),width:parent.width+500,height:parent.height+300}}});const before=modelSnapshot(state),childBefore=state.widgets.get(childId),depth=bus.undoStack.length;
+    assert.equal(m.mindNodeHidden(state,childId),true);m.toggleMindBranch(state,bus,id);assert.equal(bus.undoStack.length,depth+1);const box=state.widgets.get(id),child=state.widgets.get(childId);assert.ok(child.x+child.width<=box.x||child.x>=box.x+box.width||child.y+child.height<=box.y||child.y>=box.y+box.height);assert.deepEqual(child.style,childBefore.style);assert.deepEqual(child.mind,childBefore.mind);assert.equal(JSON.stringify(state.widgets.get(other)),otherBefore);const after=modelSnapshot(state);bus.undo();assert.equal(modelSnapshot(state),before);bus.redo();assert.equal(modelSnapshot(state),after);
+  }
+});
+
+test('topic resize skips locked descendants, vetoes a locked or removed parent, and never reads embedded attachment bytes',()=>{
+  const {state,bus,root}=fixture(),a=m.addMindChild(state,bus,root,'A'),b=m.addMindChild(state,bus,a,'B');m.markMindManualPosition(state,bus,root);m.addMindAttachments(state,bus,a,[attachedFile()]);bus.exec({op:'ENTITY_LOCK',payload:{ids:[b],locked:true}});const locked=JSON.stringify(state.widgets.get(b)),live=state.widgets.get(a).mind.attachments,src=live[0].src;let reads=0;Object.defineProperty(live[0],'src',{enumerable:true,get(){reads++;return src;}});const capture=m.captureMindTopicResize(state,root),parent=state.widgets.get(root),geometry={x:parent.x,y:parent.y,width:parent.width+300,height:parent.height+100};
+  for(let frame=1;frame<=20;frame++)bus.exec({op:'BATCH',payload:{commands:m.mindTopicResizeCommands(state,capture,geometry)}});assert.equal(reads,0);assert.equal(state.widgets.get(a).mind.attachments,live);assert.equal(JSON.stringify(state.widgets.get(b)),locked);
+  bus.exec({op:'ENTITY_LOCK',payload:{ids:[root],locked:true}});assert.deepEqual(m.mindTopicResizeCommands(state,capture,geometry),[]);bus.exec({op:'ENTITY_LOCK',payload:{ids:[root,b],locked:false}});bus.exec({op:'WIDGET_REMOVE',payload:root});assert.deepEqual(m.mindTopicResizeCommands(state,capture,geometry),[]);
+});

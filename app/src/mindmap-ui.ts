@@ -61,9 +61,8 @@ export function installMindmapUI(api:MindmapUIAPI){
   #mindmap-node-controls button{position:fixed;width:24px;height:24px;min-width:24px;display:grid;place-items:center;padding:3px;border:1px solid var(--studio-line,#dce0e8);border-radius:50%;background:var(--studio-surface,#fff);color:var(--studio-accent,#8050ba);box-shadow:0 3px 9px #15171b18;font:11px Inter,'Segoe UI',sans-serif;cursor:pointer;pointer-events:auto;animation:mind-control-appear 250ms cubic-bezier(.2,.8,.2,1) both}
   #mindmap-node-controls button[data-mind-add],#mindmap-node-controls button[data-mind-sibling]{background:var(--studio-accent,#8050ba);border-color:var(--studio-accent,#8050ba);color:var(--studio-surface,#fff)}
   #mindmap-node-controls button[data-mind-fold]{border:0;background:transparent;box-shadow:none;padding:0}
-  #mindmap-node-controls button[data-mind-fold]::before{content:'';width:10px;height:10px;border:2px solid var(--mind-branch-color,var(--studio-accent));border-radius:50%;background:var(--studio-surface,#fff);box-sizing:border-box;transition:width 250ms,height 250ms,background-color 120ms}
-  #mindmap-node-controls button[data-mind-fold][aria-expanded=false]::before{width:15px;height:15px}
-  #mindmap-node-controls button[data-mind-fold]::after{content:'';position:absolute;width:3px;height:3px;border-radius:50%;background:var(--mind-branch-color,var(--studio-accent))}
+  #mindmap-node-controls button[data-mind-fold]::before{content:'';width:20px;height:20px;border:2px solid var(--mind-branch-color,var(--studio-accent));border-radius:50%;background:var(--studio-surface,#fff);box-sizing:border-box;transition:background-color 120ms}
+  #mindmap-node-controls button[data-mind-fold]::after{content:'';position:absolute;width:4px;height:4px;border-radius:50%;background:var(--mind-branch-color,var(--studio-accent))}
   #mindmap-node-controls button:hover{filter:brightness(1.06)}
   @keyframes mind-control-appear{from{opacity:0;transform:scale(.2)}to{opacity:1;transform:scale(1)}}
   @media(prefers-reduced-motion:reduce){#mindmap-node-controls button{animation:none}#mindmap-node-controls button[data-mind-fold]::before{transition:none}}
