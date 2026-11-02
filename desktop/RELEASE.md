@@ -5,6 +5,7 @@ Interface compacta, mapa mental refinado e correções de renderização.
 - Margem de renderização calculada a partir da tinta real da fonte, preservando tamanho, alinhamento e caixas existentes.
 - Finais de letras, acentos e descendentes completos no texto normal e em textos gigantes.
 - Rasterização de textos gigantes mantém a mesma posição e os limites de memória ao navegar e redimensionar.
+- Exportações PNG e SVG incluem a tinta real de fontes manuscritas e itálicas, preservando os finais das letras sem alterar suas caixas.
 - Controles flutuantes: Home, título e menu de arquivo à esquerda; Camadas à direita; tema ao lado de Fundo. Desfazer e refazer continuam nos atalhos.
 - Mapa mental com botões distintos para filho e irmão, recolhimento circular, transições e posições livres preservadas. Cores e controles adaptados ao tema.
 - Anexos locais nos tópicos, com download e inclusão nos arquivos do board.

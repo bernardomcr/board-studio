@@ -4,6 +4,7 @@ import {PanMomentum} from './core/pan-momentum';
 import {resizeCursor,ROTATE_CURSOR} from './core/cursors';
 import {paintBoardGrid} from './render/grid-paint';
 import {installRenderDemand} from './render/render-demand';
+import {pngExportFrame} from './render/export-frame';
 import { gridStateAt, snapPoint, type GridState } from "./core/grid";
 import { CommandBus, type AlignMode, type BoardState, type Command } from "./core/commands";
 import { nextId, createWidget, STICKY_COLORS, type Widget, type WidgetType, type Style, type ShapeWidget } from "./core/model";
@@ -726,7 +727,8 @@ document.getElementById("zoombar")!.addEventListener("click", (e) => {
 
 async function exportPng(): Promise<void> {
   try {
-    const canvas = app.renderer.extract.canvas({ target: app.stage,clearColor:state.background?.color??DEFAULT_BACKGROUND.color }) as HTMLCanvasElement;
+    const frame=pngExportFrame(app.stage);
+    const canvas = app.renderer.extract.canvas({ target: app.stage,...(frame?{frame}:{}),clearColor:state.background?.color??DEFAULT_BACKGROUND.color }) as HTMLCanvasElement;
     const blob = await new Promise<Blob | null>((resolve) => canvas.toBlob(resolve, "image/png"));
     if (!blob) return;
     const url = URL.createObjectURL(blob);

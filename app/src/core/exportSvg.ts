@@ -42,11 +42,18 @@ interface Options {
 export function boardToSvg(state: BoardState, options: Options = {}): string {
   const padding = options.padding ?? 80;
   const rects: Rect[] = [];
+  const preparedText=new Map<string,string>();
   const background = state.background ?? DEFAULT_BACKGROUND;
   const scenery = options.background === undefined ? background.image : undefined;
   if (scenery) rects.push({ minX: scenery.x, minY: scenery.y, maxX: scenery.x + scenery.width, maxY: scenery.y + scenery.height });
 
-  for (const w of state.widgets.values()) if(!w.hidden&&!mindNodeHidden(state,w.id)){const r=widgetAABB(w),pad=resolvedWidgetStyle(w).borderWidth/2;rects.push({minX:r.minX-pad,minY:r.minY-pad,maxX:r.maxX+pad,maxY:r.maxY+pad});}
+  for (const w of state.widgets.values()) if(!w.hidden&&!mindNodeHidden(state,w.id)){
+    const style=resolvedWidgetStyle(w),r=widgetAABB(w),pad=style.borderWidth/2;rects.push({minX:r.minX-pad,minY:r.minY-pad,maxX:r.maxX+pad,maxY:r.maxY+pad});
+    if(w.type!=='image'&&w.type!=='frame'&&!w.audio&&!w.table&&!w.checklist&&!(w.type==='sticky_note'&&w.stickyPad)){
+      const ink:Rect[]=[];preparedText.set(w.id,textSvg({...w,style},ink));
+      for(const bounds of ink)rects.push(svgWorldBounds(w,bounds));
+    }
+  }
   for (const c of state.connectors.values()) {
     if(c.hidden||mindConnectorHidden(state,c))continue;
     const geometry = connectorGeometry(c, state.widgets);
@@ -78,7 +85,7 @@ export function boardToSvg(state: BoardState, options: Options = {}): string {
     if(widget.type==='stroke'){parts.push(strokeSvg(widget));continue;}
     const cx=widget.x+widget.width/2,cy=widget.y+widget.height/2;
     const frame=widget.type==='frame'?undefined:frames.filter(f=>pointInWidget(f,{x:cx,y:cy})).sort((a,b)=>a.width*a.height-b.width*b.height)[0];
-    const rendered=widgetSvg(widget),linked=widget.link&&/^(https?:|mailto:)/i.test(widget.link)?`<a href="${escapeXml(widget.link)}" target="_blank">${rendered}</a>`:rendered;
+    const rendered=widgetSvg(widget,preparedText.get(widget.id)),linked=widget.link&&/^(https?:|mailto:)/i.test(widget.link)?`<a href="${escapeXml(widget.link)}" target="_blank">${rendered}</a>`:rendered;
     if(frame){const clip='frame-clip-'+widget.id.replace(/[^a-zA-Z0-9_-]/g,'');parts.push(`<defs><clipPath id="${clip}"><polygon points="${widgetCorners(frame).map(p=>`${p.x},${p.y}`).join(' ')}"/></clipPath></defs><g clip-path="url(#${clip})">${linked}</g>`);}else parts.push(linked);
   }
 
@@ -86,7 +93,7 @@ export function boardToSvg(state: BoardState, options: Options = {}): string {
   return parts.join("\n");
 }
 
-function widgetSvg(w: Widget): string {
+function widgetSvg(w: Widget,preparedText?:string): string {
   w={...w,style:resolvedWidgetStyle(w)};
   const transform = `translate(${round(w.x)},${round(w.y)}) rotate(${round((w.rotation * 180) / Math.PI)},${round(w.width / 2)},${round(w.height / 2)})`;
   if(w.audio)return `<g transform="${transform}">${audioCardSvg(w)}</g>`;
@@ -114,7 +121,7 @@ function widgetSvg(w: Widget): string {
   }
 
   const body = backgroundSvg(w);
-  const text = w.type==='sticky_note'&&w.stickyPad?'':structuredSvgContent(w)??textSvg(w);
+  const text = w.type==='sticky_note'&&w.stickyPad?'':preparedText??structuredSvgContent(w)??textSvg(w);
   return `<g transform="${transform}">${body}${text}</g>`;
 }
 
@@ -172,7 +179,25 @@ function borderSvg(style: Style): string {
     (pattern ? ` stroke-dasharray="${pattern.dash} ${pattern.gap}" stroke-linecap="${pattern.dash === 0 ? "round" : "butt"}"` : "");
 }
 
-function textSvg(w: Widget): string {
+interface SvgInkMetric {width:number;left:number;right:number;ascent:number;descent:number}
+let inkContext:CanvasRenderingContext2D|null|undefined;
+const inkMetrics=new Map<string,SvgInkMetric>();let inkCharacters=0;
+function measureSvgInk(text:string,style:Style,marks:Run):SvgInkMetric|undefined{
+  if(inkContext===undefined){inkContext=typeof document==='undefined'?null:document.createElement('canvas').getContext('2d');if(inkContext)document.fonts?.addEventListener('loadingdone',()=>{inkMetrics.clear();inkCharacters=0;});}
+  if(!inkContext)return;
+  const font=`${marks.italic||style.fontStyle==='italic'?'italic':'normal'} ${marks.bold||style.fontWeight==='bold'?'700':'400'} ${style.fontSize}px ${style.fontFamily}`,key=JSON.stringify([font,text]),cached=inkMetrics.get(key);if(cached)return cached;
+  inkContext.font=font;inkContext.textAlign='left';inkContext.textBaseline='alphabetic';const metrics=inkContext.measureText(text),result={width:metrics.width,left:metrics.actualBoundingBoxLeft,right:metrics.actualBoundingBoxRight,ascent:metrics.actualBoundingBoxAscent,descent:metrics.actualBoundingBoxDescent};
+  // Measurement remains at <=1024px. A later font load invalidates fallback
+  // metrics; exports made after loading then use that font's actual bearings.
+  if(key.length<=200_000&&document.fonts?.status!=='loading'){inkMetrics.set(key,result);inkCharacters+=key.length;while(inkMetrics.size>256||inkCharacters>500_000){const first=inkMetrics.keys().next().value!;inkCharacters-=first.length;inkMetrics.delete(first);}}
+  return result;
+}
+/** Match the rounded transform emitted by widgetSvg, without changing its box. */
+function svgWorldBounds(w:Widget,rect:Rect):Rect{
+  const angle=round(w.rotation*180/Math.PI)*Math.PI/180,c=Math.cos(angle),s=Math.sin(angle),cx=round(w.width/2),cy=round(w.height/2),x=round(w.x),y=round(w.y),points=[[rect.minX,rect.minY],[rect.maxX,rect.minY],[rect.maxX,rect.maxY],[rect.minX,rect.maxY]].map(([px,py])=>({x:x+cx+(px!-cx)*c-(py!-cy)*s,y:y+cy+(px!-cx)*s+(py!-cy)*c}));
+  return {minX:Math.min(...points.map(p=>p.x)),minY:Math.min(...points.map(p=>p.y)),maxX:Math.max(...points.map(p=>p.x)),maxY:Math.max(...points.map(p=>p.y))};
+}
+function textSvg(w: Widget,ink?:Rect[]): string {
   const content=w.type==='frame'?'':mindTopicText(w);if(!content.trim())return '';
   const preferred=w.style.fontSize,fit=isBoxText(w)?fitBoxText(w,content):undefined;
   if(fit)w={...w,style:{...w.style,fontSize:fit.fontSize}};
@@ -186,6 +211,14 @@ function textSvg(w: Widget): string {
   const highlights:string[]=[],tspans:string[]=[];
   lines.forEach((line,index)=>{
     const visible=fit?trimTextLine(line):{runs:line,trailing:[]},y=firstY+index*lineHeight,width=visible.runs.reduce((sum,run)=>sum+measureRichToken(run.text,run,style),0);
+    if(ink){
+      // Adjacent spans with the same font shape as one text segment in SVG.
+      // Preserve kerning/ligatures across link and decoration-only boundaries.
+      const groups:Run[]=[];for(const run of visible.runs){const previous=groups.at(-1);if(previous&&!!(previous.bold||style.fontWeight==='bold')===!!(run.bold||style.fontWeight==='bold')&&!!(previous.italic||style.fontStyle==='italic')===!!(run.italic||style.fontStyle==='italic'))previous.text+=run.text;else groups.push({...run});}
+      const measured=groups.map(run=>({run,metrics:measureSvgInk(run.text,style,run)})),advance=measured.reduce((sum,entry)=>sum+(entry.metrics?.width??measureRichToken(entry.run.text,entry.run,style)),0),bleed=Math.max(1,fontSize/1024);
+      let pen=anchor==='middle'?x-advance/2:anchor==='end'?x-advance:x;
+      for(const {run,metrics} of measured){if(metrics){if(run.text.trim())ink.push({minX:(pen-metrics.left-bleed)*scale,minY:(y-metrics.ascent-bleed)*scale,maxX:(pen+metrics.right+bleed)*scale,maxY:(y+metrics.descent+bleed)*scale});pen+=metrics.width;}else pen+=measureRichToken(run.text,run,style);}
+    }
     if(w.style.highlightColor&&w.style.highlightColor!=='transparent'){
       const left=anchor==='middle'?x-width/2:anchor==='end'?x-width:x;
       highlights.push('<rect x="'+n(left)+'" y="'+n(y-fontSize)+'" width="'+n(width)+'" height="'+n(lineHeight)+'" fill="'+escapeXml(w.style.highlightColor)+'"/>');
