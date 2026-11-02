@@ -9,6 +9,7 @@ import {loadBoardFont,boardFontFamilies,fontFamilyName} from './fonts';
 import {validateUserFonts,snapshotUserFonts,restoreUserFonts,type UserFont} from './user-fonts';
 import {migrateFrameSnapshots} from './core/layer-migration';
 import {validateMindMetadata,validateMindMapGraph} from './core/mindmap';
+import {validateMindAttachmentBoardBudget} from './core/mind-attachments';
 import {validateAudioMetadata} from './core/audio';
 import {validateStructuredMetadataFields} from './core/structured-text';
 import {validateBoardLayers,snapshotBoardLayers,restoreBoardLayers,boardLayerFlags,type BoardLayers,type LayerMembership} from './core/board-layers';
@@ -153,37 +154,48 @@ export function validateBoardFile(value: unknown): BoardFile {
 
 export function installProjectFiles(api: { state: BoardState; bus: CommandBus; camera: Camera; sync(): void;getBoardKey?():string|null;beforeOperation?():void }) {
   const { state, bus, camera } = api;
+  if(!document.getElementById('project-file-feedback-styles')){const css=document.createElement('style');css.id='project-file-feedback-styles';css.textContent=`#project-file-error{position:fixed;z-index:120;left:50%;bottom:72px;transform:translateX(-50%);display:flex;align-items:center;gap:12px;box-sizing:border-box;width:max-content;max-width:min(560px,calc(100vw - 24px));padding:13px 12px 13px 16px;border:1px solid var(--studio-accent,#8050ba);border-radius:12px;background:var(--studio-surface,#fbfaff);color:var(--studio-ink,#292331);box-shadow:var(--studio-shadow,0 6px 28px #28163722);font:13px/1.5 Inter,'Segoe UI',sans-serif}#project-file-error>span{min-width:0;overflow-wrap:anywhere}#project-file-error>button{display:grid;place-items:center;flex:none;width:30px;height:30px;padding:0;border:0;border-radius:7px;background:transparent;color:inherit;font:23px/1 Inter,'Segoe UI',sans-serif;cursor:pointer}#project-file-error>button:hover{background:var(--studio-soft,#eee9f6);color:var(--studio-accent,#8050ba)}#project-file-error>button:focus-visible{outline:2px solid var(--studio-accent,#8050ba);outline-offset:2px}`;document.head.append(css);}
+  const clearError=()=>document.getElementById('project-file-error')?.remove();
+  function exportError(message:string){clearError();const alert=document.createElement('div');alert.id='project-file-error';alert.setAttribute('role','alert');alert.setAttribute('aria-label','Falha ao salvar arquivo');alert.setAttribute('aria-atomic','true');const text=document.createElement('span');text.textContent=message;const close=document.createElement('button');close.type='button';close.setAttribute('aria-label','Fechar aviso de arquivo');close.title='Fechar aviso';close.textContent='×';close.addEventListener('click',()=>alert.remove());alert.append(text,close);document.body.append(alert);}
   const container = document.createElement("div"); container.className = "chip";container.id='project-file-controls';
-  const status = document.createElement("span"); status.setAttribute("role", "status"); status.style.cssText = "font-size:12px;color:#73726c;max-width:200px";
+  const status=document.createElement('div');status.id='project-file-status';status.setAttribute('role','status');status.hidden=true;
+  const statusText=document.createElement('span'),dismissStatus=document.createElement('button');dismissStatus.type='button';dismissStatus.setAttribute('aria-label','Fechar mensagem de arquivo');dismissStatus.textContent='×';status.append(statusText,dismissStatus);document.body.append(status);
+  let statusTimer=0;
+  const clearStatus=()=>{clearTimeout(statusTimer);status.hidden=true;statusText.textContent='';};
+  const reportStatus=(message:string,persistent=false)=>{clearStatus();statusText.textContent=message;status.hidden=false;if(!persistent)statusTimer=window.setTimeout(clearStatus,4000);};
+  dismissStatus.onclick=clearStatus;
+  if(!document.getElementById('project-file-status-styles')){const css=document.createElement('style');css.id='project-file-status-styles';css.textContent=`#project-file-status{position:fixed;left:50%;bottom:64px;transform:translateX(-50%);z-index:110;display:flex;align-items:center;gap:12px;width:max-content;max-width:min(560px,calc(100vw - 24px));box-sizing:border-box;padding:10px 10px 10px 14px;border:1px solid var(--studio-line,#ded7e8);border-radius:12px;background:var(--studio-surface,#fbfaff);color:var(--studio-ink,#292331);box-shadow:var(--studio-shadow);font:12px/1.5 Inter,'Segoe UI',sans-serif}#project-file-status[hidden]{display:none!important}#project-file-status>span{min-width:0;overflow-wrap:anywhere}#project-file-status>button{flex:none;display:grid;place-items:center;width:26px;height:26px;padding:0;border:0;border-radius:6px;background:transparent;color:inherit;font:21px/1 Inter,sans-serif;cursor:pointer}#project-file-status>button:hover{background:var(--studio-soft,#eee9f6)}#project-file-status>button:focus-visible{outline:2px solid var(--studio-accent,#8050ba);outline-offset:2px}`;document.head.append(css);}
   const saveButton = document.createElement("button"), openButton = document.createElement("button");
   saveButton.textContent = "Salvar arquivo"; openButton.textContent = "Abrir arquivo";
   for (const button of [saveButton, openButton]) { button.type = "button"; button.style.cssText = "width:auto;padding:0 8px;font:600 12px Segoe UI,sans-serif;white-space:nowrap"; }
   saveButton.title = "Salvar uma cópia completa e editável no computador";
   openButton.title = "Abrir um arquivo .board.json e substituir o board atual";
-  container.append(saveButton, openButton, status); document.getElementById("topbar")?.append(container);
+  container.append(saveButton, openButton); document.getElementById("topbar")?.append(container);
   const input = document.createElement("input"); input.type = "file"; input.accept = ".board.json,.json,application/json"; input.hidden = true; document.body.append(input);
   saveButton.onclick = () => {
+    clearError();clearStatus();
     api.beforeOperation?.();
     const data: BoardFile = { format: "local-board", version: 1,layerOrderVersion:1, title: document.getElementById("board-title")?.textContent ?? "Board",
       layers:snapshotBoardLayers(state),
       background:state.background??{...DEFAULT_BACKGROUND},userFonts:snapshotUserFonts(boardFontFamilies(state.widgets.values(),state.connectors.values())),
       widgets: [...state.widgets.values()], order: [...state.order], connectors: [...state.connectors.values()], connectorOrder: [...state.connectorOrder],
       strokes: [...state.strokes.values()], strokeOrder: [...state.strokeOrder], groups: [...state.groups.entries()], camera: { x: camera.x, y: camera.y, scale: camera.scale } };
-    const url = URL.createObjectURL(new Blob([JSON.stringify(data)], { type: "application/json" }));
+    let blob:Blob;try{validateMindAttachmentBoardBudget(data.widgets);blob=new Blob([JSON.stringify(data)],{type:'application/json'});if(blob.size>100*1024*1024)throw new Error('O projeto completo excede 100 MiB. Remova alguma mídia antes de salvar o arquivo.');}catch(error){clearStatus();exportError(error instanceof Error?error.message:'Não foi possível salvar o arquivo.');return;}
+    const url = URL.createObjectURL(blob);
     const link = document.createElement("a"); link.href = url; link.download = `${data.title.replace(/[^\p{L}\p{N} _-]/gu, "").trim() || "Board"}.board.json`; link.click();
-    setTimeout(() => URL.revokeObjectURL(url), 1000); status.textContent = "Arquivo gerado";
+    setTimeout(() => URL.revokeObjectURL(url), 1000); reportStatus('Arquivo gerado');
   };
   let destinationKey:string|null|undefined;
-  openButton.onclick = () => {api.beforeOperation?.();destinationKey=api.getBoardKey?.();input.click();};
+  openButton.onclick = () => {clearStatus();api.beforeOperation?.();destinationKey=api.getBoardKey?.();input.click();};
   input.onchange = async () => {
     const file = input.files?.[0],boardKey=destinationKey; input.value = ""; if (!file) return;
     try {
       if (file.size > 100 * 1024 * 1024) fail("Escolha um projeto de até 100 MB.");
       const data = validateBoardFile(JSON.parse(await file.text()));
-      if(api.getBoardKey&&boardKey!==api.getBoardKey()){status.textContent='O board mudou. Abra o arquivo novamente no destino desejado.';return;}
+      if(api.getBoardKey&&boardKey!==api.getBoardKey()){reportStatus('O board mudou. Abra o arquivo novamente no destino desejado.',true);return;}
       await restoreUserFonts(data.userFonts);
       await Promise.all(boardFontFamilies(data.widgets,data.connectors).map(loadBoardFont));
-      if(api.getBoardKey&&boardKey!==api.getBoardKey()){status.textContent='O board mudou. Abra o arquivo novamente no destino desejado.';return;}
+      if(api.getBoardKey&&boardKey!==api.getBoardKey()){reportStatus('O board mudou. Abra o arquivo novamente no destino desejado.',true);return;}
       // Nothing changes until every field and reference has passed validation.
       api.beforeOperation?.();
       const widgetById = new Map(data.widgets.map(w => [w.id, w]));
@@ -209,8 +221,8 @@ export function installProjectFiles(api: { state: BoardState; bus: CommandBus; c
       restoreBoardLayers(state,data.layers);
       camera.x = data.camera.x; camera.y = data.camera.y; camera.scale = data.camera.scale;
       const title = document.getElementById("board-title"); if (title) title.textContent = data.title;
-      api.sync(); status.textContent = "Projeto aberto";
-    } catch (error) { status.textContent = "Falha ao abrir"; alert(`Não foi possível abrir o projeto. ${error instanceof Error ? error.message : "Arquivo inválido."}`); }
+      api.sync(); reportStatus('Projeto aberto');
+    } catch (error) { reportStatus('Falha ao abrir',true); alert(`Não foi possível abrir o projeto. ${error instanceof Error ? error.message : "Arquivo inválido."}`); }
   };
   return { save: () => saveButton.click(), open: () => openButton.click() };
 }

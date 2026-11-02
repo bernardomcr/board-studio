@@ -1,5 +1,6 @@
 // @ts-nocheck
 import {test,expect} from '@playwright/test';
+import {boardAction} from './helpers/board-actions';
 import {openDrawingPalette} from './helpers/drawing-palette';
 import {readFile} from 'node:fs/promises';
 
@@ -72,12 +73,12 @@ test('a long real brush gesture has identical opacity at crossings and frozen-pr
 
 test('editable project files round-trip brush opacity/precision and continue opening legacy pen strokes',async({page})=>{
   await blank(page);await brush(page,12,40);await page.mouse.move(600,500);await page.mouse.down();await page.mouse.move(800,600,{steps:24});await page.mouse.up();await page.keyboard.press('Escape');
-  const download=page.waitForEvent('download');await page.getByRole('button',{name:'Salvar arquivo',exact:true}).click();
+  const download=page.waitForEvent('download');await boardAction(page,'Salvar arquivo');
   const data=JSON.parse((await readFile(await(await download).path())).toString());expect(data.strokes[0]).toMatchObject({tool:'brush',opacity:.4,precision:true});
   data.strokes[0].opacity=.23;data.strokes[0].name='Pincel importado';
   const legacy={...data.strokes[0],id:'legacy-pen',tool:'pen',name:'Caneta antiga',z:data.strokes[0].z+1,points:data.strokes[0].points.map(p=>({...p,x:p.x+250}))};delete legacy.opacity;delete legacy.precision;
   data.strokes.push(legacy);data.strokeOrder.push(legacy.id);
-  const open=page.waitForEvent('filechooser');await page.getByRole('button',{name:'Abrir arquivo',exact:true}).click();await(await open).setFiles({name:'pincel.board.json',mimeType:'application/json',buffer:Buffer.from(JSON.stringify(data))});
+  const open=page.waitForEvent('filechooser');await boardAction(page,'Abrir arquivo');await(await open).setFiles({name:'pincel.board.json',mimeType:'application/json',buffer:Buffer.from(JSON.stringify(data))});
   await expect.poll(()=>page.evaluate(()=>window.__board.state.strokes.size)).toBe(2);
   const imported=await page.evaluate(async()=>{const b=window.__board,strokes=[...b.state.strokes.values()],{strokeSvgContent}=await import('/src/render/stroke-paint.ts');return {strokes,svg:strokeSvgContent(strokes[0])};});
   expect(imported.strokes[0]).toMatchObject({tool:'brush',opacity:.23,precision:true,name:'Pincel importado'});expect(imported.strokes[1]).toMatchObject({tool:'pen',name:'Caneta antiga'});expect(imported.strokes[1].opacity).toBeUndefined();expect(imported.strokes[1].precision).toBeUndefined();

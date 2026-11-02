@@ -6,7 +6,7 @@ export const fontFamilyName=(family:string):string=>family.split(',')[0]!.trim()
 /** Every entity that owns text participates in loading and portable exports. */
 export function boardFontFamilies(widgets:Iterable<Pick<Widget,'style'|'audio'>>,connectors?:Iterable<Pick<Connector,'captions'|'captionStyles'>>):string[]{
  const families=new Set<string>();
- for(const widget of widgets){families.add(widget.style.fontFamily);if(widget.audio)families.add('Inter');}
+ for(const widget of widgets){families.add(widget.style.fontFamily);if(widget.audio)families.add('Inter');if('stickyPad' in widget&&widget.stickyPad)families.add('Noto Sans');}
  for(const connector of connectors??[])for(let i=0;i<(connector.captions?.length??0);i++)families.add(connector.captionStyles?.[i]?.fontFamily??'Arial, sans-serif');
  return [...families];
 }

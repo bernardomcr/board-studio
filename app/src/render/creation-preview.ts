@@ -15,8 +15,8 @@ export function creationWidgetAt(widget:Widget,start:Vec,current:Vec,zoom:number
   const base=widget.type==='text'?naturalText(widget):widget;
   if(base.type==='text')return {...base,x:start.x,y:start.y};
   if(Math.hypot(current.x-start.x,current.y-start.y)*zoom<=5)return {...base,x:start.x-base.width/2,y:start.y-base.height/2};
-  const square=base.type==='sticky_note',side=Math.max(.001,Math.max(Math.abs(current.x-start.x),Math.abs(current.y-start.y)));
-  const next={...base,x:square?(current.x<start.x?start.x-side:start.x):Math.min(start.x,current.x),y:square?(current.y<start.y?start.y-side:start.y):Math.min(start.y,current.y),width:square?side:Math.max(12,Math.abs(current.x-start.x)),height:square?side:Math.max(12,Math.abs(current.y-start.y))};
+  const pad=base.type==='sticky_note'&&!!base.stickyPad,square=base.type==='sticky_note'&&!pad,side=Math.max(.001,Math.max(Math.abs(current.x-start.x),Math.abs(current.y-start.y))),factor=pad?Math.max(.001/base.width,Math.abs(current.x-start.x)/base.width,Math.abs(current.y-start.y)/base.height):1,width=pad?base.width*factor:square?side:Math.max(12,Math.abs(current.x-start.x)),height=pad?base.height*factor:square?side:Math.max(12,Math.abs(current.y-start.y));
+  const next={...base,x:square||pad?(current.x<start.x?start.x-width:start.x):Math.min(start.x,current.x),y:square||pad?(current.y<start.y?start.y-height:start.y):Math.min(start.y,current.y),width,height};
   return next;
 }
 

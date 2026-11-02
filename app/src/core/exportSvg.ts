@@ -24,7 +24,7 @@ import {mindNodeHidden,mindConnectorHidden,mindTopicText} from './mindmap';
 import {audioCardSvg} from '../render/audio-paint';
 import {structuredSvgContent} from '../render/structured-text';
 import {measureTextRun,textFontScale,wrapRichLines,fitBoxText,isBoxText,isFreeText,trimTextLine} from './text-layout';
-import {stickyPadPaper} from './stickies';
+import {stickyPadSvg} from './stickies';
 
 const escapeXml = (value: string): string =>
   value
@@ -136,7 +136,7 @@ function backgroundOuterSvg(w: Widget): string {
   if(w.type==='text'&&style.fillColor==='transparent'&&style.borderWidth<=0)return '';
 
   if (w.type === "sticky_note") {
-    if(w.stickyPad){const paper=stickyPadPaper(w),step=w.height*.025,rect=(y:number)=>`<rect x="${round(paper.x)}" y="${round(y)}" width="${round(paper.width)}" height="${round(paper.height)}" fill="${fill}" fill-opacity="${style.fillOpacity}"/>`;return `<g data-sticky-pad="true">${[3,2,1].map(layer=>rect(step*layer)+`<rect x="${round(paper.x)}" y="${round(paper.height+step*(layer-1))}" width="${round(paper.width)}" height="${round(step)}" fill="#000" fill-opacity=".08"/>`).join('')}${rect(0)}<rect x="${round(w.width*.3)}" y="${round(w.height*.942)}" width="${round(w.width*.4)}" height="${round(w.height*.045)}" rx="${round(w.height*.02)}" fill="#000" fill-opacity=".18"/>${[0,1,2,3,4].map(dot=>`<circle cx="${round(w.width*(.4+dot*.05))}" cy="${round(w.height*.964)}" r="${round(w.width*.006)}" fill="#fff" fill-opacity=".65"/>`).join('')}</g>`;}
+    if(w.stickyPad)return stickyPadSvg(w,fill,style.fillOpacity,`sticky-${w.id}`);
     return `<rect width="${round(w.width)}" height="${round(w.height)}" rx="${round(Math.min(w.width,w.height)/80)}" fill="${fill}" fill-opacity="${style.fillOpacity}"/>`;
   }
 

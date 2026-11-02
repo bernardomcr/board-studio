@@ -148,7 +148,11 @@ export function resizeWidget(
   if (sy !== 0) height = Math.max(minSize, sy > 0 ? local.y : start.height - local.y);
 
   if(start.type==='sticky_note'){
-    const side=sx===0?height:sy===0?width:Math.max(width,height);width=side;height=side;
+    if(start.stickyPad){const factor=sx===0?height/start.height:sy===0?width/start.width:Math.max(width/start.width,height/start.height);width=start.width*factor;height=start.height*factor;}
+    else{const side=sx===0?height:sy===0?width:Math.max(width,height);width=side;height=side;}
+  }else if(start.audio){
+    const factor=sx===0?height/start.height:sy===0?width/start.width:Math.max(width/start.width,height/start.height);
+    width=start.width*factor;height=start.height*factor;
   }else if (keepAspect && sx !== 0 && sy !== 0) {
     const ratio = start.width / start.height;
     if (width / height > ratio) width = height * ratio;

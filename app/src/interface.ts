@@ -3,15 +3,15 @@ import {icon} from './icons';
 
 const THEME_KEY='board-studio:interface-theme';
 
-/** Retain the real command buttons while adapting the single desktop bar. */
+/** Keep command handlers while presenting a small floating document capsule. */
 function installDock(controls:HTMLElement){
  const header=document.getElementById('topbar'),tools=document.getElementById('toolbar');if(!header||!tools)return {destroy(){}};
  const dock=document.createElement('div');dock.id='studio-dock';
- const actions=document.createElement('div');actions.id='studio-dock-actions';
+ const retired=document.createElement('div');retired.id='studio-retired-controls';retired.hidden=true;
  const more=document.createElement('button');more.id='studio-more';more.type='button';more.innerHTML=icon('more',20);more.setAttribute('aria-label','Mais opções do board');more.setAttribute('aria-expanded','false');more.setAttribute('aria-controls','studio-command-menu');more.title='Mais opções do board';
  const menu=document.createElement('div');menu.id='studio-command-menu';menu.hidden=true;menu.setAttribute('role','group');menu.setAttribute('aria-label','Opções do board');
  const commandGroup=document.createElement('div');commandGroup.className='studio-command-group';menu.append(commandGroup);
- dock.append(header,tools,actions,menu);actions.append(controls,more);document.body.append(dock);document.body.classList.add('studio-dock-ready');
+ dock.append(header,tools,controls,menu,retired);header.append(more);document.body.append(dock);document.body.classList.add('studio-dock-ready');
  const markers=new Map<HTMLElement,Comment>();
  const original=(element:HTMLElement)=>{let marker=markers.get(element);if(!marker){marker=document.createComment('studio-command');element.before(marker);markers.set(element,marker);}return marker;};
  const move=(element:HTMLElement,parent:HTMLElement)=>{original(element);if(element.parentElement!==parent)parent.append(element);};
@@ -23,20 +23,27 @@ function installDock(controls:HTMLElement){
    const text=document.createElement('span');text.className='studio-command-label';text.textContent=label;button.append(text);
   }
  }
- const positionMenu=()=>{if(menu.hidden)return;const box=more.getBoundingClientRect(),top=dock.getBoundingClientRect().bottom+8;menu.style.maxHeight=`${Math.max(80,innerHeight-top-12)}px`;menu.style.left=`${Math.max(12,Math.min(innerWidth-menu.offsetWidth-12,box.right-menu.offsetWidth))}px`;menu.style.top=`${top}px`;};
+ const positionMenu=()=>{if(menu.hidden)return;const box=more.getBoundingClientRect(),top=box.bottom+10;menu.style.maxHeight=`${Math.max(80,innerHeight-top-12)}px`;menu.style.left=`${Math.max(12,Math.min(innerWidth-menu.offsetWidth-12,box.right-menu.offsetWidth))}px`;menu.style.top=`${top}px`;};
  function close(restoreFocus=false){menu.hidden=true;more.setAttribute('aria-expanded','false');if(restoreFocus)more.focus({preventScroll:true});}
  function layout(){
-  const compact=innerWidth<=1100,mobile=innerWidth<=740,layers=document.getElementById('layers-controls'),profile=document.getElementById('profile-open');
-  if(layers&&layers.parentElement!==actions)actions.insertBefore(layers,more);
-  if(profile&&profile.parentElement!==actions)actions.insertBefore(profile,more);
+  const layers=document.getElementById('layers-controls'),profile=document.getElementById('profile-open'),home=document.getElementById('board-home-trigger');
+  if(layers&&layers.parentElement!==dock)dock.append(layers);
+  const layerPanel=document.getElementById('layers-panel'),layerButton=document.getElementById('layers-toggle');
+  if(layerPanel&&layerButton)layerPanel.style.top=`${Math.max(header!.getBoundingClientRect().bottom,layerButton.getBoundingClientRect().bottom)+10}px`;
+  const profileParent=document.body.classList.contains('home-visible')?dock:retired;
+  if(profile&&profile.parentElement!==profileParent)move(profile,profileParent);
+  if(home&&header!.firstElementChild!==home)header!.prepend(home);
   const file=document.getElementById('project-file-controls');
-  if(file){const buttons=file.querySelectorAll<HTMLButtonElement>('button');if(buttons[0])labelButton(buttons[0],'Salvar arquivo','download');if(buttons[1])labelButton(buttons[1],'Abrir arquivo','folder');if(compact)move(file,menu);else restore(file);}
-  for(const [id,label]of [['undo','Desfazer'],['redo','Refazer'],['help','Atalhos']]){const button=document.getElementById(id!);if(!button)continue;labelButton(button,label!);if(compact)move(button,commandGroup);else restore(button);}
-  for(const id of ['export','export-svg']){const button=document.getElementById(id);if(!button)continue;if(mobile){labelButton(button,id==='export'?'Exportar PNG':'Exportar SVG');move(button,commandGroup);}else restore(button);}
-  more.hidden=!compact;dock.dataset.compact=String(compact);dock.dataset.mobile=String(mobile);
-  if(!compact)close();else positionMenu();
+  if(file){const buttons=file.querySelectorAll<HTMLButtonElement>('button');if(buttons[0])labelButton(buttons[0],'Salvar arquivo','download');if(buttons[1])labelButton(buttons[1],'Abrir arquivo','folder');move(file,menu);}
+  for(const id of ['undo','redo']){const button=document.getElementById(id);if(button)move(button,retired);}
+  for(const [id,label]of [['export','Exportar PNG'],['help','Atalhos'],['export-svg','Exportar SVG']]){const button=document.getElementById(id!);if(button){labelButton(button,label!);move(button,commandGroup);}}
+  const background=document.getElementById('board-background-controls'),box=background?.getBoundingClientRect();
+  controls.style.left=`${box&&box.width?box.right+8:90}px`;
+  controls.style.bottom='14px';
+  more.hidden=false;dock.dataset.compact='true';dock.dataset.mobile=String(innerWidth<=740);
+  if(document.body.classList.contains('home-visible'))close();else positionMenu();
  }
- const observer=new MutationObserver(layout);observer.observe(document.body,{childList:true});observer.observe(header,{childList:true});
+ const observer=new MutationObserver(layout);observer.observe(document.body,{childList:true,attributes:true,attributeFilter:['class']});observer.observe(header,{childList:true});
  more.onclick=()=>{const open=menu.hidden;menu.hidden=!open;more.setAttribute('aria-expanded',String(open));if(open){positionMenu();menu.querySelector<HTMLButtonElement>('button:not(:disabled)')?.focus({preventScroll:true});}};
  menu.addEventListener('click',event=>{if((event.target as Element).closest('button:not(:disabled)'))close();});
  const outside=(event:PointerEvent)=>{if(!menu.hidden&&!menu.contains(event.target as Node)&&!more.contains(event.target as Node))close();};

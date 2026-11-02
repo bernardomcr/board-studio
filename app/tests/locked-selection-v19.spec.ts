@@ -29,14 +29,15 @@ for(const zoom of [.02,1,6])test(`marquee ignores locked backdrop and distant co
 
 test('right click respects visual stack and unlock requires a completed hold',async({page})=>{
  await fixture(page);const image=await point(page,-130,0);await page.mouse.click(image.x,image.y,{button:'right'});await expect(page.locator('#editor-context [data-action="duplicate"]')).toBeVisible();await expect(page.locator('#editor-context [data-hold-unlock]')).toHaveCount(0);
- const background=await point(page,-400,220);await page.mouse.click(background.x,background.y,{button:'right'});const unlock=page.locator('#editor-context [data-hold-unlock]');await expect(unlock).toBeVisible();await expect(page.locator('#editor-context button')).toHaveCount(1);await unlock.click();expect(await page.evaluate(()=>window.__board.state.widgets.get('backdrop').locked)).toBe(true);
+ const background=await point(page,-400,220);await page.mouse.click(background.x,background.y,{button:'right'});const unlock=page.locator('#editor-context [data-hold-unlock]');await expect(unlock).toBeVisible();await expect(page.locator('#editor-context button')).toHaveCount(1);await expect(page.locator('#selection-properties')).toBeHidden();await expect(page.locator('#selection-properties [data-hold-unlock]')).toHaveCount(0);await unlock.click();expect(await page.evaluate(()=>window.__board.state.widgets.get('backdrop').locked)).toBe(true);
  await hold(page,unlock);expect(await page.evaluate(()=>window.__board.state.widgets.get('backdrop').locked)).toBe(false);await expect(page.locator('#editor-context')).toBeHidden();await page.evaluate(()=>window.__board.bus.undo());expect(await page.evaluate(()=>window.__board.state.widgets.get('backdrop').locked)).toBe(true);
 });
 
-test('cancelled pointer and keyboard holds keep object locked and explicit layer selection exposes only unlock',async({page})=>{
- await fixture(page);await page.getByRole('button',{name:'Camadas',exact:true}).click();const caret=page.getByRole('button',{name:/^Expandir objetos da camada /}).first();await caret.click();await page.locator('[data-layer-id="backdrop"] [data-layer-select]').click();const unlock=page.locator('#selection-properties [data-hold-unlock]');await expect(unlock).toBeVisible();await expect(page.locator('#selection-properties button')).toHaveCount(1);
- await unlock.hover();await page.mouse.down();await page.waitForTimeout(150);await page.mouse.move(300,800);await page.mouse.up();expect(await page.evaluate(()=>window.__board.state.widgets.get('backdrop').locked)).toBe(true);
- await unlock.focus();await page.keyboard.down('Enter');await page.waitForTimeout(760);await page.keyboard.up('Enter');expect(await page.evaluate(()=>window.__board.state.widgets.get('backdrop').locked)).toBe(false);
+test('cancelled pointer and keyboard holds keep object locked and layers provide unlock without a floating duplicate',async({page})=>{
+ await fixture(page);await page.getByRole('button',{name:'Camadas',exact:true}).click();const caret=page.getByRole('button',{name:/^Expandir objetos da camada /}).first();await caret.click();await page.locator('[data-layer-id="backdrop"] [data-layer-select]').click();const unlock=page.locator('[data-layer-id="backdrop"] [data-layer-lock][data-hold-unlock]');await expect(unlock).toBeVisible();await expect(page.locator('#selection-properties')).toBeHidden();await expect(page.locator('#selection-properties [data-hold-unlock]')).toHaveCount(0);
+ await page.clock.install();await page.clock.pauseAt(new Date());
+ await unlock.hover();await page.mouse.down();await page.clock.runFor(150);await page.mouse.move(300,800);await page.mouse.up();await page.clock.runFor(760);expect(await page.evaluate(()=>window.__board.state.widgets.get('backdrop').locked)).toBe(true);
+ await unlock.focus();await page.keyboard.down('Enter');await page.clock.runFor(760);await page.keyboard.up('Enter');expect(await page.evaluate(()=>window.__board.state.widgets.get('backdrop').locked)).toBe(false);await expect(page.locator('#selection-properties')).toBeVisible();await expect(page.locator('#selection-properties [data-hold-unlock]')).toHaveCount(0);expect(await page.locator('#selection-properties button').count()).toBeGreaterThan(0);
 });
 
 test('locked entity command guard blocks edits deletion transforms and patch-unlock without consuming history',async({page})=>{
@@ -62,7 +63,7 @@ test('locked entity command guard blocks edits deletion transforms and patch-unl
 test('inherited layer lock cannot be bypassed from object unlock and layer hold restores own flags',async({page})=>{
  await fixture(page);await page.getByRole('button',{name:'Camadas',exact:true}).click();const row=page.locator('#layers-list [data-board-layer-id]').first();await row.locator('[data-board-layer-lock]').click();
  const blocked=await page.evaluate(()=>{const b=window.__board,w=b.state.widgets.get('one'),before=JSON.stringify(w),n=b.bus.undoStack.length;b.bus.exec({op:'ENTITY_LOCK',payload:{ids:['one'],locked:false}});b.bus.exec({op:'WIDGET_UPDATE',payload:{id:'one',patch:{layerOwnLocked:false,locked:false,x:100}}});return {same:before===JSON.stringify(b.state.widgets.get('one')),history:b.bus.undoStack.length-n};});expect(blocked).toEqual({same:true,history:0});
- await row.locator('[data-board-layer-expand]').click();await page.locator('[data-layer-id="one"] [data-layer-select]').click();await expect(page.getByRole('button',{name:'Camada bloqueada',exact:true})).toBeDisabled();
+ await row.locator('[data-board-layer-expand]').click();await page.locator('[data-layer-id="one"] [data-layer-select]').click();await expect(page.locator('#selection-properties')).toBeHidden();await expect(page.locator('[data-layer-id="one"] [data-layer-lock]')).toBeDisabled();
  await hold(page,row.locator('[data-board-layer-lock]'));expect(await page.evaluate(()=>[window.__board.state.widgets.get('one').locked,window.__board.state.widgets.get('backdrop').locked])).toEqual([false,true]);
 });
 

@@ -27,21 +27,25 @@ export class LargeTextRaster{
   const margin=2/Math.max(.000001,zoom),minX=corners?Math.min(...corners.map(p=>p.x))-margin:0,maxX=corners?Math.max(...corners.map(p=>p.x))+margin:0,minY=corners?Math.min(...corners.map(p=>p.y))-margin:0,maxY=corners?Math.max(...corners.map(p=>p.y))+margin:0;
   for(let index=0;index<runs.length;index++){
    const text=runs[index]!;text.renderable=true;if(!visible||!needsLargeTextRaster(text,zoom))continue;text.renderable=false;
-   const originX=textContainer.x+text.x,originY=textContainer.y+text.y,bounds=text.bounds,sx=text.scale.x,sy=text.scale.y;
-   const left=Math.max(minX,originX+bounds.minX*sx),top=Math.max(minY,originY+bounds.minY*sy),right=Math.min(maxX,originX+bounds.maxX*sx),bottom=Math.min(maxY,originY+bounds.maxY*sy);
+   const originX=textContainer.x+text.x,originY=textContainer.y+text.y,bounds=text.bounds,sx=text.scale.x,sy=text.scale.y,padding=text.style._getFinalPadding();
+   // Pixi's logical bounds omit transparent ink padding. Its normal quad extends
+   // beyond them, so the viewport raster must include the same glyph overhang.
+   const left=Math.max(minX,originX+(bounds.minX-padding)*sx),top=Math.max(minY,originY+(bounds.minY-padding)*sy),right=Math.min(maxX,originX+(bounds.maxX+padding)*sx),bottom=Math.min(maxY,originY+(bounds.maxY+padding)*sy);
    if(right<=left||bottom<=top)continue;
    const width=right-left,height=bottom-top,dpr=Math.max(1,Math.min(3,globalThis.devicePixelRatio||1));
    let density=Math.min(zoom*dpr,(MAX_EDGE-2)/width,(MAX_EDGE-2)/height,Math.sqrt((MAX_PIXELS-8192)/(width*height)));
    let pixelWidth=Math.max(1,Math.ceil(width*density)),pixelHeight=Math.max(1,Math.ceil(height*density));
    while(pixelWidth>MAX_EDGE||pixelHeight>MAX_EDGE||pixelWidth*pixelHeight>MAX_PIXELS){density/=Math.SQRT2;pixelWidth=Math.max(1,Math.ceil(width*density));pixelHeight=Math.max(1,Math.ceil(height*density));}
-   let tile=this.tiles.get(index);if(!tile){const canvas=document.createElement('canvas'),context=canvas.getContext('2d')!;canvas.width=pixelWidth;canvas.height=pixelHeight;const texture=new Texture({source:new CanvasSource({resource:canvas,autoGenerateMipmaps:false,scaleMode:'linear'})}),sprite=new Sprite(texture);sprite.label=`large-text-run-${index}`;sprite.eventMode='none';this.container.addChild(sprite);tile={sprite,canvas,context,key:''};this.tiles.set(index,tile);}active.add(index);
+   let tile=this.tiles.get(index);if(!tile){const canvas=document.createElement('canvas'),context=canvas.getContext('2d')!;canvas.width=pixelWidth;canvas.height=pixelHeight;const texture=new Texture({source:new CanvasSource({resource:canvas,autoGenerateMipmaps:false,scaleMode:'linear'}),dynamic:true}),sprite=new Sprite(texture);sprite.label=`large-text-run-${index}`;sprite.eventMode='none';this.container.addChild(sprite);tile={sprite,canvas,context,key:''};this.tiles.set(index,tile);}active.add(index);
    const key=JSON.stringify([text.text,text.style.styleKey,originX,originY,sx,sy,left,top,right,bottom,density,pixelWidth,pixelHeight]);
    if(tile.key!==key){
     tile.key=key;const {canvas,context}=tile;if(canvas.width!==pixelWidth||canvas.height!==pixelHeight){canvas.width=pixelWidth;canvas.height=pixelHeight;tile.sprite.texture.source.resize(pixelWidth,pixelHeight);}
     context.resetTransform();context.clearRect(0,0,pixelWidth,pixelHeight);context.setTransform(density*sx,0,0,density*sy,(originX-left)*density,(originY-top)*density);
     context.font=fontString(text.style);context.textBaseline=text.style.textBaseline;context.fillStyle=typeof text.style.fill==='string'?text.style.fill:'#1a1a1a';
-    const measured=CanvasTextMetrics.measureText(text.text,text.style),properties=measured.fontProperties,padding=text.style._getFinalPadding(),baseline=properties.ascent+Math.max(0,(measured.lineHeight-properties.fontSize)/2)+padding;
-    context.fillText(text.text,padding,baseline);tile.sprite.texture.source.update();
+    const measured=CanvasTextMetrics.measureText(text.text,text.style),properties=measured.fontProperties,baseline=properties.ascent+Math.max(0,(measured.lineHeight-properties.fontSize)/2);
+    // The regular quad's -padding offset cancels fillText's +padding. Paint at
+    // that same pen origin here; adding padding would move oversized text.
+    context.fillText(text.text,0,baseline);tile.sprite.texture.source.update();
    }
    tile.sprite.position.set(left,top);tile.sprite.width=pixelWidth/density;tile.sprite.height=pixelHeight/density;
   }

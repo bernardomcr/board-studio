@@ -7,7 +7,9 @@ import {borderPattern,patternedContour,shapeContours} from '../core/shapes';
 import {TEXT_SAMPLING,fitTextResolution} from './text-quality';
 import {screenStroke,screenDot} from './screen-coverage';
 
-export function audioSignature(widget:Widget):string{return widget.audio?[widget.audio.name,widget.audio.duration,widget.audio.waveform.join(',')].join('|'):'';}
+// Wave and play share the retained card Graphics, so foreground edits must
+// invalidate that display list as soon as the independently painted labels.
+export function audioSignature(widget:Widget):string{return widget.audio?[widget.audio.name,widget.audio.duration,widget.audio.waveform.join(','),widget.style.color].join('|'):'';}
 export function audioCardLayout(widget:Widget){const sx=widget.width/360,sy=widget.height/124,unit=Math.min(sx,sy);return {sx,sy,unit,playX:34*sx,playY:62*sy,playRadius:20*unit,waveX:76*sx,waveY:89*sy,waveWidth:260*sx,waveHeight:17*sy,titleX:76*sx,titleY:21*sy,durationY:45*sy};}
 export const AUDIO_FONT_FAMILY='Inter';
 export function audioFontSize(widget:Widget):number{return 16*audioCardLayout(widget).unit;}

@@ -78,7 +78,9 @@ import {installStructuredTextUI} from './structured-text-ui';
 import {installInterface} from './interface';
 import {installProfileUI} from './profile-ui';
 import {snapshotBoardLayers,restoreBoardLayers,type BoardLayers} from './core/board-layers';
-import {stickyPadPaper} from './core/stickies';
+import {stickyPadPaper,STICKY_PAD_WIDTH,STICKY_PAD_HEIGHT} from './core/stickies';
+import {installStickyPadMotion} from './render/sticky-pad-motion';
+import {installMindMotion} from './render/mind-motion';
 import {scaledWidgetStyle} from './core/style-scale';
 
 installInterface();
@@ -240,6 +242,7 @@ const state: BoardState = {
   selection: new Set(),
 };
 const scene = new BoardScene(world);
+const mindMotion=installMindMotion({state,scene,camera,requestRender,getBoardKey:mediaBoardKey});
 const bus = new CommandBus(state, () => {
   if(restoringBoard)return;
   if(editingId&&state.widgets.get(editingId)?.locked)endEdit(false);
@@ -653,9 +656,12 @@ const creationPreview=installCreationPreview({parent:world,camera,canvas:app.can
   const widget=createWidget(tool as WidgetType,{x:0,y:0,shape:selectedShape,content:tool==='text'?'Texto':tool==='frame'?'Quadro':''});
   widget.style={...widget.style,...creationStyles[widget.type]};return widget;
 }});
+const stickyMotion=installStickyPadMotion({parent:world,nodeAt:id=>scene.nodeAt(id),isLive:id=>{const w=state.widgets.get(id);return !!w&&w.type==='sticky_note'&&!!w.stickyPad&&!w.hidden&&!itemLocked(state,id);},onChange:requestRender});
+app.canvas.addEventListener('pointerleave',()=>stickyMotion.leave());
 
 function setTool(next: Tool): void {
   momentum.stop();
+  stickyMotion.clear();
   if(next!=='sticky_note')stickyStackMode=false;
   creationPreview.clear();
   connectorCompletion?.close();
@@ -760,7 +766,8 @@ function toggleHelp(force?: boolean): void {
   if(next)helpPreviousFocus=document.activeElement instanceof HTMLElement?document.activeElement:null;
   helpPanel.toggleAttribute("hidden", !next);
   if(next)helpPanel.querySelector<HTMLButtonElement>('[data-help-close]')?.focus();
-  else if(helpPreviousFocus?.isConnected)helpPreviousFocus.focus();
+  else if(helpPreviousFocus?.isConnected&&helpPreviousFocus.getClientRects().length)helpPreviousFocus.focus();
+  else document.getElementById('studio-more')?.focus();
 }
 
 document.getElementById("help")?.addEventListener("click", () => toggleHelp());
@@ -1031,7 +1038,6 @@ function frontmostEntityAt(p:Vec,includeLocked=false){
 function handleAtScreen(s: Vec): HandleId | null {
   if (state.selection.size < 1||!selectionHandlesVisible()) return null;
   const only=state.selection.size===1?state.widgets.get([...state.selection][0]!):undefined;
-  if(only?.type==='sticky_note'&&only.stickyPad){const local=worldToLocal(only,camera.screenToWorld(s));if(local.x>=only.width*.3&&local.x<=only.width*.7&&local.y>=only.height*.925&&local.y<=only.height*.99)return null;}
   for (const id of ["nw", "n", "ne", "e", "se", "s", "sw", "w"] as HandleId[]) {
     const p = handleScreen(id);
     if (p && Math.hypot(p.x - s.x, p.y - s.y) <= HANDLE_HIT) return id;
@@ -1134,6 +1140,7 @@ app.canvas.addEventListener("dblclick", (e) => {
 
 app.canvas.addEventListener("pointerdown", (e) => {
   momentum.stop();
+  stickyMotion.clear();
   // Native focus blur occurs after pointerdown. Commit the draft before a new
   // drag transaction begins, so Undo keeps text editing and movement separate.
   closeCaptionDraft(true);
@@ -1223,7 +1230,7 @@ app.canvas.addEventListener("pointerdown", (e) => {
     const widget = createWidget(tool, { x: start.x, y: start.y, shape: selectedShape,
       content: tool === "text" ? "Texto" : tool === "frame" ? "Quadro" : "" });
     widget.style={...widget.style,...creationStyles[widget.type]};
-    if(widget.type==='sticky_note'){widget.width=160/camera.scale;widget.height=widget.width;widget.style.fontSize/=camera.scale;if(stickyStackMode){widget.stickyPad=true;widget.name='Bloco de notas';}}
+    if(widget.type==='sticky_note'){widget.width=(stickyStackMode?STICKY_PAD_WIDTH:160)/camera.scale;widget.height=(stickyStackMode?STICKY_PAD_HEIGHT:160)/camera.scale;widget.style.fontSize/=camera.scale;if(stickyStackMode){widget.stickyPad=true;widget.name='Bloco de notas';}}
     if(widget.type==='text')widget.style.fontSize=24/camera.scale;
     gesture = { kind: "create", start, current: p, widget };
     creationPreview.show(creationWidgetAt(widget,start,p,camera.scale));
@@ -1314,8 +1321,8 @@ if (state.selection.size > 1) {
     const paper=stickyPadPaper(hit),local=worldToLocal(hit,p);
     if(local.x>=paper.x&&local.x<=paper.x+paper.width&&local.y>=paper.y&&local.y<=paper.y+paper.height){
       const center=widgetCenter(hit),offset=rotate({x:paper.x+paper.width/2-hit.width/2,y:paper.y+paper.height/2-hit.height/2},hit.rotation);
-      const widget={...createWidget('sticky_note',{x:center.x+offset.x-paper.width/2,y:center.y+offset.y-paper.height/2,width:paper.width,height:paper.height,content:''}),type:'sticky_note' as const,shape:'square' as const,content:'',rotation:hit.rotation,style:scaledWidgetStyle(hit,paper.width/hit.width,paper.height/hit.height)};
-      bus.exec({op:'SELECTION_SET',payload:[hit.id]});gesture={kind:'sticky-pull',start:p,current:p,widget};updateCursor();return;
+      const widget={...createWidget('sticky_note',{x:center.x+offset.x-paper.width/2,y:center.y+offset.y-paper.height/2,width:paper.width,height:paper.height,content:''}),type:'sticky_note' as const,shape:'square' as const,content:'',rotation:hit.rotation,style:{...scaledWidgetStyle(hit,paper.width/hit.width,paper.height/hit.height),fontSize:hit.style.fontSize}};
+      bus.exec({op:'SELECTION_SET',payload:[hit.id]});gesture={kind:'sticky-pull',start:p,current:p,widget};creationPreview.clear();stickyMotion.pull(widget,0);updateCursor();return;
     }
   }
 
@@ -1363,6 +1370,8 @@ app.canvas.addEventListener("pointermove", (e) => {
   if(gesture.kind!=='none')updateCursor();
   if (gesture.kind === "none" && (tool === "select"||tool==='shape')) {
     const hoveredWidget=topmostAt(p);
+    const pad=hoveredWidget?.type==='sticky_note'&&hoveredWidget.stickyPad&&!itemLocked(state,hoveredWidget.id)&&frontmostEntityAt(p)?.id===hoveredWidget.id?hoveredWidget:undefined,paper=pad?stickyPadPaper(pad):undefined,local=pad?worldToLocal(pad,p):undefined,overPaper=!!paper&&!!local&&local.x>=paper.x&&local.x<=paper.x+paper.width&&local.y>=paper.y&&local.y<=paper.y+paper.height;
+    stickyMotion.hover(overPaper?pad:undefined);
     hoveredLink = linkUnder(p)??hoveredWidget?.link??null;
     const hover=hoverConnectionTarget(p),nextHover=hover?.id??null;
     if(nextHover!==hoveredConnectionWidget){hoveredConnectionWidget=nextHover;drawSelection();}
@@ -1370,7 +1379,7 @@ app.canvas.addEventListener("pointermove", (e) => {
     const selected=state.selection.size===1?state.connectors.get([...state.selection][0]!):undefined,geometry=selected&&!selected.locked?connectorGeometry(selected,state.widgets):null;
     const grab=geometry&&(connectorCaptionAt(selected!,geometry,p,4/camera.scale)>=0||[geometry.points[0]!,geometry.points.at(-1)!,...connectorEditPoints(selected!,geometry)].some(point=>{if(!connectorControlVisible(selected!,geometry,point))return false;const s=camera.worldToScreen(point);return Math.hypot(s.x-screen.x,s.y-screen.y)<=10;}));
     const locked=[...state.selection].some(id=>itemLocked(state,id)),handle=!locked?handleAtScreen(screen):null,rotating=!locked&&rotateHandleAtScreen(screen),box=state.selection.size===1?state.widgets.get([...state.selection][0]!):selectionBox();
-    app.canvas.style.cursor=handle?resizeCursor(handle,box?.rotation??0):rotating?ROTATE_CURSOR:atDot?'pointer':grab?'grab':hoveredLink?'pointer':hoveredWidget?(hoveredWidget.type==='sticky_note'&&hoveredWidget.stickyPad?'grab':isFreeText(hoveredWidget)&&state.selection.has(hoveredWidget.id)?'text':'move'):tool==='shape'?'crosshair':'default';
+    app.canvas.style.cursor=handle?resizeCursor(handle,box?.rotation??0):rotating?ROTATE_CURSOR:atDot?'pointer':grab?'grab':hoveredLink?'pointer':hoveredWidget?(overPaper?'grab':isFreeText(hoveredWidget)&&state.selection.has(hoveredWidget.id)?'text':'move'):tool==='shape'?'crosshair':'default';
   }
   if(gesture.kind==='none'&&tool==='connector'){const hover=hoverConnectionTarget(p),nextHover=hover?.id??null;if(nextHover!==hoveredConnectionWidget){hoveredConnectionWidget=nextHover;drawSelection();}app.canvas.style.cursor=!pendingConnection&&hover&&connectionHandles(hover).some(h=>Math.hypot(h.point.x-screen.x,h.point.y-screen.y)<=10)?'pointer':pendingConnection?'default':'crosshair';}
 
@@ -1399,7 +1408,7 @@ app.canvas.addEventListener("pointermove", (e) => {
     }
     case 'sticky-pull':{
       gesture.current=p;const {widget,start}=gesture;
-      creationPreview.show({...widget,x:widget.x+p.x-start.x,y:widget.y+p.y-start.y});return;
+      stickyMotion.pull({...widget,x:widget.x+p.x-start.x,y:widget.y+p.y-start.y},Math.hypot(p.x-start.x,p.y-start.y));return;
     }
     case "pan": {
       if (!prev) return;
@@ -1537,6 +1546,7 @@ function marqueeRect(a: Vec, b: Vec): Rect {
 
 function endGesture(e: PointerEvent): void {
   flushGestureUpdate();
+  stickyMotion.clear();
   const objectLink=clickedObjectLink;clickedObjectLink=null;
   pointers.delete(e.pointerId);
   if (pointers.size < 2) lastPinch = null;
@@ -1891,7 +1901,7 @@ layersUI=installLayers({state,bus,camera,getBoardKey:mediaBoardKey,onSelect:()=>
 const mindImagePicker=document.createElement('input');mindImagePicker.type='file';mindImagePicker.accept='image/*';mindImagePicker.multiple=true;
 let mindImageTarget:{parentId:string;boardKey:string|null}|null=null;
 mindImagePicker.addEventListener('change',()=>{const files=Array.from(mindImagePicker.files??[]),target=mindImageTarget;mindImagePicker.value='';mindImageTarget=null;if(!target||!files.length)return;void images?.importFiles(files,{label:'Imagem no mapa mental',canInsert:()=>target.boardKey===mediaBoardKey()&&!!state.widgets.get(target.parentId)?.mind&&!state.widgets.get(target.parentId)?.locked,afterCreate:ids=>{for(const id of ids)attachMindWidget(state,bus,target.parentId,id);}});});
-mindmapUI=installMindmapUI({state,bus,camera,setTool:t=>setTool(t),getTool:()=>tool,onEdit:id=>{const w=state.widgets.get(id);if(w&&!w.locked)beginEdit(w);},onLink:()=>linkUI?.open(),onImage:parentId=>{mindImageTarget={parentId,boardKey:mediaBoardKey()};mindImagePicker.click();},onChange:()=>{syncScene();drawSelection();refreshChrome();}});
+mindmapUI=installMindmapUI({state,bus,camera,getBoardKey:mediaBoardKey,setTool:t=>setTool(t),getTool:()=>tool,onTransition:(before,duration)=>mindMotion.play(before,duration),onEdit:id=>{const w=state.widgets.get(id);if(w&&!w.locked)beginEdit(w);},onLink:()=>linkUI?.open(),onImage:parentId=>{mindImageTarget={parentId,boardKey:mediaBoardKey()};mindImagePicker.click();},onChange:()=>{syncScene();drawSelection();refreshChrome();}});
 linkUI=installLinkUI({state,bus,camera,getBoardKey:mediaBoardKey,getEditor:()=>editor,commitEditor:()=>endEdit(true),onChange:()=>{syncScene();drawSelection();refreshChrome();}});
 audioUI=installAudio({state,bus,camera,getTool:()=>tool,setTool:t=>setTool(t),getBoardKey:mediaBoardKey,onChange:()=>{syncScene();drawSelection();refreshChrome();}});
 structuredUI=installStructuredTextUI({state,bus,camera,getTool:()=>tool,getBoardKey:mediaBoardKey,isInteracting:()=>gesture.kind!=='none'||momentum.active,setTool:t=>setTool(t as Tool),onChange:()=>{syncScene();drawSelection();refreshChrome();}});

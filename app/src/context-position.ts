@@ -13,7 +13,7 @@ function toolRail(){
 /** Top of the board workspace, below every visible row of application chrome. */
 export function workspaceTop():number{
   let bottom=0;
-  for(const id of ['toolbar','topbar','theme-toggle','layers-toggle']){
+  for(const id of ['toolbar','topbar','layers-toggle']){
     const element=document.getElementById(id);if(!element)continue;
     const rect=element.getBoundingClientRect();if(rect.width>0&&rect.height>0&&!(id==='toolbar'&&toolRail()?.side))bottom=Math.max(bottom,rect.bottom);
   }
@@ -28,11 +28,13 @@ export function workspaceLeft():number{
 /** Tool menus open beside a vertical rail and stay inside the usable canvas. */
 export function positionToolPanel(panel:HTMLElement,button:HTMLElement|null){
   const top=workspaceTop(),left=workspaceLeft(),anchor=button?.getBoundingClientRect();
+  let bottom=innerHeight-12;
+  for(const id of ['board-background-toggle','theme-toggle','zoombar']){const element=document.getElementById(id),rect=element?.getBoundingClientRect();if(rect&&rect.width>0&&rect.height>0&&rect.top>top)bottom=Math.min(bottom,rect.top-12);}
   const rail=toolRail(),vertical=rail?.side;
   panel.style.transform='none';panel.style.maxWidth=`${Math.max(120,innerWidth-left-12)}px`;
-  panel.style.maxHeight=`${Math.max(80,innerHeight-top-12)}px`;
+  panel.style.maxHeight=`${Math.max(80,bottom-top)}px`;
   panel.style.left=`${Math.max(left,Math.min(innerWidth-panel.offsetWidth-12,vertical?(rail?.rect.right??left)+10:anchor?.left??left))}px`;
-  panel.style.top=`${Math.max(top,Math.min(innerHeight-panel.offsetHeight-12,vertical?anchor?.top??top:(anchor?.bottom??top)+10))}px`;
+  panel.style.top=`${Math.max(top,Math.min(bottom-panel.offsetHeight,vertical?anchor?.top??top:(anchor?.bottom??top)+10))}px`;
 }
 
 /** Anchor the complete toolbar to the selection, independent of its open menu. */

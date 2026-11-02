@@ -181,6 +181,9 @@ html body #studio-command-menu button:hover{background:var(--studio-soft);color:
 #studio-command-menu button:disabled{opacity:.45;cursor:default}
 html body #studio-command-menu #project-file-controls{display:flex;flex-direction:column;align-items:stretch;height:auto;margin-top:5px;padding:5px 0 0;border-top:1px solid var(--studio-line);border-radius:0;box-shadow:none;background:transparent}
 html body #studio-command-menu .studio-command-label{display:inline}
+html body #studio-dock #studio-command-menu #project-file-controls{position:static;display:flex;flex-direction:column;align-items:stretch;width:100%;min-width:0;height:auto;box-sizing:border-box;gap:2px;margin:5px 0 0;padding:5px 0 0;border:0;border-top:1px solid var(--studio-line);border-radius:0;background:transparent;box-shadow:none}
+html body #studio-dock #studio-command-menu #project-file-controls button{display:flex;align-items:center;justify-content:flex-start;flex:none;width:100%!important;min-width:0;height:36px;padding:7px 9px!important;gap:10px;border:0;border-radius:7px;box-sizing:border-box;font:12px Inter,sans-serif!important}
+html body #studio-dock #studio-command-menu button>svg{display:block;flex:0 0 18px;width:18px;height:18px}
 html body.home-visible #studio-dock,html body.home-visible #studio-dock-actions{display:contents}
 html body.home-visible #studio-dock #interface-controls{position:fixed;right:24px;top:20px;z-index:120}
 html body.home-visible #studio-command-menu,html body.home-visible #studio-more{display:none!important}
@@ -200,6 +203,24 @@ html body.home-visible #board-home .bh-top{padding-right:116px}
 @media(max-height:550px){:root{--studio-rail-width:82px}html body #studio-dock #toolbar{display:grid;grid-template-columns:repeat(2,34px);grid-template-rows:repeat(6,34px);grid-auto-flow:column;align-content:start;justify-content:center;gap:3px;padding:7px 4px}html body #studio-dock #toolbar button{width:34px;height:34px}html body #studio-dock #toolbar .sep{display:none}}
 @media(max-height:380px){:root{--studio-rail-width:112px}html body #studio-dock #toolbar{grid-template-columns:repeat(3,32px);grid-template-rows:repeat(4,32px);gap:2px;padding:5px 4px}html body #studio-dock #toolbar button{width:32px;height:32px}}
 html body.home-visible #studio-dock #toolbar{display:none}
+
+/* Floating document capsule: the canvas remains usable between separate controls. */
+html body #studio-dock{display:contents}
+html body #studio-dock #topbar{position:fixed;inset:12px auto auto 12px;display:flex;align-items:center;gap:4px;width:max-content;max-width:calc(100vw - 88px);height:44px;box-sizing:border-box;padding:4px;background:var(--studio-surface);color:var(--studio-ink);border:1px solid var(--studio-line);border-radius:13px;box-shadow:var(--studio-shadow);z-index:50}
+html body #studio-dock #topbar .chip:not(#board-title){display:none}
+html body #studio-dock #topbar #board-title{flex:1;min-width:40px;width:clamp(110px,18vw,260px);max-width:260px;height:34px;line-height:34px;padding:0 8px;margin:0;font-size:13px;font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+html body #studio-dock #board-home-trigger{flex:none;width:34px!important;height:34px!important;padding:7px!important;border-radius:8px!important}
+html body #studio-dock #studio-more{display:grid;flex:none;place-items:center;width:34px;height:34px;padding:7px;color:var(--studio-muted)}
+html body #studio-dock #toolbar{z-index:50}
+html body #studio-dock #layers-controls{position:fixed;inset:12px 12px auto auto;width:auto;z-index:50}
+html body #studio-dock #layers-toggle{display:grid;place-items:center;width:44px;height:44px;padding:11px;border:1px solid var(--studio-line);border-radius:13px;background:var(--studio-surface);color:var(--studio-ink);box-shadow:var(--studio-shadow)}
+html body #studio-dock #layers-toggle :is(.layers-label,.layers-total){display:none}
+html body #studio-dock #interface-controls{position:fixed;top:auto;right:auto;bottom:14px;z-index:50}
+html body #studio-dock #theme-toggle{display:grid;place-items:center;width:36px;height:36px;padding:8px;background:var(--studio-surface);color:var(--studio-ink);border:1px solid var(--studio-line);border-radius:10px;box-shadow:var(--studio-shadow)}
+html body #studio-retired-controls{display:none!important}
+html body.home-visible #studio-dock #interface-controls{top:auto;left:auto!important;right:18px;bottom:18px}
+html body.home-visible #studio-dock :is(#topbar,#layers-controls){display:none}
+@media(max-width:480px){html body #studio-dock #topbar{inset:10px auto auto 10px;max-width:calc(100vw - 76px)}html body #studio-dock #topbar #board-title{width:140px;max-width:calc(100vw - 160px)}html body #studio-dock #layers-controls{top:10px;right:10px}}
 
 /* Leave real canvas below the floating tools for the scenery controls. */
 html body #board-background-controls{left:12px;bottom:14px}

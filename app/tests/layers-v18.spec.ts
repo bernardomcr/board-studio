@@ -1,5 +1,6 @@
 // @ts-nocheck
 import {test,expect} from '@playwright/test';
+import {boardAction} from './helpers/board-actions';
 import {readFile} from 'node:fs/promises';
 async function blank(page){await page.goto('/');await page.waitForFunction(()=>window.__board?.booted);await page.getByRole('button',{name:'Criar board',exact:true}).click();await page.getByRole('dialog',{name:'Criar board',exact:true}).getByRole('button',{name:'Criar board',exact:true}).click();await expect(page.locator('#board-home')).toBeHidden();}
 async function open(page){await page.getByRole('button',{name:'Camadas',exact:true}).click();await expect(page.locator('#layers-panel')).toBeVisible();}
@@ -7,8 +8,8 @@ const row=(page,id)=>page.locator(`[data-board-layer-id="${id}"]`);
 const doc=page=>page.evaluate(()=>structuredClone(window.__board.state.layers));
 async function add(page){await page.getByRole('button',{name:'Nova camada',exact:true}).click();return (await doc(page)).activeId;}
 async function shape(page,id,options={}){return page.evaluate(async({id,options})=>{const b=window.__board,{createWidget}=await import('/src/core/model.ts');b.bus.exec({op:'WIDGET_CREATE',payload:{...createWidget('shape',{x:-100,y:-70,width:200,height:140,content:id,...options}),id}});return b.state.widgets.get(id);},{id,options});}
-async function saved(page){const pending=page.waitForEvent('download');await page.getByRole('button',{name:'Salvar arquivo',exact:true}).click();return readFile(await(await pending).path());}
-async function reimport(page,buffer){const chooser=page.waitForEvent('filechooser');await page.getByRole('button',{name:'Abrir arquivo',exact:true}).click();await(await chooser).setFiles({name:'camadas.board.json',mimeType:'application/json',buffer});await expect(page.getByRole('status').filter({hasText:'Projeto aberto'})).toBeVisible();}
+async function saved(page){const pending=page.waitForEvent('download');await boardAction(page,'Salvar arquivo');return readFile(await(await pending).path());}
+async function reimport(page,buffer){const chooser=page.waitForEvent('filechooser');await boardAction(page,'Abrir arquivo');await(await chooser).setFiles({name:'camadas.board.json',mimeType:'application/json',buffer});await expect(page.getByRole('status').filter({hasText:'Projeto aberto'})).toBeVisible();}
 
 test('empty transparent layers collect shapes text images audio connectors and brush content without creating filler objects',async({page})=>{
  await blank(page);await open(page);await expect(page.locator('[data-board-layer-id]')).toHaveCount(1);const active=await add(page);expect(await page.evaluate(()=>window.__board.state.widgets.size)).toBe(0);await expect(row(page,active)).toContainText('Transparente');

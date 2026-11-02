@@ -1,5 +1,6 @@
 // @ts-nocheck
 import {test,expect} from '@playwright/test';
+import {boardAction} from './helpers/board-actions';
 import {openDrawingPalette} from './helpers/drawing-palette';
 import {readFile} from 'node:fs/promises';
 
@@ -39,7 +40,7 @@ test('brush and eraser slider ranges keep growing and restore sizes above their 
 
 test('project files accept large finite geometry and reject non-finite dimensions without relaxing opacity or file budgets',async({page})=>{
  await blank(page);await page.evaluate(async()=>{const b=window.__board,{createWidget}=await import('/src/core/model.ts');b.bus.exec({op:'WIDGET_CREATE',payload:{...createWidget('text',{x:0,y:0,content:'I'}),id:'large'}});});
- const download=page.waitForEvent('download');await page.getByRole('button',{name:'Salvar arquivo',exact:true}).click();const data=JSON.parse((await readFile(await(await download).path())).toString());
+ const download=page.waitForEvent('download');await boardAction(page,'Salvar arquivo');const data=JSON.parse((await readFile(await(await download).path())).toString());
  const result=await page.evaluate(async data=>{
   const {validateBoardFile}=await import('/src/project-files.ts'),{validateBoardBackground}=await import('/src/core/background.ts');
   const w=data.widgets[0];w.x=2e9;w.y=-2e9;w.width=3e8;w.height=2e8;w.style.fontSize=3e5;w.style.borderWidth=1e8;w.style.borderScale=20;w.style.cornerRadius=2e5;

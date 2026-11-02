@@ -57,9 +57,13 @@ export function transformSnapshot(s:BoardState,snapshot:EntitySnapshot,dx:number
   for(const w of snapshot.widgets){
     if(w.locked)continue;
     if(translating){cmds.push({op:'WIDGET_UPDATE',payload:{id:w.id,patch:{x:w.x+dx,y:w.y+dy}}});continue;}
-    const c=point({x:w.x+w.width/2,y:w.y+w.height/2}),uniform=Math.sqrt(Math.abs(sx*sy)),square=w.type==='sticky_note'&&(sx!==1||sy!==1),width=square?Math.sqrt(w.width*w.height)*uniform:w.width*(isFreeText(w)?uniform:sx),height=square?width:w.height*(isFreeText(w)?uniform:sy),wholeMap=!!w.mind&&scaledMaps.has(w.mind.rootId);
-    const mind=wholeMap?{...w.mind!,layoutScale:(w.mind!.layoutScale??snapshotWidgets!.get(w.mind!.rootId)?.mind?.layoutScale??1)*uniform}:undefined;
-    cmds.push({op:'WIDGET_UPDATE',payload:{id:w.id,patch:{x:c.x-width/2,y:c.y-height/2,width,height,rotation:w.rotation+angle,style:{...scaledWidgetStyle(w,square?width/w.width:sx,square?height/w.height:sy),...(isBoxText(w)&&!wholeMap?{fontSize:w.style.fontSize}:{})},...(mind?{mind}:{}),...(isFreeText(w)?{textSizing:'natural'}:{})}}});
+    const c=point({x:w.x+w.width/2,y:w.y+w.height/2}),uniform=Math.sqrt(Math.abs(sx*sy)),pad=w.type==='sticky_note'&&!!w.stickyPad,square=w.type==='sticky_note'&&!pad&&(sx!==1||sy!==1),proportional=isFreeText(w)||pad||!!w.audio,width=square?Math.sqrt(w.width*w.height)*uniform:w.width*(proportional?uniform:sx),height=square?width:w.height*(proportional?uniform:sy),wholeMap=!!w.mind&&scaledMaps.has(w.mind.rootId);
+    const mindLayoutScale=wholeMap?(w.mind!.layoutScale??snapshotWidgets!.get(w.mind!.rootId)?.mind?.layoutScale??1)*uniform:undefined;
+    cmds.push({op:'WIDGET_UPDATE',payload:{
+      id:w.id,
+      patch:{x:c.x-width/2,y:c.y-height/2,width,height,rotation:w.rotation+angle,style:{...scaledWidgetStyle(w,square||pad||w.audio?width/w.width:sx,square||pad||w.audio?height/w.height:sy),...(isBoxText(w)&&!wholeMap?{fontSize:w.style.fontSize}:{})},...(isFreeText(w)?{textSizing:'natural'}:{})},
+      ...(mindLayoutScale===undefined?{}:{mindLayoutScale}),
+    }});
   }
   for(const c of snapshot.connectors){if(c.locked)continue;const endpoint=(e:Connector['start'])=>e.kind==='anchor'?e:{...e,...point(e)},scale=Math.sqrt(Math.abs(sx*sy)),wholeMap=!!c.mindBranch&&scaledMaps.has(s.widgets.get(c.mindBranch)?.mind?.rootId??'');cmds.push({op:'CONNECTOR_UPDATE',payload:{id:c.id,patch:{start:endpoint(c.start),end:endpoint(c.end),controlPoint:c.controlPoint?point(c.controlPoint):null,waypoints:c.waypoints?.map(point)??null,...(wholeMap&&scale!==1?{style:{...c.style,strokeWidth:c.style.strokeWidth*scale}}:{}),...(scale!==1&&c.captions?.length?{captionStyles:c.captions.map((_,i)=>({...c.captionStyles?.[i],fontSize:(c.captionStyles?.[i]?.fontSize??14)*scale}))}:{})}}});}
   for(const st of snapshot.strokes){if(st.locked)continue;const scale=Math.sqrt(Math.abs(sx*sy));cmds.push({op:'STROKE_UPDATE',payload:{id:st.id,patch:{points:st.points.map(p=>({...point(p),r:p.r*scale})),...(st.precisionSmoothing===undefined?{}:{precisionSmoothing:st.precisionSmoothing*scale}),...(st.erasures?{erasures:st.erasures.map(e=>({radius:e.radius*scale,points:e.points.map(point)}))}:{})}}});}

@@ -1,5 +1,6 @@
 // @ts-nocheck
 import {test,expect} from '@playwright/test';
+import {boardAction} from './helpers/board-actions';
 import {readFile} from 'node:fs/promises';
 import {createHash} from 'node:crypto';
 
@@ -76,10 +77,10 @@ test('large background image is scenery, scales proportionally and round-trips t
   // its 18MB data URL/SVG repeatedly through Playwright and the trace recorder.
   const result=await page.evaluate(async()=>{const b=window.__board,{boardToSvg}=await import('/src/core/exportSvg.ts'),svg=boardToSvg(b.state),transparent=boardToSvg(b.state,{background:'none'}),white=boardToSvg(b.state,{background:'#ffffff'}),svgImage=new DOMParser().parseFromString(svg,'image/svg+xml').querySelector('image');return {srcMatchesOriginal:b.state.background.image.src===window.__workspaceOriginalBackground,normalImage:svg.includes('<image'),normalWidth:svg.includes('width="12000"'),svgSrcMatchesOriginal:(svgImage?.getAttribute('href')??svgImage?.getAttribute('xlink:href'))===window.__workspaceOriginalBackground,transparentImage:transparent.includes('<image'),whiteImage:white.includes('<image')};});
   expect(result).toEqual({srcMatchesOriginal:true,normalImage:true,normalWidth:true,svgSrcMatchesOriginal:true,transparentImage:false,whiteImage:false});
-  await page.keyboard.press('Escape');const download=page.waitForEvent('download');await page.getByRole('button',{name:'Salvar arquivo',exact:true}).click();const path=await(await download).path(),data=await readFile(path);
+  await page.keyboard.press('Escape');const download=page.waitForEvent('download');await boardAction(page,'Salvar arquivo');const path=await(await download).path(),data=await readFile(path);
   const exported=JSON.parse(data.toString());expect(exported.background.image.width).toBe(12000);expect(exported.background.image.src===originalSrc,'Exported PNG data is byte-for-byte identical to the original').toBe(true);
   await page.getByRole('button',{name:'Fundo do board',exact:true}).click();await panel.getByRole('button',{name:'Remover imagem de fundo',exact:true}).click();expect(await page.evaluate(()=>window.__board.state.background.image)).toBeUndefined();
-  await page.keyboard.press('Escape');const open=page.waitForEvent('filechooser');await page.getByRole('button',{name:'Abrir arquivo',exact:true}).click();await(await open).setFiles({name:'composicao.board.json',mimeType:'application/json',buffer:data});
+  await page.keyboard.press('Escape');const open=page.waitForEvent('filechooser');await boardAction(page,'Abrir arquivo');await(await open).setFiles({name:'composicao.board.json',mimeType:'application/json',buffer:data});
   await expect.poll(()=>page.evaluate(()=>window.__board.state.background.image?.width)).toBe(12000);await page.evaluate(()=>window.__board.saveNow());await page.reload();await page.waitForFunction(()=>window.__board?.booted);
   expect(await page.evaluate(async()=>{const image=window.__board.state.background.image,digest=await crypto.subtle.digest('SHA-256',new TextEncoder().encode(image.src));return {w:image.width,srcSha256:Array.from(new Uint8Array(digest),byte=>byte.toString(16).padStart(2,'0')).join(''),widgets:window.__board.state.widgets.size};})).toEqual({w:12000,srcSha256:originalSha256,widgets:1});
   await expect.poll(()=>page.evaluate(()=>window.__board.app.stage.children[1].children.find(c=>c.label==='board-background')?.children[0]?.visible)).toBe(true);

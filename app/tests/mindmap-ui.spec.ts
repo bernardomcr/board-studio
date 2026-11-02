@@ -1,5 +1,6 @@
 // @ts-nocheck
 import {test,expect} from '@playwright/test';
+import {boardAction} from './helpers/board-actions';
 import {readFile} from 'node:fs/promises';
 async function blank(page){await page.goto('/');await page.waitForFunction(()=>window.__board?.booted);await page.getByRole('button',{name:'Criar board',exact:true}).click();await page.getByRole('dialog',{name:'Criar board'}).getByRole('button',{name:'Criar board',exact:true}).click();await expect(page.locator('#board-home')).toBeHidden();}
 async function fixture(page){return page.evaluate(async()=>{
@@ -59,7 +60,7 @@ test('an imported topic image is a real collapsible branch with one-step inserti
   const points=await page.evaluate(({image,ids})=>{const b=window.__board,center=id=>{const w=b.state.widgets.get(id);return b.camera.worldToScreen({x:w.x+w.width/2,y:w.y+w.height/2});};return {from:center(image.id),to:center(ids.d)};},{image,ids});
   await page.mouse.move(points.from.x,points.from.y);await page.mouse.down();await page.mouse.move(points.to.x,points.to.y,{steps:16});await page.mouse.up();
   expect(await page.evaluate(id=>window.__board.state.widgets.get(id).mind.parentId,image.id)).toBe(ids.d);
-  const saved=page.waitForEvent('download');await page.getByRole('button',{name:'Salvar arquivo',exact:true}).click();const data=JSON.parse((await readFile(await(await saved).path())).toString());expect(data.widgets.find(w=>w.id===image.id)).toMatchObject({type:'image',src:png,width:320,height:180,mind:{rootId:ids.root,parentId:ids.d}});
+  const saved=page.waitForEvent('download');await boardAction(page,'Salvar arquivo');const data=JSON.parse((await readFile(await(await saved).path())).toString());expect(data.widgets.find(w=>w.id===image.id)).toMatchObject({type:'image',src:png,width:320,height:180,mind:{rootId:ids.root,parentId:ids.d}});
   const svg=await page.evaluate(async()=>{const b=window.__board,{boardToSvg}=await import('/src/core/exportSvg.ts');return boardToSvg(b.state);});expect(svg).toContain(png);
   await page.evaluate(()=>window.__board.saveNow());await page.reload();await page.waitForFunction(()=>window.__board?.booted);
   expect(await page.evaluate(id=>{const w=window.__board.state.widgets.get(id);return {parent:w.mind.parentId,width:w.width,height:w.height,src:w.src};},image.id)).toEqual({parent:ids.d,width:320,height:180,src:png});

@@ -8,7 +8,7 @@ import {join,resolve,relative,isAbsolute,basename} from 'node:path';
 import {fileURLToPath,pathToFileURL} from 'node:url';
 
 const directory=await mkdtemp(join(tmpdir(),'board-mindmap-cpu-')),bundle=join(directory,'core.mjs');
-await build({stdin:{contents:`export * from './core/mindmap';export * from './core/groups';export {CommandBus} from './core/commands';export {boxTextInsets,fitBoxText} from './core/text-layout';export {validateBoardFile} from './project-files';`,resolveDir:fileURLToPath(new URL('../../src/',import.meta.url)),loader:'ts'},bundle:true,platform:'node',format:'esm',outfile:bundle});
+await build({stdin:{contents:`export * from './core/mindmap';export * from './core/groups';export {CommandBus} from './core/commands';export {connectorGeometry} from './core/connectors';export {boxTextInsets,fitBoxText} from './core/text-layout';export {validateBoardFile} from './project-files';`,resolveDir:fileURLToPath(new URL('../../src/',import.meta.url)),loader:'ts'},bundle:true,platform:'node',format:'esm',outfile:bundle});
 const m=await import(pathToFileURL(bundle));
 after(async()=>{const absolute=resolve(directory),within=relative(resolve(tmpdir()),absolute);assert.ok(isAbsolute(directory)&&within&&!within.startsWith('..')&&!isAbsolute(within)&&basename(absolute).startsWith('board-mindmap-cpu-'));await rm(absolute,{recursive:true,force:true,maxRetries:5,retryDelay:50});});
 function fixture(scale=1){const state={widgets:new Map(),order:[],connectors:new Map(),connectorOrder:[],strokes:new Map(),strokeOrder:[],groups:new Map(),selection:new Set()},bus=new m.CommandBus(state,()=>{}),root=m.createMindMap(state,bus,{x:0,y:0},'Centro',scale);return {state,bus,root};}
@@ -66,4 +66,73 @@ test('legacy metadata keeps scale 1 behavior and malformed scales are rejected w
   const {state,bus,root}=fixture();for(const w of state.widgets.values()){const {layoutScale,...mind}=w.mind;state.widgets.set(w.id,{...w,mind});}
   const validated=m.validateBoardFile(JSON.parse(JSON.stringify(fileOf(state))));assert.equal(Object.hasOwn(validated.widgets[0].mind,'layoutScale'),false);const child=m.addMindChild(state,bus,root);assert.equal(state.widgets.get(child).mind.layoutScale,1);assert.equal(state.widgets.get(child).style.fontSize,20);assert.equal(state.widgets.get(child).x-(state.widgets.get(root).x+state.widgets.get(root).width),50);
   const stable=snapshot(state);for(const layoutScale of [0,-1,NaN,Infinity,'2']){assert.throws(()=>m.validateMindMetadata({...state.widgets.get(root).mind,layoutScale}));assert.throws(()=>m.createMindMap(state,bus,{x:0,y:0},'Bad',layoutScale));}assert.equal(snapshot(state),stable);
+});
+
+test('Mind branches keep their curve geometry at every design scale, with distinct Org and List spacing',()=>{
+  const fixtures=[1,50,.05].map(scale=>{const f=fixture(scale),a=m.addMindChild(f.state,f.bus,f.root,'A'),b=m.addMindChild(f.state,f.bus,f.root,'B');return {...f,a,b,scale};}),baseline=fixtures[0];
+  const curve=f=>{const geometry=m.connectorGeometry([...f.state.connectors.values()].find(line=>line.mindBranch===f.a),f.state.widgets);return geometry.cubics??[geometry.cubic];};
+  const reference=curve(baseline);for(const f of fixtures){const actual=curve(f);assert.equal(actual.length,reference.length);for(let i=0;i<actual.length;i++)for(const point of ['p0','p1','p2','p3'])for(const axis of ['x','y'])close(actual[i][point][axis]/f.scale,reference[i][point][axis]);}
+  for(const f of fixtures){m.setMindLayout(f.state,f.bus,f.root,'org');let root=f.state.widgets.get(f.root),a=f.state.widgets.get(f.a),b=f.state.widgets.get(f.b);close((a.y-root.y-root.height)/f.scale,48);close((b.x-a.x-a.width)/f.scale,20);m.setMindLayout(f.state,f.bus,f.root,'list');root=f.state.widgets.get(f.root);a=f.state.widgets.get(f.a);b=f.state.widgets.get(f.b);close((a.y-root.y-root.height)/f.scale,20);close((a.x-root.x)/f.scale,38);close((b.y-a.y-a.height)/f.scale,16);}
+});
+
+test('free topic placements survive additions and reflow; explicit Reorganize resets them in one undo',()=>{
+  for(const layout of ['balanced','org','list']){
+    const {state,bus,root}=fixture(),a=m.addMindChild(state,bus,root,'A'),leaf=m.addMindChild(state,bus,a,'Leaf');m.setMindLayout(state,bus,root,layout);
+    bus.beginTransaction('Arrastar livremente');m.moveMindSubtree(state,bus,a,330,170);assert.equal(m.markMindManualPosition(state,bus,a),true);bus.endTransaction();
+    const oldA=state.widgets.get(a),oldLeaf=state.widgets.get(leaf),b=m.addMindChild(state,bus,a,'New leaf'),next=state.widgets.get(b);
+    for(const [id,old] of [[a,oldA],[leaf,oldLeaf]]){const node=state.widgets.get(id);close(node.x,old.x);close(node.y,old.y);assert.equal(node.mind.manualPosition,true);}
+    assert.ok(next.x+next.width<=oldLeaf.x||oldLeaf.x+oldLeaf.width<=next.x||next.y+next.height<=oldLeaf.y||oldLeaf.y+oldLeaf.height<=next.y,'new auto-positioned topic must not cover a freely placed sibling');
+    for(const command of m.mindLayoutCommands(state,root))bus.exec(command);close(state.widgets.get(a).x,oldA.x);close(state.widgets.get(leaf).y,oldLeaf.y);
+    const before=snapshot(state);assert.equal(m.layoutMindMap(state,bus,root),true);assert.equal(state.widgets.get(a).mind.manualPosition,undefined);assert.equal(state.widgets.get(leaf).mind.manualPosition,undefined);bus.undo();assert.equal(snapshot(state),before);bus.redo();assert.equal(state.widgets.get(a).mind.manualPosition,undefined);
+  }
+});
+
+test('manual placements persist, reject malformed metadata and locks, and reparent as one structural undo',()=>{
+  const {state,bus,root}=fixture(),a=m.addMindChild(state,bus,root,'A'),leaf=m.addMindChild(state,bus,a,'Leaf'),target=m.addMindChild(state,bus,root,'Target');m.markMindManualPosition(state,bus,a);
+  const file=m.validateBoardFile(JSON.parse(JSON.stringify(fileOf(state))));assert.equal(file.widgets.find(w=>w.id===a).mind.manualPosition,true);assert.equal(file.widgets.find(w=>w.id===leaf).mind.manualPosition,true);for(const value of [0,1,'true',null])assert.throws(()=>m.validateMindMetadata({...state.widgets.get(a).mind,manualPosition:value}));
+  const before=snapshot(state);assert.equal(m.reparentMindNode(state,bus,a,target),true);assert.equal(state.widgets.get(a).mind.manualPosition,undefined);assert.equal(state.widgets.get(leaf).mind.manualPosition,undefined);bus.undo();assert.equal(snapshot(state),before);
+  bus.exec({op:'ENTITY_LOCK',payload:{ids:[leaf],locked:true}});const stable=snapshot(state);assert.equal(m.markMindManualPosition(state,bus,a),false);assert.equal(snapshot(state),stable);
+});
+
+test('default Mind topics use readable canvas colors and transparent child boxes without replacing custom appearance',()=>{
+  for(const dark of [false,true]){const {state,bus}=fixture(),root=m.createMindMap(state,bus,{x:0,y:0},'Central',1,{dark}),a=m.addMindChild(state,bus,root,'A'),r=state.widgets.get(root),child=state.widgets.get(a);assert.equal(r.style.fillColor,dark?'#643d55':'#f3c1d3');assert.equal(r.style.color,dark?'#f7edf4':'#342a3a');assert.equal(r.style.borderWidth,0);assert.equal(child.style.fillOpacity,0);assert.equal(child.style.color,r.style.color);bus.exec({op:'WIDGET_UPDATE',payload:{id:a,patch:{style:{...child.style,fillColor:'#345678',fillOpacity:.7,color:'#fedcba'}}}});const b=m.addMindSibling(state,bus,a);assert.equal(state.widgets.get(b).style.fillColor,'#345678');assert.equal(state.widgets.get(b).style.fillOpacity,.7);assert.equal(state.widgets.get(b).style.color,'#fedcba');}
+});
+
+const emptyState=()=>({widgets:new Map(),order:[],connectors:new Map(),connectorOrder:[],strokes:new Map(),strokeOrder:[],groups:new Map(),selection:new Set()});
+const modelSnapshot=state=>JSON.stringify({widgets:[...state.widgets],connectors:[...state.connectors],order:state.order,connectorOrder:state.connectorOrder});
+const attachedFile=()=>({id:'resize-file',name:'arquivo-local.txt',mimeType:'text/plain',src:'data:text/plain;base64,YQ==',size:1});
+
+test('120 whole-map resize frames never read captured attachment metadata or source bytes and retain one compact gesture',()=>{
+  const {state,bus,root}=fixture(),child=m.addMindChild(state,bus,root,'A');m.addMindAttachments(state,bus,root,[attachedFile()]);
+  const before=modelSnapshot(state),depth=bus.undoStack.length,live=state.widgets.get(root).mind.attachments,captured=m.captureSelection(state,[root]),capturedRoot=captured.widgets.find(widget=>widget.id===root),capturedFiles=capturedRoot.mind.attachments,src=live[0].src;
+  let capturedReads=0,sourceReads=0;Object.defineProperty(capturedRoot.mind,'attachments',{enumerable:true,get(){capturedReads++;return capturedFiles;}});Object.defineProperty(live[0],'src',{enumerable:true,get(){sourceReads++;return src;}});
+  bus.beginTransaction('Redimensionar mapa');
+  for(let frame=1;frame<=120;frame++){const scale=1+frame/120;bus.exec({op:'BATCH',payload:{commands:m.transformSnapshot(state,captured,frame,frame/2,scale,scale)}});assert.equal(state.widgets.get(root).mind.attachments,live);assert.equal(state.widgets.get(root).mind.attachments[0],live[0]);}
+  bus.endTransaction();assert.equal(capturedReads,0,'resize must not inspect attachments in the capture');assert.equal(sourceReads,0,'pointer-frame commands must never read embedded bytes');assert.equal(bus.undoStack.length,depth+1);assert.equal(state.widgets.get(root).mind.layoutScale,2);assert.equal(state.widgets.get(child).mind.layoutScale,2);
+  const gesture=JSON.stringify(bus.undoStack.at(-1).command);assert.ok(gesture.includes('mindLayoutScale'));assert.ok(!gesture.includes('attachments')&&!gesture.includes('base64,')&&!gesture.includes('arquivo-local.txt'));assert.ok(gesture.length<6000,'120 updates must coalesce into one final transform');
+  const final=modelSnapshot(state);bus.undo();assert.equal(modelSnapshot(state),before);bus.redo();assert.equal(modelSnapshot(state),final);assert.equal(state.widgets.get(root).mind.attachments,live);
+});
+
+test('scalar map scaling survives JSON journal replay, its redo stack and full project round-trips with attachments intact',()=>{
+  const {state,bus,root}=fixture(2),child=m.addMindChild(state,bus,root,'A');m.addMindAttachments(state,bus,root,[attachedFile()]);const before=modelSnapshot(state),capture=m.captureSelection(state,[root]);
+  bus.beginTransaction('Resize');for(const scale of [1.2,1.7,3])bus.exec({op:'BATCH',payload:{commands:m.transformSnapshot(state,capture,40,15,scale,scale)}});bus.endTransaction();const final=modelSnapshot(state),journal=JSON.parse(JSON.stringify(bus.snapshot()));
+  const replay=emptyState(),restored=new m.CommandBus(replay,()=>{});restored.restore(journal.applied,journal.undone);assert.equal(modelSnapshot(replay),final);restored.undo();assert.equal(modelSnapshot(replay),before);restored.redo();assert.equal(modelSnapshot(replay),final);
+  bus.undo();const undoneJournal=JSON.parse(JSON.stringify(bus.snapshot())),pending=emptyState(),pendingBus=new m.CommandBus(pending,()=>{});pendingBus.restore(undoneJournal.applied,undoneJournal.undone);assert.equal(modelSnapshot(pending),before);assert.equal(pendingBus.canRedo,true);pendingBus.redo();assert.equal(modelSnapshot(pending),final);
+  const validated=m.validateBoardFile(JSON.parse(JSON.stringify(fileOf(replay))));assert.equal(validated.widgets.find(widget=>widget.id===root).mind.layoutScale,6);assert.equal(validated.widgets.find(widget=>widget.id===child).mind.layoutScale,6);assert.deepEqual(validated.widgets.find(widget=>widget.id===root).mind.attachments,[attachedFile()]);
+});
+
+test('scalar scaling rejects invalid values and locked hidden-only bypasses; mixed metadata updates coalesce and replay in order',()=>{
+  const f=fixture(),{state,bus,root}=f;for(const value of [0,-1,NaN,Infinity,'2',null]){const before=modelSnapshot(state),depth=bus.undoStack.length;bus.exec({op:'WIDGET_UPDATE',payload:{id:root,patch:{x:999},mindLayoutScale:value}});assert.equal(modelSnapshot(state),before);assert.equal(bus.undoStack.length,depth);}
+  bus.exec({op:'ENTITY_LOCK',payload:{ids:[root],locked:true}});for(const patch of [{},{hidden:true}]){const before=modelSnapshot(state),depth=bus.undoStack.length;bus.exec({op:'WIDGET_UPDATE',payload:{id:root,patch,mindLayoutScale:4}});assert.equal(modelSnapshot(state),before);assert.equal(bus.undoStack.length,depth);}
+  const ordinary={...state.widgets.get(root),id:'ordinary',mind:undefined,locked:false};bus.exec({op:'WIDGET_CREATE',payload:ordinary});const ordinaryBefore=modelSnapshot(state);bus.exec({op:'WIDGET_UPDATE',payload:{id:ordinary.id,patch:{x:998},mindLayoutScale:4}});assert.equal(modelSnapshot(state),ordinaryBefore);
+  for(const sequence of ['scalar-full','full-scalar','scalar-position','full-and-scalar']){
+    const {state,bus,root}=fixture();m.addMindAttachments(state,bus,root,[attachedFile()]);const before=modelSnapshot(state),initial={...state.widgets.get(root).mind};bus.beginTransaction(sequence);
+    const update=(patch,mindLayoutScale)=>bus.exec({op:'WIDGET_UPDATE',payload:{id:root,patch,...(mindLayoutScale===undefined?{}:{mindLayoutScale})}});
+    if(sequence==='scalar-full'){update({x:20},2);update({mind:{...initial,layoutScale:7,notes:'Replacement'}},undefined);}
+    if(sequence==='full-scalar'){update({mind:{...initial,layoutScale:9,notes:'Keep replacement'}},undefined);update({x:40},4);}
+    if(sequence==='scalar-position'){update({x:20},2);update({x:30},undefined);}
+    if(sequence==='full-and-scalar'){update({x:20},2);update({mind:{...initial,layoutScale:9,notes:'Combined'}},4);}
+    bus.endTransaction();const expected=modelSnapshot(state),journal=JSON.parse(JSON.stringify(bus.snapshot())),copy=emptyState(),replayed=new m.CommandBus(copy,()=>{});replayed.restore(journal.applied,journal.undone);assert.equal(modelSnapshot(copy),expected,sequence);replayed.undo();assert.equal(modelSnapshot(copy),before,`${sequence}: one Undo`);replayed.redo();assert.equal(modelSnapshot(copy),expected,`${sequence}: Redo`);
+    assert.equal(state.widgets.get(root).mind.layoutScale,sequence==='scalar-full'?7:sequence==='scalar-position'?2:4);assert.deepEqual(state.widgets.get(root).mind.attachments,[attachedFile()]);
+  }
 });

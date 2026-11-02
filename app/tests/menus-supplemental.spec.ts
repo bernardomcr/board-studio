@@ -1,6 +1,7 @@
 // Supplemental implementation-team UI sweep; this is not an independent review.
 // @ts-nocheck
 import {test,expect} from '@playwright/test';
+import {boardAction as documentAction} from './helpers/board-actions';
 import {openDrawingPalette} from './helpers/drawing-palette';
 
 async function ready(page){await page.goto('/');await page.waitForFunction(()=>window.__board?.booted);}
@@ -18,11 +19,11 @@ async function marker(page,value){await page.evaluate(async value=>{const b=wind
 
 test('Help owns Delete, Space and Tab until Escape without changing the selected board',async({page})=>{
   await blank(page);await marker(page,'Preserve behind Help');await page.evaluate(()=>window.__board.bus.exec({op:'SELECTION_SET',payload:['marker']}));const before=await page.evaluate(()=>({history:window.__board.bus.undoStack.length,selection:[...window.__board.state.selection]}));
-  const trigger=page.getByRole('button',{name:'Atalhos',exact:true});await trigger.click();await expect(page.locator('#help-panel')).toBeVisible();
+  const trigger=page.getByRole('button',{name:'Mais opções do board',exact:true});await documentAction(page,'Atalhos');await expect(page.locator('#help-panel')).toBeVisible();
   await page.keyboard.press('Delete');expect(await page.evaluate(()=>window.__board.state.widgets.has('marker'))).toBe(true);
   await page.keyboard.down('Space');expect(await page.evaluate(()=>window.__board.gesture().kind)).toBe('none');await page.keyboard.up('Space');
   // Space may activate the focused native Close button; reopen for the Tab check.
-  if(await page.locator('#help-panel').isHidden())await trigger.click();
+  if(await page.locator('#help-panel').isHidden())await documentAction(page,'Atalhos');
   for(let index=0;index<4;index++){await page.keyboard.press('Tab');expect(await page.locator('#help-panel').evaluate(el=>el.contains(document.activeElement))).toBe(true);}
   expect(await page.evaluate(()=>({history:window.__board.bus.undoStack.length,selection:[...window.__board.state.selection]}))).toEqual(before);
   await page.keyboard.press('Escape');await expect(page.locator('#help-panel')).toBeHidden();await expect(trigger).toBeFocused();

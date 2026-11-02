@@ -1,15 +1,17 @@
 No Teu Cu e Atiro para Windows 10/11 x64.
 
-Campos, navegação e mapa mental refinados, mantendo a identidade em cinza escuro e roxo.
+Interface compacta, mapa mental refinado e correções de renderização.
 
-- Campos de tamanho e demais formulários respeitam o tema, inclusive no foco e ao usar as setas de incremento.
-- Barra lateral compacta e flutuante, com canvas livre acima e abaixo e acesso ao botão Fundo.
-- Mapas mentais criados com proporções legíveis no zoom atual; novos tópicos preservam tema, forma, tipografia e estilo do ramo.
-- Arraste de ramos com prévia para inserir como filho, irmão acima/abaixo ou no lado da raiz permitido pelo layout.
-- Menus de tópico, mapa e ramos organizados; controle dos níveis por Alt+0 a Alt+9 e seleção de subtópicos.
-- Texto ajustado ao contorno de círculos e losangos, inclusive após converter um tópico existente.
-- Tópicos bloqueados oferecem somente desbloqueio por pressão; herança de bloqueios e Undo/Redo preservados.
-- Mantidas as correções de conectores, seleção e borracha de precisão da v0.19.0.
+- Margem de renderização calculada a partir da tinta real da fonte, preservando tamanho, alinhamento e caixas existentes.
+- Finais de letras, acentos e descendentes completos no texto normal e em textos gigantes.
+- Rasterização de textos gigantes mantém a mesma posição e os limites de memória ao navegar e redimensionar.
+- Controles flutuantes: Home, título e menu de arquivo à esquerda; Camadas à direita; tema ao lado de Fundo. Desfazer e refazer continuam nos atalhos.
+- Mapa mental com botões distintos para filho e irmão, recolhimento circular, transições e posições livres preservadas. Cores e controles adaptados ao tema.
+- Anexos locais nos tópicos, com download e inclusão nos arquivos do board.
+- Bloco de notas em cartão com folha animada; notas destacadas quadradas.
+- Player de áudio proporcional, cores sincronizadas imediatamente e controles respeitando os menus.
+- Removido o desbloqueador flutuante duplicado. Desbloqueio mantido no botão direito e no painel Camadas, pressionando o controle.
+- Redimensionamento de tópicos sem copiar anexos a cada movimento.
 
 - Instalador: arquivo com final `setup.exe`.
 - Sem instalação: arquivo com final `portable.exe`.

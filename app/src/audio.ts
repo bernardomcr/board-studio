@@ -50,7 +50,8 @@ export function installAudio(api:AudioAPI){
   #audio-create-menu{position:fixed;z-index:46;width:212px;padding:6px;background:#fff;color:#303746;border:1px solid #e4e7ed;border-radius:9px;box-shadow:0 5px 24px #15171b26;font:12px Inter,'Segoe UI',sans-serif}
   #audio-create-menu button{display:flex;align-items:center;gap:10px;width:100%;height:38px;padding:0 10px;border:0;border-radius:5px;background:transparent;color:inherit;font:inherit;text-align:left;cursor:pointer}
   #audio-create-menu button:hover{background:#eef2ff;color:#4262ff}
-  #audio-overlays{position:fixed;inset:0;pointer-events:none;z-index:27;overflow:hidden}
+  /* Canvas controls belong above the board, below every application control. */
+  #audio-overlays{position:fixed;inset:0;pointer-events:none;z-index:4;overflow:hidden}
   #audio-overlays [hidden],#audio-record-dialog [hidden]{display:none!important}
   body.home-visible #audio-overlays{display:none!important}
   .audio-overlay{position:absolute;transform:translate(-50%,-50%);transform-origin:center;pointer-events:none}
@@ -60,9 +61,9 @@ export function installAudio(api:AudioAPI){
   .audio-overlay button svg{width:64%;height:64%}
   .audio-overlay [data-audio-download]{opacity:0;pointer-events:none;transition:opacity .12s}
   .audio-overlay:hover [data-audio-download],.audio-overlay:focus-within [data-audio-download],.audio-overlay[data-selected=true] [data-audio-download]{opacity:1;pointer-events:auto}
-  .audio-overlay input{position:absolute;opacity:0;pointer-events:auto;margin:0;cursor:pointer}
+  .audio-overlay input{position:absolute;opacity:0;pointer-events:auto;margin:0;cursor:pointer;accent-color:var(--audio-ink,#4262ff)}
   .audio-overlay input:focus-visible{opacity:.75}
-  .audio-playhead{position:absolute;width:1px;background:#4262ff;pointer-events:none;transform:translateX(-50%)}
+  .audio-playhead{position:absolute;width:1px;background:var(--audio-ink,#4262ff);pointer-events:none;transform:translateX(-50%)}
   .audio-current-time{position:absolute;right:5%;bottom:3%;background:var(--audio-fill,#fff);color:var(--audio-ink,#303746);padding:0 3px;pointer-events:none;font:10px Inter,'Segoe UI',sans-serif;white-space:nowrap}
   #audio-record-dialog{position:fixed;inset:0;background:#11182765;z-index:85;display:flex;align-items:center;justify-content:center;padding:20px;box-sizing:border-box;font:13px Inter,'Segoe UI',sans-serif;color:#303746}
   #audio-record-dialog section{width:420px;max-width:100%;box-sizing:border-box;padding:24px;border:1px solid #e4e7ed;border-radius:14px;background:#fff;box-shadow:0 16px 60px #0004}

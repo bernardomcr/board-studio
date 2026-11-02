@@ -18,25 +18,25 @@ for(const width of [360,800,1280,1600,1920])test(`tools dock at the actual left 
   if(dark)await page.getByRole('button',{name:'Ativar tema escuro',exact:true}).click();await settle(page);
   const dock=await page.evaluate(()=>{
    const bounds=element=>{const r=element.getBoundingClientRect();return {x:r.x,y:r.y,right:r.right,bottom:r.bottom,width:r.width,height:r.height};};
-   const bar=document.getElementById('toolbar'),header=document.getElementById('topbar'),dock=document.getElementById('studio-dock');return {tools:bounds(bar),header:bounds(header),dock:bounds(dock),title:document.getElementById('board-title').textContent,rounding:getComputedStyle(bar).borderRadius,surface:getComputedStyle(dock).backgroundColor,scenery:getComputedStyle(header).backgroundColor,shadow:getComputedStyle(bar).boxShadow,overflow:getComputedStyle(bar).overflowX,
+   const bar=document.getElementById('toolbar'),header=document.getElementById('topbar'),dock=document.getElementById('studio-dock');return {tools:bounds(bar),header:bounds(header),dock:bounds(dock),title:document.getElementById('board-title').textContent,rounding:getComputedStyle(bar).borderRadius,surface:getComputedStyle(header).backgroundColor,scenery:getComputedStyle(header).backgroundColor,shadow:getComputedStyle(bar).boxShadow,overflow:getComputedStyle(bar).overflowX,
     controls:[...document.querySelectorAll('#toolbar button,#topbar button,#board-title,#theme-toggle,#layers-toggle')].filter(element=>{const r=element.getBoundingClientRect();return r.width>0&&r.height>0;}).map(element=>{const rect=bounds(element),hit=document.elementFromPoint(rect.x+rect.width/2,rect.y+rect.height/2);return {name:element.id||element.getAttribute('aria-label')||element.textContent.trim(),inTools:!!element.closest('#toolbar'),...rect,usable:element===hit||element.contains(hit)};})};
   });
-  await expectFloatingRail(page);expect(dock.title.length).toBe(800);expect(dock.dock.x).toBe(0);expect(dock.dock.y).toBe(0);expect(dock.dock.width).toBe(width);expect(dock.tools.x+dock.tools.width).toBeLessThanOrEqual(width);expect(dock.surface).not.toBe('rgba(0, 0, 0, 0)');expect(['auto','scroll']).not.toContain(dock.overflow);expect(dock.header.y).toBe(0);
+  await expectFloatingRail(page);expect(dock.title.length).toBe(800);expect(dock.header.x).toBeGreaterThanOrEqual(8);expect(dock.header.right).toBeLessThan(width-60);expect(dock.tools.x+dock.tools.width).toBeLessThanOrEqual(width);expect(dock.surface).not.toBe('rgba(0, 0, 0, 0)');expect(['auto','scroll']).not.toContain(dock.overflow);expect(dock.header.y).toBeGreaterThanOrEqual(8);
   const top=await workspace(page);
-  for(const control of dock.controls){expect(control.x,control.name).toBeGreaterThanOrEqual(-.5);expect(control.right,control.name).toBeLessThanOrEqual(width+.5);expect(control.bottom,control.name).toBeLessThanOrEqual(control.inTools?900.5:top-9.5);expect(control.usable,`${width}: ${control.name}`).toBe(true);
+  for(const control of dock.controls){expect(control.x,control.name).toBeGreaterThanOrEqual(-.5);expect(control.right,control.name).toBeLessThanOrEqual(width+.5);expect(control.bottom,control.name).toBeLessThanOrEqual(900.5);expect(control.usable,`${width}: ${control.name}`).toBe(true);
    for(const other of dock.controls){if(other===control)continue;const overlap=Math.min(control.right,other.right)-Math.max(control.x,other.x)>1&&Math.min(control.bottom,other.bottom)-Math.max(control.y,other.y)>1;expect(overlap,`${width}: ${control.name} overlaps ${other.name}`).toBe(false);}
   }
   await expect(page.getByRole('button',{name:'Camadas',exact:true})).toBeVisible();
-  if(width<=1100)await page.getByRole('button',{name:'Mais opções do board',exact:true}).click();
+  await page.getByRole('button',{name:'Mais opções do board',exact:true}).click();
   for(const name of ['Salvar arquivo','Abrir arquivo','Exportar PNG','Exportar SVG','Atalhos'])await expect(page.getByRole('button',{name,exact:true})).toBeVisible();
-  if(width<=1100)await page.keyboard.press('Escape');
+  await page.keyboard.press('Escape');
  }
 });
 
 test('shape, note, layer and selection menus respect the complete dock through a narrow resize',async({page})=>{
  await page.setViewportSize({width:1600,height:900});await blank(page);await page.locator('#toolbar [data-tool="shape"]').click();await page.locator('#shape-picker [data-more-shapes]').click();await contained(page,'#shape-picker');
  await page.setViewportSize({width:360,height:640});await settle(page);await contained(page,'#shape-picker');await page.keyboard.press('Escape');
- await page.locator('#toolbar [data-tool="sticky_note"]').click();await contained(page,'#sticky-picker');await page.locator('#sticky-picker [data-sticky-pad]').click();await contained(page,'#sticky-picker');await page.keyboard.press('Escape');
+ await page.locator('#toolbar [data-tool="sticky_note"]').click();const sticky=await contained(page,'#sticky-picker'),theme=await page.locator('#theme-toggle').boundingBox();expect(sticky.y+sticky.height).toBeLessThanOrEqual(theme.y);await page.locator('#sticky-picker [data-sticky-pad]').click();await contained(page,'#sticky-picker');await page.keyboard.press('Escape');
  await page.getByRole('button',{name:'Camadas',exact:true}).click();const layers=await page.locator('#layers-panel').boundingBox();expect(layers.y).toBeGreaterThanOrEqual((await workspace(page))-2);await page.getByRole('button',{name:'Fechar camadas',exact:true}).click();
  await page.evaluate(async()=>{const b=window.__board,{createWidget}=await import('/src/core/model.ts'),p=b.camera.screenToWorld({x:110,y:20});b.bus.exec({op:'WIDGET_CREATE',payload:{...createWidget('shape',{...p,width:140,height:80,content:'Perto do dock'}),id:'dock-object'}});b.bus.exec({op:'SELECTION_SET',payload:['dock-object']});});
  await page.keyboard.press('v');await contained(page,'#selection-properties');await page.locator('#selection-properties details[data-menu="shape"] > summary').click();await page.locator('#selection-properties [data-action="more-shapes"]').click();await contained(page,'#shape-picker');await expect(page.locator('#shape-search')).toBeFocused();

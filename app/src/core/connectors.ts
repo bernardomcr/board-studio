@@ -156,14 +156,15 @@ function sampleCubic(p0: Vec, p1: Vec, p2: Vec, p3: Vec): Vec[] {
 }
 /** Curvature follows the attached edges and remains proportional to the chord.
  * Mind branches use the axis distance and a small world-space minimum instead.
- * Their model has no separate widget-scale component, so that minimum is 20. */
-function curveReach(connector:Connector,a:Vec,b:Vec):number{
+ * The minimum follows the mind map's design unit, including maps born at 2,000%. */
+function curveReach(connector:Connector,a:Vec,b:Vec,widgets:Map<string,Widget>):number{
   if(!connector.mindBranch)return length(a,b)*.4;
   const vertical=connector.start.kind==='anchor'&&connector.end.kind==='anchor'&&connector.start.x===.5&&connector.end.x===.5;
-  return Math.max(Math.abs(vertical?b.y-a.y:b.x-a.x)*.4,20);
+  const child=widgets.get(connector.mindBranch),scale=child?.mind?.layoutScale??widgets.get(child?.mind?.rootId??'')?.mind?.layoutScale??1;
+  return Math.max(Math.abs(vertical?b.y-a.y:b.x-a.x)*.4,20*scale);
 }
 function splineCubics(connector:Connector,knots:Vec[],widgets:Map<string,Widget>,startNormal?:Vec,endNormal?:Vec):ConnectorCubic[]{
-  const spans=knots.slice(1).map((end,index)=>curveReach(connector,knots[index]!,end));
+  const spans=knots.slice(1).map((end,index)=>curveReach(connector,knots[index]!,end,widgets));
   const directions:Vec[]=knots.map((point,index)=>{
     if(index===0)return startNormal??(connector.start.kind==='anchor'?anchorNormal(connector.start,widgets):{x:0,y:0});
     if(index===knots.length-1){const normal=endNormal??(connector.end.kind==='anchor'?anchorNormal(connector.end,widgets):{x:0,y:0});return {x:-normal.x,y:-normal.y};}

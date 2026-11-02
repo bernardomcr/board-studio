@@ -11,7 +11,7 @@ import {destroyDisplayTree} from './destroy-tree';
 import type { BoardState } from "../core/commands";
 import { widgetAABB, rectsIntersect, widgetCorners, type Rect } from "../core/geometry";
 import {visibleFrames,frameForWidget} from '../core/frame-visibility';
-import { connectorGeometry, connectorVisualBounds,type ConnectorGeometry } from "../core/connectors";
+import { connectorGeometry, connectorVisualBounds,type Connector,type ConnectorGeometry } from "../core/connectors";
 import {connectorCaptionLayout,connectorCaptionBounds,type CaptionLayout} from '../core/connector-captions';
 import { strokeBounds, type StrokePoint, type Stroke } from "../core/strokes";
 import {paintStroke,strokeRenderKey} from './stroke-paint';
@@ -27,7 +27,7 @@ import {renderStructuredText} from './structured-text';
 import {textFontScale,wrapRichLines,fitBoxText,isBoxText,isFreeText,trimTextLine,TEXT_DESIGN_SIZE,type BoxTextFit} from '../core/text-layout';
 import {LargeTextRaster,needsLargeTextRaster} from './large-text';
 import {screenStroke,screenDot,screenStrokeKey} from './screen-coverage';
-import {stickyPadPaper} from '../core/stickies';
+import {paintStickyPad,paintStickyPadLabel} from './sticky-pad-paint';
 
 interface Node {
   container: Container;
@@ -50,6 +50,13 @@ interface Node {
   paintedDpr?:number;
 }
 interface ConnectorLabelNode {container:Container;textLayer:Container;text:Text;caption?:CaptionLayout;largeText?:LargeTextRaster}
+export interface MindTopicPresentation {widget:Widget;alpha:number}
+export interface MindBranchPresentation {connector:Connector;alpha:number}
+interface MindPresentation {
+  state:BoardState;
+  topics:Map<string,{node:Node;ghost:boolean}>;
+  branches:Map<string,{graphics:Graphics;labels:ConnectorLabelNode[]}>;
+}
 function destroyConnectorLabel(node:ConnectorLabelNode):void{node.largeText?.destroy();destroyDisplayTree(node.container);}
 const TRANSFORM_FIELDS=new Set(['x','y','rotation','z','name','hidden','locked']);
 /** Commands replace widget records while moving. Its local paint does not
@@ -80,6 +87,8 @@ export class BoardScene {
   private textResolution = 2;
   private zoom = 1;
   private visible?:Rect;
+  private mindPresentation?:MindPresentation;
+  private mindPresentationEpoch=0;
 
   constructor(stage: Container) {
     this.frameLayer.sortableChildren = true;
@@ -233,6 +242,8 @@ export class BoardScene {
   // -------------------------------------------------------------- sync
 
   sync(state: BoardState, visible?: Rect, zoom = 1): void {
+    // A model/camera sync always wins over a short-lived presentation.
+    this.endMindPresentation();
     this.zoom = zoom;
     this.visible=visible;
     this.textResolution = textRasterDensity(zoom);
@@ -291,6 +302,81 @@ export class BoardScene {
     return this.nodes.get(id)?.container;
   }
 
+  /** Retain existing GPU topic trees; only removed topics need temporary trees. */
+  beginMindPresentation(state:BoardState,topics:ReadonlyMap<string,Widget>,branches:ReadonlyMap<string,Connector>):number {
+    this.endMindPresentation();
+    const presentation:MindPresentation={state,topics:new Map(),branches:new Map()};
+    this.mindPresentation=presentation;
+    for(const [id,widget] of topics){
+      if(!widget.mind&&!state.widgets.get(id)?.mind)continue;
+      let node=this.nodes.get(id);const ghost=!node;
+      if(!node){node=this.createNode(widget);this.paint(node,widget);node.container.zIndex=widget.z;node.container.eventMode='none';this.layer.addChild(node.container);}
+      presentation.topics.set(id,{node,ghost});
+    }
+    for(const [id,connector] of branches){
+      if(!connector.mindBranch)continue;
+      const graphics=new Graphics();graphics.label=`${id}:mind-motion`;graphics.eventMode='none';graphics.zIndex=connector.z;this.layer.addChild(graphics);
+      presentation.branches.set(id,{graphics,labels:[]});
+      const original=this.connectorNodes.get(id);if(original)original.visible=false;
+      for(const label of this.connectorLabels.get(id)??[])label.container.visible=false;
+    }
+    return ++this.mindPresentationEpoch;
+  }
+
+  hasMindPresentation(epoch:number):boolean {return !!this.mindPresentation&&this.mindPresentationEpoch===epoch;}
+
+  /** No model writes or full scene sync: transform topics and route only these branches. */
+  applyMindPresentation(topics:ReadonlyMap<string,MindTopicPresentation>,branches:ReadonlyMap<string,MindBranchPresentation>,widgets:Map<string,Widget>):void {
+    const presentation=this.mindPresentation;if(!presentation)return;
+    for(const [id,{widget,alpha}] of topics){
+      const entry=presentation.topics.get(id);if(!entry)continue;
+      const {node}=entry,local=node.paintedWidget??widget;
+      node.container.position.set(widget.x+widget.width/2,widget.y+widget.height/2);
+      node.container.rotation=widget.rotation;
+      node.container.scale.set(widget.width/Math.max(Number.MIN_VALUE,local.width),widget.height/Math.max(Number.MIN_VALUE,local.height));
+      node.container.alpha=alpha;
+      node.container.visible=alpha>0&&!widget.hidden&&(!this.visible||rectsIntersect(this.visible,widgetAABB(widget)));
+    }
+    for(const [id,{connector,alpha}] of branches){
+      const entry=presentation.branches.get(id);if(!entry)continue;
+      const geometry=connectorGeometry(connector,widgets);if(!geometry){entry.graphics.visible=false;continue;}
+      paintConnector(entry.graphics,connector,geometry,true,this.zoom);
+      const captions=connectorCaptionLayout(connector,geometry),bounds=connectorCaptionBounds(captions);
+      const shown=alpha>0&&!connector.hidden&&(!this.visible||rectsIntersect(this.visible,connectorVisualBounds(connector,geometry))||!!bounds&&rectsIntersect(this.visible,bounds));
+      entry.graphics.visible=shown;entry.graphics.alpha=alpha;entry.graphics.zIndex=connector.z;
+      while(entry.labels.length>captions.length)destroyConnectorLabel(entry.labels.pop()!);
+      for(let i=0;i<captions.length;i++){
+        const caption=captions[i]!;let label=entry.labels[i];
+        if(!label){const container=new Container(),textLayer=new Container(),text=new Text({...TEXT_SAMPLING,text:'',resolution:this.textResolution,style:sharedTextStyle({fontSize:TEXT_DESIGN_SIZE})});container.eventMode='none';textLayer.addChild(text);container.addChild(textLayer);label={container,textLayer,text};entry.labels.push(label);this.layer.addChild(container);}
+        const previous=label.caption,scale=caption.fontSize/TEXT_DESIGN_SIZE;
+        if(!previous||previous.text!==caption.text||previous.fontSize!==caption.fontSize||previous.fontFamily!==caption.fontFamily||previous.color!==caption.color){label.text.text=caption.text;label.text.style=sharedTextStyle({fontFamily:caption.fontFamily,fontSize:TEXT_DESIGN_SIZE,fill:caption.color});label.text.scale.set(scale);label.text.position.set(-label.text.width/2,-label.text.height/2);label.text.resolution=fitTextResolution(label.text,this.textResolution*scale);}
+        label.caption=caption;label.container.position.set(caption.position.x,caption.position.y);label.container.rotation=caption.angle;label.container.zIndex=connector.z+.5;label.container.visible=shown&&!!caption.text;label.container.alpha=alpha;
+        if(label.largeText||needsLargeTextRaster(label.text,this.zoom)){label.largeText??=new LargeTextRaster(label.container);label.largeText.update({x:caption.position.x,y:caption.position.y,width:0,height:0,rotation:caption.angle} as Widget,label.textLayer,shown?this.visible:undefined,this.zoom);}
+      }
+    }
+  }
+
+  /** Restore authoritative transforms/visibility and release every temporary tree. */
+  endMindPresentation():void {
+    const presentation=this.mindPresentation;if(!presentation)return;
+    this.mindPresentation=undefined;this.mindPresentationEpoch++;
+    const {state}=presentation;
+    for(const [id,{node,ghost}] of presentation.topics){
+      if(ghost){node.largeText?.destroy();destroyDisplayTree(node.container);this.links.delete(id);continue;}
+      const widget=state.widgets.get(id);node.container.alpha=1;node.container.scale.set(1);
+      if(!widget){node.container.visible=false;continue;}
+      node.container.position.set(widget.x+widget.width/2,widget.y+widget.height/2);node.container.rotation=widget.rotation;
+      node.container.visible=!widget.hidden&&!mindNodeHidden(state,id)&&(!this.visible||rectsIntersect(this.visible,widgetAABB(widget)));
+    }
+    for(const [id,entry] of presentation.branches){
+      entry.graphics.destroy();for(const label of entry.labels)destroyConnectorLabel(label);
+      const original=this.connectorNodes.get(id),connector=state.connectors.get(id);if(!original)continue;
+      const geometry=connector?connectorGeometry(connector,state.widgets):null,captions=connector&&geometry?connectorCaptionLayout(connector,geometry):[],bounds=connectorCaptionBounds(captions);
+      original.visible=!!connector&&!!geometry&&!connector.hidden&&!mindConnectorHidden(state,connector)&&(!this.visible||rectsIntersect(this.visible,connectorVisualBounds(connector,geometry))||!!bounds&&rectsIntersect(this.visible,bounds));
+      for(const label of this.connectorLabels.get(id)??[])label.container.visible=original.visible&&!!label.caption?.text;
+    }
+  }
+
   private createNode(widget: Widget): Node {
     const container = new Container();
     container.label=widget.id;
@@ -343,7 +429,7 @@ export class BoardScene {
     const coverage=w.checklist||w.table||node.decorations?this.zoom*(globalThis.devicePixelRatio||1):0;
     if(node.layoutWidget===w&&node.layoutDensity===this.textResolution&&node.layoutCoverage===coverage)return;
     node.layoutWidget=w;node.layoutDensity=this.textResolution;node.layoutCoverage=coverage;
-    if(w.type==='sticky_note'&&w.stickyPad){this.links.delete(w.id);for(const child of node.text.removeChildren())destroyDisplayTree(child);node.sig='sticky-pad';return;}
+    if(w.type==='sticky_note'&&w.stickyPad){this.links.delete(w.id);paintStickyPadLabel(node.text,w,this.textResolution);node.sig='sticky-pad';return;}
     if(w.audio){this.links.delete(w.id);node.sig='';paintAudioLabels(node.text,w,this.textResolution);return;}
     if(renderStructuredText(node.text,w,this.textResolution,this.zoom)){this.links.delete(w.id);node.sig='';return;}
     for (const child of node.text.children) if (child instanceof Text){const resolution=fitTextResolution(child,this.textResolution*Math.abs(child.scale.x));if(child.resolution!==resolution)child.resolution=resolution;}
@@ -547,11 +633,7 @@ function drawBackground(g: Graphics, w: Widget, zoom: number): void {
 
   if (w.type === "sticky_note") {
     if(w.stickyPad){
-      const paper=stickyPadPaper(w),step=w.height*.025;
-      for(let layer=3;layer>=1;layer--){g.rect(paper.x,paper.y+step*layer,paper.width,paper.height).fill({color:style.fillColor,alpha:style.fillOpacity});g.rect(paper.x,paper.y+paper.height+step*(layer-1),paper.width,step).fill({color:0x000000,alpha:.08});}
-      g.rect(paper.x,paper.y,paper.width,paper.height).fill({color:style.fillColor,alpha:style.fillOpacity});
-      g.roundRect(w.width*.3,w.height*.942,w.width*.4,w.height*.045,w.height*.02).fill({color:0x000000,alpha:.18});
-      for(let dot=0;dot<5;dot++)g.circle(w.width*(.4+dot*.05),w.height*.964,w.width*.006).fill({color:0xffffff,alpha:.65});
+      paintStickyPad(g,w);
       return;
     }
     const radius=Math.min(w.width,w.height)/80;

@@ -11,6 +11,34 @@ export function sharedTextStyle(options:TextStyleOptions):TextStyle{
   const style=new TextStyle(options);styles.set(key,style);if(styles.size>512)styles.delete(styles.keys().next().value!);return style;
 }
 const resolutions=new WeakMap<Text,{requested:number;styleKey:string;text:string;value:number}>();
+const inkReady=new WeakMap<Text,{style:TextStyle;styleKey:string;text:string}>();
+const paddedStyles=new Map<string,TextStyle>();
+let inkContext:CanvasRenderingContext2D|undefined;
+
+/** Font advances and ink bounds differ, especially for handwriting and italics.
+ * Reserve transparent raster bleed without changing layout, anchors or font size.
+ * Never mutate a shared style: another word may need different ink margins. */
+function ensureInkPadding(text:Text):void{
+  const style=text.style,ready=inkReady.get(text);
+  if(ready?.style===style&&ready.styleKey===style.styleKey&&ready.text===text.text)return;
+  inkContext??=document.createElement('canvas').getContext('2d')!;
+  const measured=CanvasTextMetrics.measureText(text.text||' ',style),properties=measured.fontProperties;
+  inkContext.font=style._fontString;inkContext.textBaseline=style.textBaseline;
+  let overflow=0;
+  for(let i=0;i<measured.lines.length;i++){
+    const metrics=inkContext.measureText(measured.lines[i]!),lineWidth=measured.lineWidths[i]??0;
+    const x=style.align==='right'?measured.maxLineWidth-lineWidth:style.align==='center'?(measured.maxLineWidth-lineWidth)/2:0;
+    const baseline=i*measured.lineHeight+properties.ascent+Math.max(0,(measured.lineHeight-properties.fontSize)/2);
+    overflow=Math.max(overflow,(metrics.actualBoundingBoxLeft||0)-x,x+(metrics.actualBoundingBoxRight||0)-measured.width,(metrics.actualBoundingBoxAscent||0)-baseline,baseline+(metrics.actualBoundingBoxDescent||0)-measured.height);
+  }
+  const padding=Math.max(style._getFinalPadding(),Math.ceil(overflow)+Math.max(1,style.fontSize/1024));
+  if(padding>style._getFinalPadding()){
+    const key=style.styleKey+'|ink:'+padding;let padded=paddedStyles.get(key);
+    if(!padded){padded=style.clone();padded.fill=style.fill;padded.padding=padding;paddedStyles.set(key,padded);if(paddedStyles.size>512)paddedStyles.delete(paddedStyles.keys().next().value!);}
+    text.style=padded;
+  }
+  inkReady.set(text,{style:text.style,styleKey:text.style.styleKey,text:text.text});
+}
 
 /** Half-octave buckets avoid rebuilding font textures on every wheel sample. */
 export function textRasterDensity(zoom:number,dpr=globalThis.devicePixelRatio||1):number{
@@ -20,6 +48,7 @@ export function textRasterDensity(zoom:number,dpr=globalThis.devicePixelRatio||1
 
 /** Bound the actual pooled texture allocation, including power-of-two padding. */
 export function fitTextResolution(text:Text,requested:number):number{
+  ensureInkPadding(text);
   const styleKey=text.style.styleKey,cached=resolutions.get(text);if(cached&&cached.requested===requested&&cached.styleKey===styleKey&&cached.text===text.text)return cached.value;
   const measured=CanvasTextMetrics.measureText(text.text||' ',text.style),padding=text.style._getFinalPadding();
   // CanvasTextGenerator rounds the logical bounds before multiplying by density.

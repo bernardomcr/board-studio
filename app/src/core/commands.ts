@@ -87,9 +87,10 @@ function mergeAbsoluteUpdates(before:Command,after:Command):Command|null {
     return {op:'BATCH',payload:{label:b.label??a.label,commands}};
   }
   if(!['WIDGET_UPDATE','CONNECTOR_UPDATE','STROKE_UPDATE'].includes(after.op))return null;
-  const a=before.payload as {id:string;patch:Record<string,unknown>},b=after.payload as {id:string;patch:Record<string,unknown>};
+  const a=before.payload as {id:string;patch:Record<string,unknown>;mindLayoutScale?:number},b=after.payload as {id:string;patch:Record<string,unknown>;mindLayoutScale?:number};
   if(a.id!==b.id)return null;
-  return {op:after.op,payload:{id:b.id,patch:{...a.patch,...b.patch}}};
+  const mindLayoutScale=after.op==='WIDGET_UPDATE'?(b.mindLayoutScale??('mind' in b.patch?undefined:a.mindLayoutScale)):undefined;
+  return {op:after.op,payload:{id:b.id,patch:{...a.patch,...b.patch},...(mindLayoutScale===undefined?{}:{mindLayoutScale})}};
 }
 
 function retainGestureEntry(entries:ExecutedCommand[],entry:ExecutedCommand):void {
@@ -206,10 +207,10 @@ export class CommandBus {
       if(['WIDGET_CREATE','CONNECTOR_CREATE','STROKE_CREATE','GROUP_CREATE'].includes(command.op)&&lockedTree((command.payload as {id:string}).id))return null;
       if(['WIDGET_CREATE','CONNECTOR_CREATE','STROKE_CREATE'].includes(command.op)){const doc=ensureBoardLayers(s),flags=boardLayerFlags(doc,(command.payload as {layerId?:string}).layerId??doc.activeId);if(flags.hidden||flags.locked)return null;}
       if(['WIDGET_UPDATE','CONNECTOR_UPDATE','STROKE_UPDATE'].includes(command.op)){
-        const {id,patch}=command.payload as {id:string;patch:Record<string,unknown>};
+        const {id,patch,mindLayoutScale}=command.payload as {id:string;patch:Record<string,unknown>;mindLayoutScale?:number};
         // Visibility is a view control, available from the layers panel. A
         // locked object's content, geometry, style and lock cannot be patched.
-        if(lockedTree(id)&&!Object.keys(patch).every(key=>key==='hidden'))return null;
+        if(lockedTree(id)&&(mindLayoutScale!==undefined||!Object.keys(patch).every(key=>key==='hidden')))return null;
       }
       if(['WIDGET_REMOVE','CONNECTOR_REMOVE','STROKE_REMOVE','GROUP_REMOVE'].includes(command.op)&&lockedTree(command.payload as string))return null;
       if(['WIDGET_TRANSLATE','WIDGET_REORDER','WIDGET_ALIGN','WIDGET_DISTRIBUTE'].includes(command.op)&&(command.payload as {ids:string[]}).ids.some(id=>lockedTree(id)))return null;
@@ -513,10 +514,17 @@ export class CommandBus {
       }
 
       case "WIDGET_UPDATE": {
-        const { id, patch:incoming } = command.payload as { id: string; patch: Partial<Widget>&{textSizing?:'natural'} };
+        const { id, patch:incoming,mindLayoutScale } = command.payload as { id: string; patch: Partial<Widget>&{textSizing?:'natural'};mindLayoutScale?:number };
         const widget = s.widgets.get(id);
         if (!widget) return null;
         let patch={...incoming};
+        // Keep immutable attachment bytes out of every pointer-frame command.
+        // The journal records this scalar; replay derives the same metadata.
+        if(mindLayoutScale!==undefined){
+          const mind='mind' in incoming?incoming.mind:widget.mind;
+          if(!mind||!Number.isFinite(mindLayoutScale)||mindLayoutScale<=0)return null;
+          patch.mind={...mind,layoutScale:mindLayoutScale};
+        }
         if(incoming.style)patch.style={...widget.style,...incoming.style};
         const sized=incoming.width!==undefined||incoming.height!==undefined;
         if(sized){
@@ -532,7 +540,8 @@ export class CommandBus {
           const text=naturalText({...widget,...patch,style} as TextWidget);
           patch={...patch,style,width:text.width,height:text.height,textSizing:'natural'};
         }
-        command.payload={id,patch};
+        const recordedPatch={...patch};if(mindLayoutScale!==undefined&&!('mind' in incoming))delete recordedPatch.mind;
+        command.payload={id,patch:recordedPatch,...(mindLayoutScale===undefined?{}:{mindLayoutScale})};
         const before = { ...widget } as Widget;
         const after = projectLayerItem(s,{ ...widget, ...prepareLayerPatch(widget,patch) } as Widget);
         return {

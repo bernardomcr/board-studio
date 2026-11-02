@@ -2,7 +2,8 @@ import type {BoardState,CommandBus} from './core/commands';
 import type {Camera} from './core/camera';
 import type {Widget,ShapeWidget} from './core/model';
 import {widgetAABB,type Vec} from './core/geometry';
-import {createMindMap,addMindChild,addMindSibling,toggleMindBranch,reparentMindNode,layoutMindMap,setMindLayout,setMindColor,setMindLineShape,setMindDetails,setMindTheme,showMindLevels,selectMindSubtopics,MIND_THEMES,mindLayoutCommands,deleteMindSubtree,mindChildren,mindSubtree,mindRoot,mindNodeHidden,navigateMindNode,type MindLayout,type MindSide} from './core/mindmap';
+import {createMindMap,addMindChild,addMindSibling,toggleMindBranch,reparentMindNode,layoutMindMap,markMindManualPosition,setMindLayout,setMindColor,setMindLineShape,setMindDetails,setMindTheme,showMindLevels,selectMindSubtopics,MIND_THEMES,mindLayoutCommands,deleteMindSubtree,mindChildren,mindSubtree,mindRoot,mindNodeHidden,navigateMindNode,type MindLayout,type MindSide} from './core/mindmap';
+import type {Connector} from './core/connectors';
 import {itemLocked} from './core/groups';
 import {ensureBoardLayers,boardLayerFlags} from './core/board-layers';
 import {shapeIconSvg} from './core/shapes';
@@ -11,15 +12,18 @@ import {boardFontOptions,loadBoardFont} from './fonts';
 import {relativeBorderScale} from './core/style-scale';
 import {sizeRangeMaximum,multipliedSize,formatSize} from './size-controls';
 import {icon} from './icons';
-import {compactContextPanel,positionContextPanel} from './context-position';
+import {compactContextPanel,positionContextPanel,workspaceLeft,workspaceTop} from './context-position';
 import {installFontPickers} from './font-picker';
 import {uiPalette} from './ui-palette';
 import {brandColorRevision} from './brand-colors';
+import {installMindAttachments} from './mind-attachments';
 
 interface MindmapUIAPI{
   state:BoardState;bus:CommandBus;camera:Camera;
   setTool(tool:'select'):void;getTool?():string;
   onEdit(id:string):void;onChange?():void;onLink?():void;onImage?(parentId:string):void;
+  onTransition?(before:{widgets:Map<string,Widget>;connectors:Map<string,Connector>},duration:number):void;
+  getBoardKey?():string|null;
 }
 const COLORS=[['#4262ff','Azul'],['#e25767','Vermelho'],['#f39b42','Laranja'],['#55a676','Verde'],['#2ba4ad','Turquesa'],['#9a65c8','Roxo'],['#da73aa','Rosa'],['#62748b','Cinza']] as const;
 const escape=(value:unknown)=>String(value??'').replace(/[&"<>]/g,c=>({'&':'&amp;','"':'&quot;','<':'&lt;','>':'&gt;'}[c]!));
@@ -53,13 +57,28 @@ export function installMindmapUI(api:MindmapUIAPI){
   #mindmap-properties .mind-layout-choice .mind-layout-check{margin-left:auto;visibility:hidden}
   #mindmap-properties .mind-layout-choice[aria-pressed=true] .mind-layout-check{visibility:visible}
   #mindmap-properties .mind-form{display:flex;flex-direction:column;gap:12px;width:238px}#mindmap-properties .mind-form label{display:flex;flex-direction:column;gap:6px;color:#606978;font-size:11px}#mindmap-properties .mind-form input,#mindmap-properties .mind-form textarea,#mindmap-properties .mind-form select{font:12px Inter,Segoe UI,sans-serif;color:#292823;border:1px solid #d9dfe8;border-radius:5px;box-sizing:border-box;padding:7px;background:#fff;width:100%;min-width:0}#mindmap-properties .mind-form input[type=color]{height:30px;padding:2px;cursor:pointer}#mindmap-properties .mind-form input[type=range]{height:22px;border:0;padding:0;accent-color:#4262ff;cursor:ew-resize}#mindmap-properties .mind-form textarea{height:110px;resize:vertical;line-height:1.5}#mindmap-properties .mind-form .mind-form-row{display:flex;align-items:flex-end;gap:8px}#mindmap-properties .mind-form-row label{flex:1}#mindmap-properties .mind-form-row button,#mindmap-properties .mind-icon-presets button,#mindmap-properties .mind-transparent{display:flex;align-items:center;justify-content:center;border:1px solid #dce0e8;background:white;color:inherit;border-radius:5px;cursor:pointer;height:32px;min-width:32px;font:inherit;padding:6px}#mindmap-properties .mind-form button[aria-pressed=true]{background:#edf1ff;color:#4262ff;border-color:#aabaff}#mindmap-properties .mind-icon-presets{display:flex;gap:5px;flex-wrap:wrap}#mindmap-properties .mind-icon-presets button{font-size:17px}#mindmap-properties .mind-form small{font-size:10px;color:#858c99;line-height:1.5}#mindmap-properties .mind-theme-preview{display:flex;gap:3px;margin-left:auto}#mindmap-properties .mind-theme-preview i{width:9px;height:14px;border-radius:3px}
-  #mindmap-node-controls{position:fixed;display:flex;align-items:center;gap:6px;z-index:41;transform:translateY(-50%);pointer-events:none}
-  #mindmap-node-controls button{height:26px;min-width:26px;display:flex;align-items:center;justify-content:center;gap:3px;padding:0 5px;border:1px solid #b8c6ff;border-radius:20px;background:#fff;color:#4262ff;box-shadow:0 2px 6px #15171b13;font:11px Inter,'Segoe UI',sans-serif;cursor:pointer;pointer-events:auto}
-  #mindmap-node-controls button[data-mind-add]{border-color:#4262ff;background:#4262ff;color:#fff;padding:0;width:26px}
-  #mindmap-node-controls button:hover{filter:brightness(.96)}
+  #mindmap-node-controls{position:fixed;inset:0;display:block;z-index:41;transform:none;pointer-events:none}
+  #mindmap-node-controls button{position:fixed;width:24px;height:24px;min-width:24px;display:grid;place-items:center;padding:3px;border:1px solid var(--studio-line,#dce0e8);border-radius:50%;background:var(--studio-surface,#fff);color:var(--studio-accent,#8050ba);box-shadow:0 3px 9px #15171b18;font:11px Inter,'Segoe UI',sans-serif;cursor:pointer;pointer-events:auto;animation:mind-control-appear 250ms cubic-bezier(.2,.8,.2,1) both}
+  #mindmap-node-controls button[data-mind-add],#mindmap-node-controls button[data-mind-sibling]{background:var(--studio-accent,#8050ba);border-color:var(--studio-accent,#8050ba);color:var(--studio-surface,#fff)}
+  #mindmap-node-controls button[data-mind-fold]{border:0;background:transparent;box-shadow:none;padding:0}
+  #mindmap-node-controls button[data-mind-fold]::before{content:'';width:10px;height:10px;border:2px solid var(--mind-branch-color,var(--studio-accent));border-radius:50%;background:var(--studio-surface,#fff);box-sizing:border-box;transition:width 250ms,height 250ms,background-color 120ms}
+  #mindmap-node-controls button[data-mind-fold][aria-expanded=false]::before{width:15px;height:15px}
+  #mindmap-node-controls button[data-mind-fold]::after{content:'';position:absolute;width:3px;height:3px;border-radius:50%;background:var(--mind-branch-color,var(--studio-accent))}
+  #mindmap-node-controls button:hover{filter:brightness(1.06)}
+  @keyframes mind-control-appear{from{opacity:0;transform:scale(.2)}to{opacity:1;transform:scale(1)}}
+  @media(prefers-reduced-motion:reduce){#mindmap-node-controls button{animation:none}#mindmap-node-controls button[data-mind-fold]::before{transition:none}}
   #mindmap-drop-target{position:fixed;pointer-events:none;border:2px dashed #4262ff;border-radius:12px;box-shadow:0 0 0 5px #4262ff1f;box-sizing:border-box;z-index:39}
   #mindmap-drop-target span{position:absolute;bottom:calc(100% + 8px);left:50%;transform:translateX(-50%);white-space:nowrap;background:#4262ff;color:white;border-radius:5px;padding:6px 8px;font:11px Inter,'Segoe UI',sans-serif}
   #mindmap-properties .mind-menu-title{font-size:11px;font-weight:500;color:var(--studio-muted,#687385);margin:0}
+  #mindmap-properties [data-menu=mind-attachments]>summary{gap:3px;width:auto;min-width:36px}
+  #mindmap-properties .mind-attachment-count{font-size:10px;color:var(--studio-muted);font-variant-numeric:tabular-nums}
+  #mindmap-properties [data-menu=mind-attachments]>.property-popover{width:292px}
+  #mindmap-properties .mind-attachment-list{display:flex;flex-direction:column;gap:5px;width:100%;min-width:0;max-height:280px;overflow:auto}
+  #mindmap-properties .mind-attachment-row{display:flex;align-items:center;gap:5px;padding:7px 0;border-bottom:1px solid var(--studio-line,#e6e7eb)}
+  #mindmap-properties .mind-attachment-name{flex:1;min-width:0;font-size:12px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  #mindmap-properties .mind-attachment-name small{display:block;margin-top:3px;color:var(--studio-muted,#746b80);font-size:10px}
+  #mindmap-properties .mind-attachment-row button{display:grid;place-items:center;flex:none;width:30px;height:30px;padding:5px;border:0;border-radius:6px;background:transparent;color:inherit;cursor:pointer}
+  #mindmap-properties .mind-attachment-row button:hover{background:var(--studio-soft,#eee9f6);color:var(--studio-accent,#8050ba)}
   #mindmap-properties .mind-menu-section{display:flex;flex-direction:column;gap:6px}
   #mindmap-properties .mind-icon-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:4px}
   #mindmap-properties .mind-icon-grid button{display:flex;align-items:center;justify-content:center;min-width:0;height:42px;padding:8px;border:1px solid transparent;border-radius:7px;background:transparent;color:inherit;cursor:pointer}
@@ -76,8 +95,11 @@ export function installMindmapUI(api:MindmapUIAPI){
   #mindmap-properties .mind-levels button{height:32px;min-width:32px;border:1px solid var(--studio-line,#e3e7ee);border-radius:6px;background:var(--studio-raised,#f7f8fc);color:inherit;font:inherit;cursor:pointer}
   #mindmap-properties .mind-lock-control{width:auto!important;gap:8px!important;padding:9px 12px!important;font:12px Inter,'Segoe UI',sans-serif;white-space:nowrap}
   #mindmap-properties button:disabled{opacity:.4;cursor:default}
-  #mindmap-node-controls button{background:var(--studio-surface,#fff);color:var(--studio-accent,#4262ff);border-color:var(--studio-line,#b8c6ff)}
-  #mindmap-node-controls button[data-mind-add]{background:var(--studio-accent,#4262ff);border-color:var(--studio-accent,#4262ff);color:var(--studio-surface,#fff)}
+  #mindmap-properties .mind-layout-choice{color:var(--studio-ink,#292823)}
+  #mindmap-properties .mind-layout-choice:hover{background:var(--studio-soft,#f1f3fb)}
+  #mindmap-properties .mind-layout-choice[aria-pressed=true]{background:var(--studio-tint,#eef2ff);color:var(--studio-accent,#8050ba)}
+  #mindmap-properties .mind-custom-color{border-color:var(--studio-line,#eceef2)}
+  #mindmap-properties .mind-colors button[aria-pressed=true]{box-shadow:0 0 0 2px var(--studio-accent,#8050ba)}
   #mindmap-drop-target{border-color:var(--studio-accent,#4262ff);box-shadow:0 0 0 4px color-mix(in srgb,var(--studio-accent,#4262ff) 14%,transparent)}
   #mindmap-drop-target[data-kind=before],#mindmap-drop-target[data-kind=after]{height:3px!important;border:0;border-radius:2px;background:var(--studio-accent,#4262ff);box-shadow:none}
   #mindmap-drop-target[data-kind=before]::before,#mindmap-drop-target[data-kind=after]::before{content:'';position:absolute;left:-3px;top:-2px;width:7px;height:7px;border-radius:50%;background:var(--studio-accent,#4262ff)}
@@ -91,12 +113,17 @@ export function installMindmapUI(api:MindmapUIAPI){
   const toolbarButton=document.createElement('button');toolbarButton.type='button';toolbarButton.dataset.tool='mindmap';toolbarButton.dataset.label='Mapa mental';toolbarButton.setAttribute('aria-label','Mapa mental');toolbarButton.title='Mapa mental';toolbarButton.innerHTML=icon('mindmap',22);
   const toolbar=document.getElementById('toolbar')!;toolbar.querySelector('[data-tool="shape"]')?.after(toolbarButton);if(!toolbarButton.parentElement)toolbar.append(toolbarButton);
   let renderKey='',selectedId='',drop:MindDrop|null=null,inputEngaged=false,pointerInteraction=false,refreshDeferred=false,forceHistoryRefresh=false,mindPalette:'color'|'fillColor'|'borderColor'|null=null;
+  let dragOrigin:{id:string;widgets:Map<string,Widget>}|undefined;
+  const transitionStart=()=>api.onTransition&&!matchMedia('(prefers-reduced-motion: reduce)').matches?{widgets:new Map([...state.widgets].filter(([,node])=>!!node.mind)),connectors:new Map([...state.connectors].filter(([,line])=>!!line.mindBranch))}:undefined;
+  const transitionEnd=(before:ReturnType<typeof transitionStart>)=>{if(before)api.onTransition?.(before,250);};
   panel.addEventListener('pointerdown',()=>{pointerInteraction=true;},true);
   const release=()=>{pointerInteraction=false;if(refreshDeferred){refreshDeferred=false;refresh();}};document.addEventListener('click',release);window.addEventListener('pointerup',()=>setTimeout(release,120),true);window.addEventListener('pointercancel',release,true);
   panel.addEventListener('focusin',event=>{if((event.target as HTMLElement).matches('input,textarea,select'))inputEngaged=true;});panel.addEventListener('focusout',()=>queueMicrotask(()=>{inputEngaged=panel.contains(document.activeElement)&&!!document.activeElement?.matches('input,textarea,select');if(!inputEngaged)refresh();}));
   const selected=()=>{const node=state.selection.size===1?state.widgets.get([...state.selection][0]!):undefined;return node?.mind&&!node.hidden&&!mindNodeHidden(state,node.id)?node:undefined;};
   const active=()=>!document.body.classList.contains('home-visible')&&(!api.getTool||api.getTool()==='select');
+  document.addEventListener('pointerdown',event=>{if(event.button!==0||!(event.target instanceof HTMLCanvasElement)||!active()){dragOrigin=undefined;return;}const node=selected();dragOrigin=node&&!node.locked?{id:node.id,widgets:new Map([...state.widgets].filter(([,widget])=>!!widget.mind))}:undefined;});
   const locked=(node:Widget)=>itemLocked(state,node.id);
+  const attachments=installMindAttachments({state,bus,getBoardKey:api.getBoardKey,onChange:()=>{renderKey='';refresh();api.onChange?.();}});
   const canUnlock=(node:Widget)=>locked(node)&&!boardLayerFlags(ensureBoardLayers(state),node.layerId??ensureBoardLayers(state).activeId).locked;
   installHoldAction(panel,()=>{const node=selected();if(!node||!canUnlock(node))return;bus.exec({op:'ENTITY_LOCK',payload:{ids:[node.id],locked:false}});renderKey='';refresh();api.onChange?.();});
   function focusNode(id:string,edit=false){
@@ -108,10 +135,11 @@ export function installMindmapUI(api:MindmapUIAPI){
     }
     if(edit&&node&&!locked(node))api.onEdit(id);refresh();api.onChange?.();
   }
-  function create(){const id=createMindMap(state,bus,{x:camera.x,y:camera.y},'Ideia central',1/camera.scale);if(state.widgets.has(id))focusNode(id,true);return id;}
+  function create(){const background=state.background?.color??'#fbfaf7',rgb=/^#[a-f\d]{6}$/i.test(background)?parseInt(background.slice(1),16):0xffffff,dark=.2126*(rgb>>16)+.7152*(rgb>>8&255)+.0722*(rgb&255)<135,id=createMindMap(state,bus,{x:camera.x,y:camera.y},'Ideia central',1/camera.scale,{dark});if(state.widgets.has(id))focusNode(id,true);return id;}
   function add(id:string,kind:'child'|'sibling',before=false){
+    const motion=transitionStart();
     const result=kind==='child'?addMindChild(state,bus,id):addMindSibling(state,bus,id,'Novo tópico',before);
-    if(result)focusNode(result,true);return result;
+    if(result){focusNode(result,true);transitionEnd(motion);}return result;
   }
   function collapseAll(id:string){const node=state.widgets.get(id);if(!node||locked(node))return;bus.beginTransaction('Recolher todos os níveis');try{showMindLevels(state,bus,id,1);if(!state.widgets.get(id)?.mind?.collapsed)toggleMindBranch(state,bus,id);}finally{bus.endTransaction();}}
   function perform(action:string){const node=selected();if(!node||locked(node))return;
@@ -119,6 +147,7 @@ export function installMindmapUI(api:MindmapUIAPI){
     if(action==='edit'){api.onEdit(node.id);return;}
     if(action==='link'){api.onLink?.();return;}
     if(action==='image'){api.onImage?.(node.id);return;}
+    const motion=action==='select-subtopics'?undefined:transitionStart();
     if(action==='collapse')toggleMindBranch(state,bus,node.id);
     if(action==='select-subtopics')selectMindSubtopics(state,bus,node.id);
     if(action==='expand-branch')showMindLevels(state,bus,node.id,0);
@@ -127,7 +156,7 @@ export function installMindmapUI(api:MindmapUIAPI){
     if(action==='collapse-map')collapseAll(mindRoot(state,node.id)?.id??node.id);
     if(action==='reflow')layoutMindMap(state,bus,mindRoot(state,node.id)?.id??node.id);
     if(action==='delete')deleteMindSubtree(state,bus,node.id);
-    renderKey='';refresh();api.onChange?.();
+    renderKey='';refresh();api.onChange?.();transitionEnd(motion);
   }
   async function formatTopic(patch:Partial<Widget['style']>){const node=selected();if(!node||locked(node))return;const id=node.id;if(patch.fontFamily)await loadBoardFont(patch.fontFamily);const current=selected();if(!current||current!==node||locked(current))return;
     bus.beginTransaction('Formatar tópico');bus.exec({op:'WIDGET_UPDATE',payload:{id,patch:{style:{...current.style,...patch}}}});const commands=mindLayoutCommands(state,id);if(commands.length)bus.exec({op:'BATCH',payload:{commands}});bus.endTransaction();renderKey='';refresh();api.onChange?.();
@@ -160,18 +189,22 @@ export function installMindmapUI(api:MindmapUIAPI){
   }
   function branchMenu(){return `<details data-menu="mind-branches"><summary role="button" aria-label="Ramos e níveis" title="Ramos e níveis">${icon('mindmap',21)}</summary><div class="property-popover">${menuAction('select-subtopics','Selecionar subtópicos','select')}${menuAction('expand-branch','Expandir todo o ramo','plus','Alt+0')}${menuAction('collapse-branch','Recolher todo o ramo','minus')}<hr><p class="mind-menu-title">Níveis visíveis</p><div class="mind-levels">${Array.from({length:10},(_,level)=>`<button type="button" data-mind-level="${level}" aria-label="${level?`Mostrar ${level} ${level===1?'nível':'níveis'} do ramo`:'Mostrar todos os níveis do ramo'}" title="${level?`${level} ${level===1?'nível':'níveis'}`:'Todos'} (Alt+${level})">${level||'Todos'}</button>`).join('')}</div></div></details>`;}
   function detailsMenu(node:Widget){const mind=node.mind!;return `<details data-menu="mind-details"><summary role="button" aria-label="Notas e ícone" title="Notas e ícone">${icon('sticky',21)}</summary><div class="property-popover"><div class="mind-form"><label>Notas do tópico<textarea data-mind-notes aria-label="Notas do tópico">${escape(mind.notes??'')}</textarea></label><label>Ícone do tópico<input type="text" data-mind-icon-input aria-label="Ícone do tópico" value="${escape(mind.icon??'')}" placeholder="Emoji ou símbolo" maxlength="128"></label><div class="mind-icon-presets">${['💡','🎯','🚀','⭐','✅','📌'].map(value=>`<button type="button" data-mind-icon="${value}" aria-label="Ícone ${value}">${value}</button>`).join('')}<button type="button" data-mind-icon="" aria-label="Remover ícone">${icon('close',16)}</button></div></div></div></details>`;}
+  function attachmentMenu(node:Widget){const files=node.mind?.attachments??[],size=(bytes:number)=>bytes<1024?`${bytes} B`:bytes<1024*1024?`${(bytes/1024).toFixed(1)} KiB`:`${(bytes/(1024*1024)).toFixed(1)} MiB`;return `<details data-menu="mind-attachments"><summary role="button" aria-label="Anexos do tópico" title="${files.length} ${files.length===1?'anexo':'anexos'}">${icon('attachment',20)}${files.length?`<span class="mind-attachment-count" aria-label="${files.length} anexos">${files.length}</span>`:''}</summary><div class="property-popover"><button type="button" class="mind-menu-action" data-mind-attachment-add aria-label="Adicionar arquivo ao tópico">${icon('plus',18)}<span>Adicionar arquivo</span></button>${files.length?`<div class="mind-attachment-list" aria-label="Arquivos do tópico">${files.map(file=>`<div class="mind-attachment-row"><span class="mind-attachment-name" title="${escape(file.name)}">${escape(file.name)}<small>${size(file.size)}</small></span><button type="button" data-mind-attachment-download="${escape(file.id)}" aria-label="Baixar ${escape(file.name)}" title="Baixar ${escape(file.name)}">${icon('download',18)}</button><button type="button" data-mind-attachment-remove="${escape(file.id)}" aria-label="Remover ${escape(file.name)}" title="Remover ${escape(file.name)}">${icon('trash',18)}</button></div>`).join('')}</div>`:''}</div></details>`;}
   toolbarButton.addEventListener('click',event=>{event.stopPropagation();create();});
   panel.addEventListener('click',event=>{
     const button=(event.target as Element).closest<HTMLButtonElement>('button');if(!button)return;
     const node=selected();if(!node||locked(node))return;
     if(button.dataset.mindAction)perform(button.dataset.mindAction);
     if(button.dataset.mindColor){const node=selected();if(node)setMindColor(state,bus,node.id,button.dataset.mindColor);renderKey='';refresh();api.onChange?.();}
-    if(button.dataset.mindLayout){const node=selected();if(node)setMindLayout(state,bus,node.id,button.dataset.mindLayout as MindLayout);renderKey='';refresh();api.onChange?.();}
+    if(button.dataset.mindLayout){const motion=transitionStart(),node=selected();if(node)setMindLayout(state,bus,node.id,button.dataset.mindLayout as MindLayout);renderKey='';refresh();api.onChange?.();transitionEnd(motion);}
     if(button.dataset.mindLine){const node=selected();if(node)setMindLineShape(state,bus,node.id,button.dataset.mindLine as 'straight'|'curved'|'elbowed');renderKey='';refresh();api.onChange?.();}
     if(button.dataset.mindTheme){const node=selected();if(node)setMindTheme(state,bus,node.id,button.dataset.mindTheme as keyof typeof MIND_THEMES);renderKey='';refresh();api.onChange?.();}
     if(button.dataset.mindIcon!==undefined){const node=selected();if(node)setMindDetails(state,bus,node.id,{icon:button.dataset.mindIcon});renderKey='';refresh();api.onChange?.();}
-    if(button.dataset.mindLevel!==undefined){showMindLevels(state,bus,node.id,Number(button.dataset.mindLevel));renderKey='';refresh();api.onChange?.();}
+    if(button.dataset.mindLevel!==undefined){const motion=transitionStart();showMindLevels(state,bus,node.id,Number(button.dataset.mindLevel));renderKey='';refresh();api.onChange?.();transitionEnd(motion);}
     if(button.dataset.mindShape)setTopicShape(button.dataset.mindShape as ShapeWidget['shape']);
+    if(button.hasAttribute('data-mind-attachment-add'))attachments.open(node.id);
+    if(button.dataset.mindAttachmentDownload)attachments.download(node.id,button.dataset.mindAttachmentDownload);
+    if(button.dataset.mindAttachmentRemove)attachments.remove(node.id,button.dataset.mindAttachmentRemove);
     if(button.dataset.mindToggle){const field=button.dataset.mindToggle as keyof Widget['style'],value=button.dataset.mindToggleValue??'normal';void formatTopic({[field]:['textAlign','textAlignVertical'].includes(field)?value:node.style[field]===value?field==='textDecoration'?'none':'normal':value});}
     if(button.dataset.mindPalette!==undefined){mindPalette=button.dataset.mindPalette==='close'?null:button.dataset.mindPalette as typeof mindPalette;renderKey='';refresh();}
     if(button.dataset.colorDomain==='mind-format'){const field=button.dataset.colorField!,value=button.dataset.color!;void formatTopic({[field]:value,...(field==='fillColor'?{fillOpacity:value==='transparent'?0:1}:{})});}
@@ -183,10 +216,11 @@ export function installMindmapUI(api:MindmapUIAPI){
     if(input.hasAttribute('data-mind-icon-input')){setMindDetails(state,bus,node.id,{icon:input.value});renderKey='';refresh();}
     if(input.dataset.mindFormat){const field=input.dataset.mindFormat;let value:string|number=input.value;if(field==='fontSize'){value=Number(value);if(!Number.isFinite(value)||value<=0)return;}if(field==='fillOpacity'||field==='borderOpacity'){value=Number(value);if(!Number.isFinite(value))return;value=Math.max(0,Math.min(1,value));}if(field==='borderScale'){value=Number(value)/100;if(!Number.isFinite(value)||value<0)return;void formatTopic({borderScale:value,borderWidth:value*Math.min(node.width,node.height)});}else void formatTopic({...{[field]:value},...(field==='fillColor'?{fillOpacity:1}:{})});}
   });
-  controls.addEventListener('click',event=>{const button=(event.target as Element).closest<HTMLButtonElement>('button');if(!button)return;event.stopPropagation();if(button.hasAttribute('data-mind-notes-button')){panel.querySelector<HTMLElement>('[data-menu="mind-details"] summary')?.click();panel.querySelector<HTMLTextAreaElement>('[data-mind-notes]')?.focus();return;}perform(button.hasAttribute('data-mind-add')?'child':'collapse');});
+  controls.addEventListener('pointerdown',event=>event.stopPropagation());
+  controls.addEventListener('click',event=>{const button=(event.target as Element).closest<HTMLButtonElement>('button');if(!button)return;event.stopPropagation();if(button.hasAttribute('data-mind-notes-button')){panel.querySelector<HTMLElement>('[data-menu="mind-details"] summary')?.click();panel.querySelector<HTMLTextAreaElement>('[data-mind-notes]')?.focus();return;}perform(button.hasAttribute('data-mind-add')?'child':button.hasAttribute('data-mind-sibling')?'sibling':'collapse');});
   function closeMenus(){delete panel.dataset.openMenu;for(const details of panel.querySelectorAll<HTMLDetailsElement>('details'))details.open=false;if(mindPalette){mindPalette=null;renderKey='';queueMicrotask(refresh);}}
   document.addEventListener('pointerdown',event=>{if(!(event.target as Element).closest('.font-picker-popover,.brand-dialog')&&!panel.contains(event.target as Node))closeMenus();});
-  panel.addEventListener('keydown',event=>{if(event.target instanceof HTMLInputElement&&event.target.type==='range'&&(event.ctrlKey||event.metaKey)&&['z','y'].includes(event.key.toLowerCase()))return;if(event.key==='Escape'){event.preventDefault();closeMenus();}event.stopPropagation();});
+  panel.addEventListener('keydown',event=>{if((event.ctrlKey||event.metaKey)&&['z','y'].includes(event.key.toLowerCase())&&(!(event.target instanceof HTMLInputElement||event.target instanceof HTMLTextAreaElement)||event.target instanceof HTMLInputElement&&event.target.type==='range'))return;if(event.key==='Escape'){event.preventDefault();closeMenus();}event.stopPropagation();});
   function refresh(){
     if(pointerInteraction&&!forceHistoryRefresh){refreshDeferred=true;return;}
     const node=selected(),visible=!!node&&active();panel.hidden=!visible;controls.hidden=!visible;
@@ -195,14 +229,15 @@ export function installMindmapUI(api:MindmapUIAPI){
     if(document.activeElement?.closest('.font-picker-popover')&&!forceHistoryRefresh)return;
     if(inputEngaged&&!forceHistoryRefresh){positionContextPanel(panel,state,camera);return;}
     const mind=node!.mind!,root=mindRoot(state,node!.id),children=mindChildren(state,node!.id),color=mind.color??node!.style.borderColor??'#4262ff',layout=root?.mind?.layout??'balanced',line=root?.mind?.lineShape??(layout==='org'||layout==='list'?'elbowed':'curved'),isLocked=locked(node!);
-    const key=JSON.stringify([node!.id,color,layout,line,!!mind.collapsed,children.map(child=>child.id),isLocked,canUnlock(node!),node!.style,node!.type==='shape'?node!.shape:null,node!.type==='frame'?node!.title:node!.content,mind.notes,mind.icon,root?.mind?.theme,brandColorRevision()]);
+    const key=JSON.stringify([node!.id,color,layout,line,!!mind.collapsed,children.map(child=>child.id),isLocked,canUnlock(node!),node!.style,node!.type==='shape'?node!.shape:null,node!.type==='frame'?node!.title:node!.content,mind.notes,mind.icon,mind.attachments?.map(file=>[file.id,file.name,file.size]),root?.mind?.theme,brandColorRevision()]);
     if(key!==renderKey){renderKey=key;const separator='<span class="mind-separator" aria-hidden="true"></span>';
       if(isLocked){
         panel.innerHTML=canUnlock(node!)?`<button type="button" class="mind-lock-control" data-hold-unlock aria-label="Mantenha pressionado para desbloquear tópico" title="Mantenha pressionado para desbloquear">${icon('lock',18)}<span>Desbloquear</span></button>`:`<button type="button" class="mind-lock-control" disabled aria-label="Camada bloqueada" title="Desbloqueie a camada no painel Camadas">${icon('lock',18)}<span>Camada bloqueada</span></button>`;
         controls.innerHTML='';
       }else{
-        panel.innerHTML=actionButton('child','Adicionar subtópico','mind-child','Tab')+(mind.parentId?actionButton('sibling','Adicionar tópico irmão','plus','Enter'):'')+separator+formatMenu(node!)+colorMenu(color)+actionButton('link','Adicionar link','link','Ctrl+K')+actionButton('image','Imagem no tópico','image')+detailsMenu(node!)+separator+actionButton('collapse',mind.collapsed?'Expandir ramo':'Recolher ramo',mind.collapsed?'chevron-right':'chevron-down','Espaço')+branchMenu()+mapMenu(layout,line,root?.mind?.theme??'classic')+actionButton('delete','Excluir ramo','trash','Delete');
-        controls.innerHTML=(children.length?`<button type="button" data-mind-fold aria-label="${mind.collapsed?'Expandir':'Recolher'} ${children.length} subtópicos" title="${mind.collapsed?'Expandir':'Recolher'} ramo">${icon(mind.collapsed?'chevron-right':'minus',13)}<span>${children.length}</span></button>`:'')+`<button type="button" data-mind-add aria-label="Adicionar subtópico no board" title="Adicionar subtópico (Tab)">${icon('plus',17)}</button>`;
+        panel.innerHTML=actionButton('child','Adicionar subtópico','mind-child','Tab')+(mind.parentId?actionButton('sibling','Adicionar tópico irmão','plus','Enter'):'')+separator+formatMenu(node!)+colorMenu(color)+actionButton('link','Adicionar link','link','Ctrl+K')+actionButton('image','Imagem no tópico','image')+attachmentMenu(node!)+detailsMenu(node!)+separator+actionButton('collapse',mind.collapsed?'Expandir ramo':'Recolher ramo',mind.collapsed?'chevron-right':'chevron-down','Espaço')+branchMenu()+mapMenu(layout,line,root?.mind?.theme??'classic')+actionButton('delete','Excluir ramo','trash','Delete');
+        const descendants=mindSubtree(state,node!.id).length-1;
+        controls.innerHTML=(children.length?`<button type="button" data-mind-fold aria-label="${mind.collapsed?'Expandir':'Recolher'} ${children.length} ${children.length===1?'subtópico':'subtópicos'}" aria-expanded="${!mind.collapsed}" title="${mind.collapsed?'Expandir':'Recolher'} ${descendants} ${descendants===1?'subtópico':'subtópicos'} · Espaço"></button>`:'')+`<button type="button" data-mind-add aria-label="Adicionar subtópico no board" title="Adicionar subtópico (Tab)">${icon('plus',16)}</button>`+(mind.parentId?`<button type="button" data-mind-sibling aria-label="Adicionar tópico irmão no board" title="Adicionar tópico irmão (Enter)">${icon('plus',16)}</button>`:'');
         if(mind.notes)controls.insertAdjacentHTML('beforeend',`<button type="button" data-mind-notes-button aria-label="Abrir notas do tópico" title="${escape(mind.notes.slice(0,150))}">${icon('sticky',14)}</button>`);
         panel.querySelector<HTMLButtonElement>('[data-mind-action="collapse"]')!.disabled=!children.length;
         installFontPickers(panel);
@@ -210,21 +245,25 @@ export function installMindmapUI(api:MindmapUIAPI){
       compactContextPanel(panel);
     }
     positionContextPanel(panel,state,camera);
-    const bounds=widgetAABB(node!),side=mind.parentId?mind.side:'right',edge=camera.worldToScreen({x:side==='left'?bounds.minX:bounds.maxX,y:(bounds.minY+bounds.maxY)/2}),width=controls.offsetWidth||26,left=side==='left'?edge.x-width-12:edge.x+12;
-    controls.style.left=`${left}px`;controls.style.top=`${edge.y}px`;controls.style.flexDirection=side==='left'?'row-reverse':'row';
-    controls.hidden=isLocked||left<72||left+width>innerWidth-12||edge.y<82||edge.y>innerHeight-65;
+    const bounds=widgetAABB(node!),a=camera.worldToScreen({x:bounds.minX,y:bounds.minY}),b=camera.worldToScreen({x:bounds.maxX,y:bounds.maxY}),side=mind.parentId?mind.side:layout==='left'?'left':'right',vertical=layout==='org',sign=side==='left'?-1:1,edge={x:side==='left'?a.x:b.x,y:(a.y+b.y)/2},centerX=(a.x+b.x)/2,safeLeft=workspaceLeft(),safeTop=workspaceTop();
+    controls.style.setProperty('--mind-branch-color',color);controls.hidden=isLocked;
+    const place=(selector:string,x:number,y:number)=>{const button=controls.querySelector<HTMLButtonElement>(selector);if(!button)return;button.style.left=`${x-12}px`;button.style.top=`${y-12}px`;button.hidden=x-12<safeLeft||x+12>innerWidth-12||y-12<safeTop||y+12>innerHeight-56;};
+    place('[data-mind-add]',vertical?centerX:edge.x+sign*(children.length?43:19),vertical?b.y+(children.length?43:19):edge.y);
+    place('[data-mind-sibling]',vertical?b.x+19:centerX,vertical?edge.y:b.y+19);
+    place('[data-mind-fold]',vertical?centerX:edge.x+sign*18,vertical?b.y+18:edge.y);
+    place('[data-mind-notes-button]',b.x+19,a.y-12);
     if(drop)positionDrop(drop);
   }
   function afterEdit(id:string,key:'Enter'|'Tab'){return add(id,key==='Tab'?'child':'sibling');}
   function handleKey(event:KeyboardEvent):boolean{
     const node=selected();if(!node||!active()||event.ctrlKey||event.metaKey)return false;
-    if(event.altKey){const digit=event.code.match(/^(?:Digit|Numpad)([0-9])$/)?.[1]??(/^[0-9]$/.test(event.key)?event.key:undefined);if(digit!==undefined){event.preventDefault();if(!locked(node)){showMindLevels(state,bus,node.id,Number(digit));renderKey='';refresh();api.onChange?.();}return true;}return false;}
-    if(event.key===' '){event.preventDefault();if(!locked(node))toggleMindBranch(state,bus,node.id);return true;}
+    if(event.altKey){const digit=event.code.match(/^(?:Digit|Numpad)([0-9])$/)?.[1]??(/^[0-9]$/.test(event.key)?event.key:undefined);if(digit!==undefined){event.preventDefault();if(!locked(node)){const motion=transitionStart();showMindLevels(state,bus,node.id,Number(digit));renderKey='';refresh();api.onChange?.();transitionEnd(motion);}return true;}return false;}
+    if(event.key===' '){event.preventDefault();if(!locked(node))perform('collapse');return true;}
     if(event.key==='Escape'&&panel.querySelector('details[open]')){event.preventDefault();closeMenus();return true;}
     if(event.key==='Tab'){event.preventDefault();if(event.shiftKey&&node.mind!.parentId)focusNode(node.mind!.parentId);else if(!locked(node))add(node.id,'child');return true;}
     if(event.key==='Enter'){event.preventDefault();if(!locked(node))add(node.id,'sibling',event.shiftKey);return true;}
     if(event.key==='Delete'||event.key==='Backspace'){event.preventDefault();if(!locked(node))perform('delete');return true;}
-    if(event.key.startsWith('Arrow')&&!event.shiftKey){event.preventDefault();if(!locked(node)&&node.mind!.collapsed&&event.key===(node.mind!.side==='left'?'ArrowLeft':'ArrowRight'))toggleMindBranch(state,bus,node.id);const target=navigateMindNode(state,node.id,event.key);if(target)focusNode(target);return true;}
+    if(event.key.startsWith('Arrow')&&!event.shiftKey){event.preventDefault();const expand=!locked(node)&&node.mind!.collapsed&&event.key===(node.mind!.side==='left'?'ArrowLeft':'ArrowRight'),motion=expand?transitionStart():undefined;if(expand)toggleMindBranch(state,bus,node.id);const target=navigateMindNode(state,node.id,event.key);if(target)focusNode(target);transitionEnd(motion);return true;}
     return false;
   }
   function dropTarget(sourceId:string,p:Vec):MindDrop|undefined{
@@ -257,9 +296,9 @@ export function installMindmapUI(api:MindmapUIAPI){
     Object.assign(dropHint.style,{left:`${left}px`,top:`${line?(next.kind==='before'?a.y-5:b.y+3):a.y-5}px`,width:`${width}px`,height:`${line?3:b.y-a.y+10}px`});
     dropHint.querySelector('span')!.textContent=next.kind==='before'?'Inserir antes':next.kind==='after'?'Inserir depois':half?`Ramo à ${next.kind==='left'?'esquerda':'direita'}`:'Adicionar como subtópico';
   }
-  function clearDrop(){drop=null;dropHint.hidden=true;delete dropHint.dataset.kind;delete dropHint.dataset.parent;}
+  function clearDrop(){drop=null;dragOrigin=undefined;dropHint.hidden=true;delete dropHint.dataset.kind;delete dropHint.dataset.parent;}
   function previewDrop(sourceId:string,p:Vec){drop=dropTarget(sourceId,p)??null;dropHint.hidden=!drop;if(drop)positionDrop(drop);return drop?.targetId??null;}
-  function commitDrop(sourceId:string,p:Vec){const target=dropTarget(sourceId,p);clearDrop();if(!target)return false;const changed=reparentMindNode(state,bus,sourceId,target.parentId,target.side,target.order);if(changed){renderKey='';refresh();api.onChange?.();}return changed;}
+  function commitDrop(sourceId:string,p:Vec){const target=dropTarget(sourceId,p),origin=dragOrigin;clearDrop();if(!target){const old=origin?.id===sourceId?origin.widgets.get(sourceId):undefined,node=state.widgets.get(sourceId),excluded=new Set(mindSubtree(state,sourceId)),padding=10/camera.scale,blocked=origin&&[...origin.widgets.values()].some(widget=>{if(widget.id===sourceId||!excluded.has(widget.id)&&!widget.locked)return false;const box=widgetAABB(widget);return p.x>=box.minX-padding&&p.x<=box.maxX+padding&&p.y>=box.minY-padding&&p.y<=box.maxY+padding;});if(old&&node&&!blocked&&Math.hypot(node.x-old.x,node.y-old.y)*camera.scale>5&&markMindManualPosition(state,bus,sourceId)){renderKey='';refresh();api.onChange?.();}return false;}const motion=transitionStart(),changed=reparentMindNode(state,bus,sourceId,target.parentId,target.side,target.order);if(changed){renderKey='';refresh();api.onChange?.();transitionEnd(motion);}return changed;}
   window.addEventListener('resize',refresh);refresh();
   function refreshAfterHistory(){const active=document.activeElement instanceof HTMLInputElement&&panel.contains(document.activeElement)&&document.activeElement.type==='range'?document.activeElement:null,label=active?.getAttribute('aria-label');pointerInteraction=false;refreshDeferred=false;inputEngaged=false;renderKey='';forceHistoryRefresh=true;try{refresh();}finally{forceHistoryRefresh=false;}if(label)[...panel.querySelectorAll<HTMLInputElement>('input[type="range"]')].find(input=>input.getAttribute('aria-label')===label)?.focus({preventScroll:true});}
   window.addEventListener('board-brand-colors-changed',()=>{renderKey='';refresh();});

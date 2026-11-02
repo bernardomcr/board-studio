@@ -32,6 +32,7 @@ export interface Style {
   textAlignVertical: "top" | "middle" | "bottom";
 }
 
+export interface MindAttachment {id:string;name:string;mimeType:string;src:string;size:number}
 export interface MindMetadata {
   rootId:string;
   parentId:string|null;
@@ -43,9 +44,13 @@ export interface MindMetadata {
   lineShape?:'straight'|'curved'|'elbowed';
   notes?:string;
   icon?:string;
+  /** Files are embedded locally and are only exposed through explicit download. */
+  attachments?:MindAttachment[];
   theme?:string;
   /** Board units per design unit; omitted preserves legacy maps at scale 1. */
   layoutScale?:number;
+  /** Automatic reflow keeps a topic placed freely until explicit Reorganize. */
+  manualPosition?:boolean;
 }
 
 export interface BaseWidget extends LayerMembership {

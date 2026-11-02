@@ -2,6 +2,7 @@
 // when the browser finishes the selected media, never the destination identity.
 // @ts-nocheck
 import {test,expect} from '@playwright/test';
+import {boardAction} from './helpers/board-actions';
 import {readFile} from 'node:fs/promises';
 
 async function create(page,title){
@@ -166,7 +167,7 @@ test('mind image import cannot attach or leave an orphan after its parent become
 
 test('project file read cannot replace a different board opened while the file was pending',async({page})=>{
   await blank(page);await imported(page);
-  const download=page.waitForEvent('download');await page.getByRole('button',{name:'Salvar arquivo',exact:true}).click();
+  const download=page.waitForEvent('download');await boardAction(page,'Salvar arquivo');
   const project=await readFile(await(await download).path());
   await page.evaluate(()=>{
     const original=File.prototype.text;window.__mediaGate={started:false};
@@ -177,7 +178,7 @@ test('project file read cannot replace a different board opened while the file w
       await new Promise(resolve=>window.__mediaGate.release=resolve);return content;
     };
   });
-  await choose(page,page.getByRole('button',{name:'Abrir arquivo',exact:true}),{name:'delayed.board.json',mimeType:'application/json',buffer:project});
+  const chooser=page.waitForEvent('filechooser');await boardAction(page,'Abrir arquivo');await(await chooser).setFiles({name:'delayed.board.json',mimeType:'application/json',buffer:project});
   await decoding(page);await another(page);
   await page.evaluate(async()=>{
     const b=window.__board,{createWidget}=await import('/src/core/model.ts');
