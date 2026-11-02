@@ -44,6 +44,8 @@ export interface MindMetadata {
   notes?:string;
   icon?:string;
   theme?:string;
+  /** Board units per design unit; omitted preserves legacy maps at scale 1. */
+  layoutScale?:number;
 }
 
 export interface BaseWidget extends LayerMembership {

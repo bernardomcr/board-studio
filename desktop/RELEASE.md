@@ -1,14 +1,14 @@
 No Teu Cu e Atiro para Windows 10/11 x64.
 
-Revisão de interação, seleção e menus, mantendo a identidade em cinza escuro e roxo.
+Campos, navegação e mapa mental refinados, mantendo a identidade em cinza escuro e roxo.
 
-- Conectores terminam na borda visível de formas e imagens, incluindo máscaras e rotação.
-- Seleção por área considera o traçado do conector, evitando caixas invisíveis gigantes.
-- Objetos bloqueados são ignorados no canvas; botão direito permite manter pressionado para desbloquear, respeitando objetos por cima.
-- Bloqueios herdados de camadas e ramos de mapas mentais são preservados, com Undo e Redo.
-- Ferramentas na lateral, Home sem banner decorativo e menus de recorte e organização consistentes.
-- Ao criar um objeto, a ferramenta volta automaticamente a Selecionar (V).
-- A borracha de precisão reutiliza a geometria dos cortes e evita recalcular a mesma área apagada para cada amostra do pincel.
+- Campos de tamanho e demais formulários respeitam o tema, inclusive no foco e ao usar as setas de incremento.
+- Barra lateral compacta e flutuante, com canvas livre acima e abaixo e acesso ao botão Fundo.
+- Mapas mentais criados com proporções legíveis no zoom atual; novos tópicos preservam tema, forma, tipografia e estilo do ramo.
+- Arraste de ramos com prévia para inserir como filho, irmão acima/abaixo ou no lado da raiz permitido pelo layout.
+- Menus de tópico, mapa e ramos organizados; controle dos níveis por Alt+0 a Alt+9 e seleção de subtópicos.
+- Tópicos bloqueados oferecem somente desbloqueio por pressão; herança de bloqueios e Undo/Redo preservados.
+- Mantidas as correções de conectores, seleção e borracha de precisão da v0.19.0.
 
 - Instalador: arquivo com final `setup.exe`.
 - Sem instalação: arquivo com final `portable.exe`.

@@ -28,7 +28,7 @@ test('mind-map menus recolor a branch, change layout, collapse descendants and d
   expect(await page.evaluate(async id=>(await import('/src/core/mindmap.ts')).mindNodeHidden(window.__board.state,id),ids.c)).toBe(false);
   await page.getByRole('button',{name:'Cor do ramo',exact:true}).click();await page.getByRole('button',{name:'Cor do ramo: vermelho',exact:true}).click();
   expect(await page.evaluate(ids=>({a:window.__board.state.widgets.get(ids.a).mind.color,c:window.__board.state.widgets.get(ids.c).mind.color}),ids)).toEqual({a:'#e25767',c:'#e25767'});
-  await page.getByRole('button',{name:'Organização do mapa',exact:true}).click();await page.getByRole('button',{name:'Ramos à esquerda',exact:true}).click();
+  await page.getByRole('button',{name:'Mapa',exact:true}).click();await page.getByRole('button',{name:'Organização do mapa',exact:true}).click();await page.getByRole('button',{name:'Ramos à esquerda',exact:true}).click();
   expect(await page.evaluate(ids=>{const b=window.__board,r=b.state.widgets.get(ids.root);return [ids.a,ids.d].every(id=>{const w=b.state.widgets.get(id);return w.x+w.width<r.x;});},ids)).toBe(true);
   await page.keyboard.press('Escape');await select(page,ids.a);await page.getByRole('button',{name:'Excluir ramo',exact:true}).click();
   expect(await page.evaluate(ids=>[window.__board.state.widgets.has(ids.a),window.__board.state.widgets.has(ids.c),window.__board.state.widgets.has(ids.d)],ids)).toEqual([false,false,true]);

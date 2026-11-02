@@ -2,7 +2,7 @@
 import {test,expect} from '@playwright/test';
 import {readFile} from 'node:fs/promises';
 async function blank(page){await page.goto('/');await page.waitForFunction(()=>window.__board?.booted);await page.getByRole('button',{name:'Criar board',exact:true}).click();await page.getByRole('dialog',{name:'Criar board'}).getByRole('button',{name:'Criar board',exact:true}).click();await expect(page.locator('#board-home')).toBeHidden();}
-async function menu(page,label){await page.getByRole('button',{name:label,exact:true}).click();}
+async function menu(page,label){if(['Organização do mapa','Paleta do mapa','Linhas do mapa'].includes(label)&&!await page.locator('[data-menu="mind-map"]').evaluate(el=>el.open))await page.getByRole('button',{name:'Mapa',exact:true}).click();await page.getByRole('button',{name:label,exact:true}).click();}
 
 test('mind topics preserve notes, icon, map palette and native font formatting through editing and project round-trips',async({page})=>{
  await blank(page);const ids=await page.evaluate(async()=>{const b=window.__board,{createMindMap,addMindChild}=await import('/src/core/mindmap.ts'),root=createMindMap(b.state,b.bus,{x:0,y:0},'Centro'),child=addMindChild(b.state,b.bus,root,'Ramo');b.bus.exec({op:'SELECTION_SET',payload:[child]});return {root,child,size:{width:b.state.widgets.get(child).width,height:b.state.widgets.get(child).height}};});

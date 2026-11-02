@@ -1,5 +1,6 @@
 // @ts-nocheck
 import {test,expect} from '@playwright/test';
+import {expectFloatingRail} from './helpers/floating-rail';
 
 async function blank(page){
  await page.goto('/');await page.waitForFunction(()=>window.__board?.booted);
@@ -11,14 +12,12 @@ async function blank(page){
 for(const viewport of [{width:1600,height:1000},{width:360,height:640},{width:800,height:420}]){
  test(`side rail and drawing menus remain usable at ${viewport.width}x${viewport.height}`,async({page})=>{
   await page.setViewportSize(viewport);await blank(page);
-  const rail=await page.locator('#toolbar').boundingBox();
-  expect(rail.x).toBe(0);expect(rail.y).toBe(48);
-  expect(rail.width).toBe(viewport.height<=520?82:56);
+  const {rail}=await expectFloatingRail(page);
   const controls=await page.locator('#toolbar button').evaluateAll(buttons=>buttons.map(button=>{
    const r=button.getBoundingClientRect(),hit=document.elementFromPoint(r.x+r.width/2,r.y+r.height/2);
    return {name:button.getAttribute('aria-label'),x:r.x,y:r.y,right:r.right,bottom:r.bottom,hit:button===hit||button.contains(hit)};
   }));
-  for(const control of controls){expect(control.x,control.name).toBeGreaterThanOrEqual(0);expect(control.y,control.name).toBeGreaterThanOrEqual(48);expect(control.right,control.name).toBeLessThanOrEqual(rail.width);expect(control.bottom,control.name).toBeLessThanOrEqual(viewport.height);expect(control.hit,control.name).toBe(true);}
+  for(const control of controls){expect(control.x,control.name).toBeGreaterThanOrEqual(rail.x);expect(control.y,control.name).toBeGreaterThanOrEqual(rail.y);expect(control.right,control.name).toBeLessThanOrEqual(rail.right);expect(control.bottom,control.name).toBeLessThanOrEqual(rail.bottom);expect(control.hit,control.name).toBe(true);}
   for(const tool of ['brush','eraser']){
    await page.locator(`#toolbar [data-tool="${tool}"]`).click();
    const point={x:viewport.width*.65,y:viewport.height-90};
@@ -26,7 +25,7 @@ for(const viewport of [{width:1600,height:1000},{width:360,height:640},{width:80
    await page.mouse.click(point.x,point.y,{button:'right'});
    const panel=page.locator('#drawing-palette');await expect(panel).toBeVisible();
    const bounds=await panel.boundingBox();
-   expect(bounds.x).toBeGreaterThanOrEqual(rail.width+10);expect(bounds.y).toBeGreaterThanOrEqual(58);
+   expect(bounds.x).toBeGreaterThanOrEqual(rail.right+10);expect(bounds.y).toBeGreaterThanOrEqual(58);
    expect(bounds.x+bounds.width).toBeLessThanOrEqual(viewport.width-10);expect(bounds.y+bounds.height).toBeLessThanOrEqual(viewport.height-10);
    await panel.getByRole('button',{name:tool==='brush'?'Fechar opções do pincel':'Fechar opções da borracha',exact:true}).click();
    await expect(panel).toBeHidden();await expect(page.locator(`#toolbar [data-tool="${tool}"]`)).toHaveClass(/active/);

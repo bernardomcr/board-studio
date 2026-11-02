@@ -21,7 +21,7 @@ export function boxTextInsets(w:Widget):BoxTextInsets{
   if(!isBoxText(w))return {left:0,right:0,top:0,bottom:0};
   const width=w.width,height=w.height,short=Math.min(width,height);let left=short*.05,right=left,top=left,bottom=left;
   if(w.type==='sticky_note'){left=right=top=bottom=Math.max(0,short)/16;}
-  else if(w.mind){left=right=top=bottom=Math.min(10,Math.max(0,short)/4);}
+  else if(w.mind){left=right=top=bottom=Math.min(10*(w.mind.layoutScale??1),Math.max(0,short)/4);}
   else if(w.type==='shape'){
     const shape=canonicalShape(w.shape);
     switch(shape){

@@ -47,14 +47,14 @@ function changedMind(state:BoardState,id:string,patch:Partial<MindMetadata>):Com
   const w=state.widgets.get(id);if(!w?.mind)return;const mind={...w.mind,...patch};state.widgets.set(id,{...w,mind});return {op:'WIDGET_UPDATE',payload:{id,patch:{mind}}};
 }
 function run(bus:CommandBus,label:string,commands:Command[]):boolean{if(!commands.length)return false;bus.exec({op:'BATCH',payload:{label,commands}});return true;}
-function dimensions(widget:Widget,initial=false){
+function dimensions(widget:Widget,initial=false,unitScale=widget.mind?.layoutScale??1){
   // Existing topic boxes are user geometry. Reflow positions the tree without
   // silently expanding a box as its content or preferred font changes.
   if(!initial||widget.type==='image')return {width:widget.width,height:widget.height};
   const content=mindTopicText(widget);
   const size=naturalTextSize({...widget,type:'text',content} as Parameters<typeof naturalTextSize>[0]);
   const root=widget.mind?.parentId===null;
-  return {width:Math.max(root?168:92,size.width+32),height:Math.max(root?64:44,size.height+20)};
+  return {width:Math.max((root?168:92)*unitScale,size.width+32*unitScale),height:Math.max((root?64:44)*unitScale,size.height+20*unitScale)};
 }
 function childIndex(state:BoardState):Map<string,Widget[]>{
   const index=new Map<string,Widget[]>();
@@ -66,37 +66,38 @@ function childIndex(state:BoardState):Map<string,Widget[]>{
 /** Build a deterministic variable-size tree layout without mutating the live board. */
 export function mindLayoutCommands(state:BoardState,id:string):Command[]{
   const root=mindRoot(state,id);if(!root?.mind)return [];
+  const unitScale=root.mind.layoutScale??1,gapX=GAP_X*unitScale,gapY=GAP_Y*unitScale,rootGapY=ROOT_GAP_Y*unitScale,treeGap=TREE_GAP*unitScale;
   const nodes=[...state.widgets.values()].filter(w=>w.mind?.rootId===root.id),index=childIndex(state),sizes=new Map(nodes.map(w=>[w.id,dimensions(w)]));
   const sequence:Widget[]=[],seen=new Set<string>(),stack=[root];
   while(stack.length){const w=stack.pop()!;if(seen.has(w.id))continue;seen.add(w.id);sequence.push(w);stack.push(...(index.get(w.id)??[]).filter(c=>c.mind?.rootId===root.id).reverse());}
   const span=new Map<string,number>();
-  for(let i=sequence.length-1;i>=0;i--){const node=sequence[i]!,children=node.mind!.collapsed?[]:(index.get(node.id)??[]),own=sizes.get(node.id)!.height;span.set(node.id,Math.max(own,children.reduce((sum,c)=>sum+(span.get(c.id)??0),0)+Math.max(0,children.length-1)*GAP_Y));}
+  for(let i=sequence.length-1;i>=0;i--){const node=sequence[i]!,children=node.mind!.collapsed?[]:(index.get(node.id)??[]),own=sizes.get(node.id)!.height;span.set(node.id,Math.max(own,children.reduce((sum,c)=>sum+(span.get(c.id)??0),0)+Math.max(0,children.length-1)*gapY));}
   const rootSize=sizes.get(root.id)!,center={x:root.x+root.width/2,y:root.y+root.height/2},positions=new Map<string,{x:number;y:number;side:MindSide}>();
   positions.set(root.id,{x:center.x-rootSize.width/2,y:center.y-rootSize.height/2,side:root.mind.side});
   const layout=root.mind.layout??'balanced',rootChildren=root.mind.collapsed?[]:(index.get(root.id)??[]);
   if(layout==='org'){
     const widths=new Map<string,number>();
-    for(let i=sequence.length-1;i>=0;i--){const node=sequence[i]!,children=node.mind!.collapsed?[]:index.get(node.id)??[];widths.set(node.id,Math.max(sizes.get(node.id)!.width,children.reduce((sum,c)=>sum+widths.get(c.id)!,0)+Math.max(0,children.length-1)*TREE_GAP));}
+    for(let i=sequence.length-1;i>=0;i--){const node=sequence[i]!,children=node.mind!.collapsed?[]:index.get(node.id)??[];widths.set(node.id,Math.max(sizes.get(node.id)!.width,children.reduce((sum,c)=>sum+widths.get(c.id)!,0)+Math.max(0,children.length-1)*treeGap));}
     const pending=[root];
-    while(pending.length){const parent=pending.pop()!;if(parent.mind!.collapsed)continue;const children=index.get(parent.id)??[],own=positions.get(parent.id)!,size=sizes.get(parent.id)!,total=children.reduce((sum,c)=>sum+widths.get(c.id)!,0)+Math.max(0,children.length-1)*TREE_GAP;let left=own.x+size.width/2-total/2;
-      for(const child of children){const childSize=sizes.get(child.id)!,width=widths.get(child.id)!;positions.set(child.id,{x:left+width/2-childSize.width/2,y:own.y+size.height+GAP_X,side:'right'});left+=width+TREE_GAP;pending.push(child);}
+    while(pending.length){const parent=pending.pop()!;if(parent.mind!.collapsed)continue;const children=index.get(parent.id)??[],own=positions.get(parent.id)!,size=sizes.get(parent.id)!,total=children.reduce((sum,c)=>sum+widths.get(c.id)!,0)+Math.max(0,children.length-1)*treeGap;let left=own.x+size.width/2-total/2;
+      for(const child of children){const childSize=sizes.get(child.id)!,width=widths.get(child.id)!;positions.set(child.id,{x:left+width/2-childSize.width/2,y:own.y+size.height+gapX,side:'right'});left+=width+treeGap;pending.push(child);}
     }
   }else if(layout==='list'){
-    let top=positions.get(root.id)!.y+rootSize.height+TREE_GAP;const pending=(root.mind.collapsed?[]:(index.get(root.id)??[])).slice().reverse().map(node=>({node,depth:1}));
-    while(pending.length){const {node,depth}=pending.pop()!,size=sizes.get(node.id)!;positions.set(node.id,{x:positions.get(root.id)!.x+depth*GAP_X,y:top,side:'right'});top+=size.height+TREE_GAP;if(!node.mind!.collapsed)pending.push(...(index.get(node.id)??[]).slice().reverse().map(child=>({node:child,depth:depth+1})));}
+    let top=positions.get(root.id)!.y+rootSize.height+treeGap;const pending=(root.mind.collapsed?[]:(index.get(root.id)??[])).slice().reverse().map(node=>({node,depth:1}));
+    while(pending.length){const {node,depth}=pending.pop()!,size=sizes.get(node.id)!;positions.set(node.id,{x:positions.get(root.id)!.x+depth*gapX,y:top,side:'right'});top+=size.height+treeGap;if(!node.mind!.collapsed)pending.push(...(index.get(node.id)??[]).slice().reverse().map(child=>({node:child,depth:depth+1})));}
   }else for(const side of ['left','right'] as const){
     const children=rootChildren.filter(c=>(layout==='balanced'?c.mind!.side:layout)===side);
-    let cursor=center.y-(children.reduce((sum,c)=>sum+span.get(c.id)!,0)+Math.max(0,children.length-1)*ROOT_GAP_Y)/2;
+    let cursor=center.y-(children.reduce((sum,c)=>sum+span.get(c.id)!,0)+Math.max(0,children.length-1)*rootGapY)/2;
     const placements:Array<{node:Widget;parent:Widget;parentX:number;top:number;side:MindSide}>=[];
-    for(const node of children){placements.push({node,parent:root,parentX:positions.get(root.id)!.x,top:cursor,side});cursor+=span.get(node.id)!+ROOT_GAP_Y;}
+    for(const node of children){placements.push({node,parent:root,parentX:positions.get(root.id)!.x,top:cursor,side});cursor+=span.get(node.id)!+rootGapY;}
     while(placements.length){
       const item=placements.pop()!,{node,parent,parentX,top}=item,size=sizes.get(node.id)!,parentSize=sizes.get(parent.id)!;
-      const x=side==='right'?parentX+parentSize.width+GAP_X:parentX-GAP_X-size.width,y=top+span.get(node.id)!/2-size.height/2;
+      const x=side==='right'?parentX+parentSize.width+gapX:parentX-gapX-size.width,y=top+span.get(node.id)!/2-size.height/2;
       positions.set(node.id,{x,y,side});
       if(node.mind!.collapsed)continue;
-      const descendants=index.get(node.id)??[],childrenSpan=descendants.reduce((sum,c)=>sum+span.get(c.id)!,0)+Math.max(0,descendants.length-1)*GAP_Y;
+      const descendants=index.get(node.id)??[],childrenSpan=descendants.reduce((sum,c)=>sum+span.get(c.id)!,0)+Math.max(0,descendants.length-1)*gapY;
       let childTop=top+span.get(node.id)!/2-childrenSpan/2;
-      for(const child of descendants){placements.push({node:child,parent:node,parentX:x,top:childTop,side});childTop+=span.get(child.id)!+GAP_Y;}
+      for(const child of descendants){placements.push({node:child,parent:node,parentX:x,top:childTop,side});childTop+=span.get(child.id)!+gapY;}
     }
   }
   const commands:Command[]=[],resolved=new Map<string,Widget>();
@@ -114,7 +115,10 @@ export function mindLayoutCommands(state:BoardState,id:string):Command[]{
     const side=mind.side,start=layout==='org'?{kind:'anchor' as const,widgetId:parent.id,x:.5,y:1}:layout==='list'?{kind:'anchor' as const,widgetId:parent.id,x:0,y:1}:{kind:'anchor' as const,widgetId:parent.id,x:side==='left'?0:1,y:.5},end=layout==='org'?{kind:'anchor' as const,widgetId:node.id,x:.5,y:0}:{kind:'anchor' as const,widgetId:node.id,x:side==='left'?1:0,y:.5};
     const old=branches.get(node.id),color=mind.color??parent.mind?.color??MIND_COLORS[0];
     const shape=root.mind.lineShape??(layout==='org'||layout==='list'?'elbowed':'curved');
-    if(!old){const branch:Connector={id:nextId('mind-branch'),type:'connector',mindBranch:node.id,start,end,shape,style:{strokeColor:color,strokeWidth:2.5,startCap:'none',endCap:'none'},z:behind};commands.push({op:'CONNECTOR_CREATE',payload:branch},{op:'CONNECTOR_UPDATE',payload:{id:branch.id,patch:{z:behind}}});}
+    if(!old){
+      const inherited=branches.get(parent.id)??(index.get(parent.id)??[]).map(sibling=>branches.get(sibling.id)).find(Boolean);
+      const branch:Connector={id:nextId('mind-branch'),type:'connector',mindBranch:node.id,start,end,shape,style:{...inherited?.style,strokeColor:color,strokeWidth:inherited?.style.strokeWidth??2.5*unitScale,startCap:'none',endCap:'none'},z:behind};commands.push({op:'CONNECTOR_CREATE',payload:branch},{op:'CONNECTOR_UPDATE',payload:{id:branch.id,patch:{z:behind}}});
+    }
     else{
       const patch={start,end,shape,controlPoint:null,waypoints:null,z:behind,style:{...old.style,strokeColor:color,startCap:'none' as const,endCap:'none' as const}};
       if(old.shape!==patch.shape||old.z!==behind||old.controlPoint||old.waypoints?.length||JSON.stringify(old.start)!==JSON.stringify(start)||JSON.stringify(old.end)!==JSON.stringify(end)||old.style.strokeColor!==color||old.style.startCap!=='none'||old.style.endCap!=='none')commands.push({op:'CONNECTOR_UPDATE',payload:{id:old.id,patch}});
@@ -125,13 +129,15 @@ export function mindLayoutCommands(state:BoardState,id:string):Command[]{
 export function layoutMindMap(state:BoardState,bus:CommandBus,id:string):boolean{return run(bus,'Organizar mapa mental',mindLayoutCommands(state,id));}
 export const normalizeMindMap=layoutMindMap;
 
-function topic(content:string,mind:MindMetadata,point:Vec):ShapeWidget{
+function topic(content:string,mind:MindMetadata,point:Vec,unitScale=1,inherit?:Widget):ShapeWidget{
   const root=mind.parentId===null,color=mind.color??MIND_COLORS[0],widget=createWidget('shape',{x:point.x,y:point.y,shape:'round_rectangle',content}) as ShapeWidget;
-  widget.mind=mind;widget.style={...widget.style,fontFamily:'Inter',fontSize:root?26:20,fontWeight:root?'bold':'normal',textAlign:'center',textAlignVertical:'middle',fillColor:'#ffffff',fillOpacity:1,borderColor:color,borderWidth:root?2:1.5,borderScale:(root?2:1.5)/(root?64:44),cornerRadius:root?16:11};
-  const size=dimensions(widget,true);return {...widget,...size,x:point.x-size.width/2,y:point.y-size.height/2};
+  widget.mind={...mind,layoutScale:unitScale};widget.style={...widget.style,fontFamily:'Inter',fontSize:(root?26:20)*unitScale,fontWeight:root?'bold':'normal',textAlign:'center',textAlignVertical:'middle',fillColor:'#ffffff',fillOpacity:1,borderColor:color,borderWidth:(root?2:1.5)*unitScale,borderScale:(root?2:1.5)/(root?64:44),cornerRadius:(root?16:11)*unitScale};
+  if(inherit){widget.style={...inherit.style,borderColor:color};if(inherit.type==='shape')widget.shape=inherit.shape;}
+  const size=dimensions(widget,true,unitScale);return {...widget,...size,x:point.x-size.width/2,y:point.y-size.height/2};
 }
-export function createMindMap(state:BoardState,bus:CommandBus,point:Vec,content='Ideia central'):string{
-  const id=nextId('mind'),node=topic(content,{rootId:id,parentId:null,side:'right',order:0,layout:'balanced',color:MIND_COLORS[0]},point);node.id=id;
+export function createMindMap(state:BoardState,bus:CommandBus,point:Vec,content='Ideia central',unitScale=1):string{
+  if(!Number.isFinite(unitScale)||unitScale<=0)throw new Error('Escala do mapa mental inválida.');
+  const id=nextId('mind'),node=topic(content,{rootId:id,parentId:null,side:'right',order:0,layout:'balanced',color:MIND_COLORS[0]},point,unitScale);node.id=id;
   run(bus,'Criar mapa mental',[{op:'WIDGET_CREATE',payload:node},{op:'SELECTION_SET',payload:[id]}]);return id;
 }
 function addTopic(state:BoardState,bus:CommandBus,parentId:string,content:string,side?:MindSide,afterId?:string,before=false):string|null{
@@ -139,8 +145,9 @@ function addTopic(state:BoardState,bus:CommandBus,parentId:string,content:string
   const copy=staged(state),siblings=mindChildren(copy,parentId),order=afterId?Math.max(0,siblings.findIndex(w=>w.id===afterId)+(before?0:1)):siblings.length;
   if(!side){if(parent.mind.parentId===null){const right=siblings.filter(w=>w.mind!.side==='right').length;side=right<5?'right':'left';}else side=parent.mind.side;}
   if(root.mind!.layout==='left'||root.mind!.layout==='right')side=root.mind!.layout;
-  const color=parent.id===root.id?MIND_COLORS[siblings.length%MIND_COLORS.length]:parent.mind.color??MIND_COLORS[0];
-  const node=topic(content,{rootId:root.id,parentId,side,order,color},{x:parent.x+parent.width/2,y:parent.y+parent.height/2}),commands:Command[]=[{op:'WIDGET_CREATE',payload:node}];
+  const colors=MIND_THEMES[root.mind!.theme as keyof typeof MIND_THEMES]?.colors??MIND_COLORS,color=parent.id===root.id?colors[siblings.length%colors.length]!:parent.mind.color??colors[0]!,unitScale=root.mind!.layoutScale??1;
+  const inherit=afterId?state.widgets.get(afterId):parent.id!==root.id?parent:siblings.find(node=>node.type==='shape'||node.type==='text');
+  const node=topic(content,{rootId:root.id,parentId,side,order,color},{x:parent.x+parent.width/2,y:parent.y+parent.height/2},unitScale,inherit),commands:Command[]=[{op:'WIDGET_CREATE',payload:node}];
   copy.widgets.set(node.id,node);copy.order.push(node.id);
   const sequence=[...siblings];sequence.splice(order,0,node);for(let i=0;i<sequence.length;i++)if(sequence[i]!.mind!.order!==i){const command=changedMind(copy,sequence[i]!.id,{order:i});if(command)commands.push(command);}
   if(parent.mind.collapsed){const command=changedMind(copy,parentId,{collapsed:false});if(command)commands.push(command);}
@@ -155,7 +162,7 @@ export function attachMindWidget(state:BoardState,bus:CommandBus,parentId:string
   const copy=staged(state),siblings=mindChildren(copy,parentId),theme=MIND_THEMES[root.mind.theme as keyof typeof MIND_THEMES],colors=theme?.colors??MIND_COLORS;
   let side:MindSide=parent.id===root.id?(siblings.filter(node=>node.mind!.side==='right').length<5?'right':'left'):parent.mind.side;
   if(root.mind.layout==='left'||root.mind.layout==='right')side=root.mind.layout;
-  const color=parent.id===root.id?colors[siblings.length%colors.length]!:parent.mind.color??colors[0]!,mind:MindMetadata={rootId:root.id,parentId,side,order:siblings.length,color};
+  const color=parent.id===root.id?colors[siblings.length%colors.length]!:parent.mind.color??colors[0]!,mind:MindMetadata={rootId:root.id,parentId,side,order:siblings.length,color,layoutScale:root.mind.layoutScale??1};
   copy.widgets.set(widgetId,{...widget,mind});const commands:Command[]=[{op:'WIDGET_UPDATE',payload:{id:widgetId,patch:{mind}}}];
   if(parent.mind.collapsed){const expanded=changedMind(copy,parentId,{collapsed:false});if(expanded)commands.push(expanded);}
   commands.push(...mindLayoutCommands(copy,root.id),{op:'SELECTION_SET',payload:[widgetId]});return run(bus,'Adicionar objeto ao tópico',commands);
@@ -166,6 +173,26 @@ export function addMindSibling(state:BoardState,bus:CommandBus,id:string,content
 export function toggleMindBranch(state:BoardState,bus:CommandBus,id:string):boolean{
   const node=state.widgets.get(id);if(!node?.mind||node.locked||!mindChildren(state,id).length)return false;
   const copy=staged(state),command=changedMind(copy,id,{collapsed:!node.mind.collapsed});return run(bus,node.mind.collapsed?'Expandir ramo':'Recolher ramo',[command!,...mindLayoutCommands(copy,id),{op:'SELECTION_SET',payload:[id]}]);
+}
+/** Reveal relative descendant levels without changing explicit layer visibility. */
+export function showMindLevels(state:BoardState,bus:CommandBus,id:string,level:number):boolean{
+  const node=state.widgets.get(id);if(!node?.mind||node.locked||!Number.isInteger(level)||level<0||level>9)return false;
+  const copy=staged(state),index=childIndex(state),pending=[{id,depth:0}],seen=new Set<string>(),commands:Command[]=[];
+  while(pending.length){
+    const current=pending.pop()!;if(seen.has(current.id))continue;seen.add(current.id);
+    const topic=copy.widgets.get(current.id),children=index.get(current.id)??[];if(!topic?.mind)continue;
+    const collapsed=level>0&&current.depth>=level&&children.length>0;
+    if(!topic.locked&&!!topic.mind.collapsed!==collapsed)commands.push(changedMind(copy,current.id,{collapsed})!);
+    pending.push(...children.map(child=>({id:child.id,depth:current.depth+1})));
+  }
+  if(!commands.length)return false;
+  commands.push(...mindLayoutCommands(copy,id));return run(bus,level===0?'Expandir todos os níveis':'Mostrar níveis do ramo',commands);
+}
+export function selectMindSubtopics(state:BoardState,bus:CommandBus,id:string):boolean{
+  if(!state.widgets.get(id)?.mind)return false;
+  const ids=mindSubtree(state,id).filter(nodeId=>nodeId!==id).filter(nodeId=>{const node=state.widgets.get(nodeId)!;return !node.hidden&&!node.locked&&!mindNodeHidden(state,nodeId);});
+  if(ids.length===state.selection.size&&ids.every(nodeId=>state.selection.has(nodeId)))return false;
+  bus.exec({op:'SELECTION_SET',payload:ids});return true;
 }
 export function setMindLayout(state:BoardState,bus:CommandBus,id:string,layout:MindLayout):boolean{
   const root=mindRoot(state,id);if(!root?.mind||root.locked||!['balanced','right','left','org','list'].includes(layout))return false;
@@ -201,11 +228,15 @@ export function setMindTheme(state:BoardState,bus:CommandBus,id:string,theme:key
 export function reparentMindNode(state:BoardState,bus:CommandBus,id:string,parentId:string,side?:MindSide,order?:number):boolean{
   const node=state.widgets.get(id),parent=state.widgets.get(parentId),root=mindRoot(state,parentId),ids=mindSubtree(state,id);
   if(!node?.mind?.parentId||!parent?.mind||!root||ids.includes(parentId)||ids.some(id=>state.widgets.get(id)?.locked)||parent.locked)return false;
+  if([...state.connectors.values()].some(connector=>connector.locked&&connector.mindBranch&&ids.includes(connector.mindBranch)))return false;
   const oldRoot=node.mind.rootId,copy=staged(state),commands:Command[]=[],siblings=mindChildren(copy,parentId).filter(w=>w.id!==id);
   const nextSide=parent.id===root.id?(side??node.mind.side):parent.mind.side,index=Number.isFinite(order)?Math.max(0,Math.min(siblings.length,Math.floor(order!))):siblings.length;
   const color=parent.id===root.id?(node.mind.color??MIND_COLORS[0]):parent.mind.color??MIND_COLORS[0];
+  if(node.mind.parentId===parentId&&node.mind.side===nextSide&&mindChildren(state,parentId).findIndex(sibling=>sibling.id===id)===index)return false;
   for(const descendantId of ids){const descendant=copy.widgets.get(descendantId)!,mind={...descendant.mind!,rootId:root.id,side:nextSide,color,...(descendantId===id?{parentId,order:index}:{})},style={...descendant.style,borderColor:color};copy.widgets.set(descendantId,{...descendant,mind,style});commands.push({op:'WIDGET_UPDATE',payload:{id:descendantId,patch:{mind,style}}});}
-  siblings.splice(index,0,copy.widgets.get(id)!);for(let i=0;i<siblings.length;i++)commands.push(changedMind(copy,siblings[i]!.id,{order:i})!);
+  siblings.splice(index,0,copy.widgets.get(id)!);
+  const sequences=node.mind.parentId===parentId?[siblings]:[siblings,mindChildren(copy,node.mind.parentId)];
+  for(const sequence of sequences)for(let i=0;i<sequence.length;i++){const sibling=sequence[i]!;if(sibling.mind!.order!==i){if(sibling.locked)return false;commands.push(changedMind(copy,sibling.id,{order:i})!);}}
   if(parent.mind.collapsed)commands.push(changedMind(copy,parentId,{collapsed:false})!);
   commands.push(...mindLayoutCommands(copy,oldRoot),...(oldRoot===root.id?[]:mindLayoutCommands(copy,root.id)),{op:'SELECTION_SET',payload:[id]});return run(bus,'Mover ramo',commands);
 }
@@ -242,7 +273,8 @@ export function validateMindMetadata(value:unknown):MindMetadata{
   if(data.notes!==undefined&&(typeof data.notes!=='string'||data.notes.length>1000000))throw new Error('Notas de tópico inválidas.');
   if(data.icon!==undefined&&(typeof data.icon!=='string'||data.icon.length>128))throw new Error('Ícone de tópico inválido.');
   if(data.theme!==undefined&&(typeof data.theme!=='string'||!Object.hasOwn(MIND_THEMES,data.theme)))throw new Error('Paleta de mapa inválida.');
-  return {rootId:data.rootId as string,parentId:data.parentId as string|null,side:data.side as MindSide,order:data.order,...(data.collapsed===undefined?{}:{collapsed:data.collapsed as boolean}),...(data.layout===undefined?{}:{layout:data.layout as MindLayout}),...(data.color===undefined?{}:{color:data.color as string}),...(data.lineShape===undefined?{}:{lineShape:data.lineShape as 'straight'|'curved'|'elbowed'}),...(data.notes===undefined?{}:{notes:data.notes as string}),...(data.icon===undefined?{}:{icon:data.icon as string}),...(data.theme===undefined?{}:{theme:data.theme as string})};
+  if(data.layoutScale!==undefined&&(typeof data.layoutScale!=='number'||!Number.isFinite(data.layoutScale)||data.layoutScale<=0))throw new Error('Escala de mapa inválida.');
+  return {rootId:data.rootId as string,parentId:data.parentId as string|null,side:data.side as MindSide,order:data.order,...(data.collapsed===undefined?{}:{collapsed:data.collapsed as boolean}),...(data.layout===undefined?{}:{layout:data.layout as MindLayout}),...(data.color===undefined?{}:{color:data.color as string}),...(data.lineShape===undefined?{}:{lineShape:data.lineShape as 'straight'|'curved'|'elbowed'}),...(data.notes===undefined?{}:{notes:data.notes as string}),...(data.icon===undefined?{}:{icon:data.icon as string}),...(data.theme===undefined?{}:{theme:data.theme as string}),...(data.layoutScale===undefined?{}:{layoutScale:data.layoutScale as number})};
 }
 export function validateMindMapGraph(widgets:Widget[],connectors:Connector[]):void{
   const nodes=new Map(widgets.filter(w=>w.mind).map(w=>[w.id,w])),done=new Set<string>();

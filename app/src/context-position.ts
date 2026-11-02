@@ -2,29 +2,36 @@ import type { Camera } from './core/camera';
 import type { BoardState } from './core/commands';
 import { selectedBounds } from './core/groups';
 
+/** Read the live capsule, including its compact multi-column layout. */
+function toolRail(){
+  const element=document.getElementById('toolbar');if(!element)return;
+  const rect=element.getBoundingClientRect();if(rect.width<=0||rect.height<=0)return;
+  const side=getComputedStyle(element).flexDirection==='column'||rect.height>rect.width;
+  return {rect,side};
+}
+
 /** Top of the board workspace, below every visible row of application chrome. */
 export function workspaceTop():number{
   let bottom=0;
   for(const id of ['toolbar','topbar','theme-toggle','layers-toggle']){
     const element=document.getElementById(id);if(!element)continue;
-    const rect=element.getBoundingClientRect();if(rect.width>0&&rect.height>0&&!(id==='toolbar'&&rect.height>rect.width))bottom=Math.max(bottom,rect.bottom);
+    const rect=element.getBoundingClientRect();if(rect.width>0&&rect.height>0&&!(id==='toolbar'&&toolRail()?.side))bottom=Math.max(bottom,rect.bottom);
   }
   return Math.max(12,bottom+10);
 }
 
-/** A docked tool rail reserves its width, rather than its complete height. */
+/** Reserve the capsule's real right edge, never its full vertical extent. */
 export function workspaceLeft():number{
-  const rect=document.getElementById('toolbar')?.getBoundingClientRect();
-  return rect&&rect.width>0&&rect.height>rect.width?Math.max(12,rect.right+12):12;
+  const rail=toolRail();return rail?.side?Math.max(12,rail.rect.right+12):12;
 }
 
 /** Tool menus open beside a vertical rail and stay inside the usable canvas. */
 export function positionToolPanel(panel:HTMLElement,button:HTMLElement|null){
   const top=workspaceTop(),left=workspaceLeft(),anchor=button?.getBoundingClientRect();
-  const rail=document.getElementById('toolbar')?.getBoundingClientRect(),vertical=!!rail&&rail.height>rail.width;
+  const rail=toolRail(),vertical=rail?.side;
   panel.style.transform='none';panel.style.maxWidth=`${Math.max(120,innerWidth-left-12)}px`;
   panel.style.maxHeight=`${Math.max(80,innerHeight-top-12)}px`;
-  panel.style.left=`${Math.max(left,Math.min(innerWidth-panel.offsetWidth-12,vertical?(rail?.right??left)+10:anchor?.left??left))}px`;
+  panel.style.left=`${Math.max(left,Math.min(innerWidth-panel.offsetWidth-12,vertical?(rail?.rect.right??left)+10:anchor?.left??left))}px`;
   panel.style.top=`${Math.max(top,Math.min(innerHeight-panel.offsetHeight-12,vertical?anchor?.top??top:(anchor?.bottom??top)+10))}px`;
 }
 
@@ -52,7 +59,7 @@ function workspaceLimits(){
   const layerLeft=layers&&!layers.hidden&&document.body.classList.contains('layers-open')?layers.getBoundingClientRect().left-12:innerWidth-12;
   const left=workspaceLeft();
   const top=workspaceTop();
-  return {left,right:Math.max(left+220,layerLeft),top};
+  return {left,right:Math.min(innerWidth-12,Math.max(left+Math.min(220,innerWidth-left-12),layerLeft)),top};
 }
 
 function positionPopover(menu:HTMLDetailsElement){

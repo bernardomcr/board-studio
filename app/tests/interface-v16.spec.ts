@@ -1,5 +1,6 @@
 // @ts-nocheck
 import {test,expect} from '@playwright/test';
+import {expectFloatingRail} from './helpers/floating-rail';
 import {readFile} from 'node:fs/promises';
 import {createHash} from 'node:crypto';
 
@@ -27,7 +28,7 @@ for(const viewport of [{width:1280,height:900},{width:800,height:460},{width:390
  await page.setViewportSize(viewport);await ready(page);await create(page);
  const layout=await page.locator('#toolbar').evaluate(el=>{const r=el.getBoundingClientRect(),style=getComputedStyle(el),header=document.getElementById('studio-dock').getBoundingClientRect();return {x:r.x,y:r.y,width:r.width,height:r.height,headerBottom:header.bottom,overflowX:style.overflowX,overflowY:style.overflowY,buttons:[...el.querySelectorAll('button[data-tool]')].filter(button=>button.getClientRects().length).map(button=>{const b=button.getBoundingClientRect(),hit=document.elementFromPoint(b.x+b.width/2,b.y+b.height/2);return {name:button.dataset.tool,x:b.x,y:b.y,right:b.right,bottom:b.bottom,foreground:button===hit||button.contains(hit)};})};});
  const short=viewport.height<=520;
- expect(layout.x).toBe(0);expect(layout.y).toBe(48);expect(layout.y).toBeCloseTo(layout.headerBottom,1);expect(layout.width).toBe(short?82:56);expect(layout.y+layout.height).toBeCloseTo(viewport.height,1);expect(layout.height).toBeGreaterThan(layout.width);expect(layout.x+layout.width).toBeLessThanOrEqual(viewport.width);expect(['auto','scroll']).not.toContain(layout.overflowX);expect(['auto','scroll']).not.toContain(layout.overflowY);
+ await expectFloatingRail(page);expect(layout.height).toBeGreaterThan(layout.width);expect(layout.x+layout.width).toBeLessThanOrEqual(viewport.width);expect(['auto','scroll']).not.toContain(layout.overflowX);expect(['auto','scroll']).not.toContain(layout.overflowY);
  expect(new Set(layout.buttons.map(button=>button.x.toFixed(1))).size).toBe(short?2:1);expect(layout.buttons.some(button=>button.name==='checklist')).toBe(false);for(const button of layout.buttons){expect(button.x).toBeGreaterThanOrEqual(layout.x);expect(button.right).toBeLessThanOrEqual(layout.x+layout.width);expect(button.right).toBeLessThanOrEqual(viewport.width);expect(button.y).toBeGreaterThanOrEqual(layout.y);expect(button.bottom).toBeLessThanOrEqual(viewport.height);expect(button.foreground,button.name).toBe(true);}
  const workspace=await page.evaluate(async()=>{const {workspaceTop,workspaceLeft}=await import('/src/context-position.ts');return {top:workspaceTop(),left:workspaceLeft()};});
  expect(workspace.left).toBeGreaterThanOrEqual(layout.x+layout.width+8);
