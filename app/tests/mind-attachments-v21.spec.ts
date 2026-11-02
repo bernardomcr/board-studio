@@ -1,10 +1,11 @@
 // @ts-nocheck
 import {test,expect} from '@playwright/test';
+import {editMindTopic} from './helpers/mind-edit';
 import {boardAction} from './helpers/board-actions';
 import {readFile} from 'node:fs/promises';
 
 async function create(page,title){await page.getByRole('button',{name:'Criar board',exact:true}).click();const dialog=page.getByRole('dialog',{name:'Criar board',exact:true});await dialog.getByRole('textbox',{name:'Nome do board',exact:true}).fill(title);await dialog.getByRole('button',{name:'Criar board',exact:true}).click();await expect(page.locator('#board-home')).toBeHidden();await page.waitForFunction(()=>location.hash.startsWith('#board/'));}
-async function fixture(page){await page.goto('/');await page.waitForFunction(()=>window.__board?.booted);await create(page,'Anexos');return page.evaluate(async()=>{const b=window.__board,m=await import('/src/core/mindmap.ts'),id=m.createMindMap(b.state,b.bus,{x:0,y:0},'Arquivos');b.bus.exec({op:'SELECTION_SET',payload:[id]});return id;});}
+async function fixture(page){await page.goto('/');await page.waitForFunction(()=>window.__board?.booted);await create(page,'Anexos');const id=await page.evaluate(async()=>{const b=window.__board,m=await import('/src/core/mindmap.ts'),id=m.createMindMap(b.state,b.bus,{x:0,y:0},'Arquivos');b.bus.exec({op:'SELECTION_SET',payload:[id]});return id;});await editMindTopic(page,id);return id;}
 async function open(page){const menu=page.locator('[data-menu=mind-attachments]');if(!await menu.evaluate(node=>node.open))await page.getByRole('button',{name:'Anexos do tópico',exact:true}).click();return menu;}
 async function attach(page,files){await open(page);const chooser=page.waitForEvent('filechooser');await page.getByRole('button',{name:'Adicionar arquivo ao tópico',exact:true}).click();await(await chooser).setFiles(files);}
 const values=[{name:'Anotação <local>.txt',mimeType:'text/plain',buffer:Buffer.from('Olá, arquivo local.\n')},{name:'voz.webm',mimeType:'audio/webm',buffer:Buffer.from([0x1a,0x45,0xdf,0xa3,0,1,2,3])},{name:'trecho.mp4',mimeType:'video/mp4',buffer:Buffer.from([0,0,0,8,0x66,0x74,0x79,0x70])}];

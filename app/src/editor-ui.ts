@@ -40,6 +40,8 @@ interface EditorUIApi {
   setStickyStackMode?(enabled:boolean):void;
   getGroupScope?(): string | null; onExitGroup?(): void;
   entityAt?(point:{x:number;y:number}):string|undefined;
+  contextGestureActive?():boolean;
+  onContextEntity?(id:string):boolean;
   isTransforming?():boolean;
 }
 
@@ -82,7 +84,7 @@ export function installEditorUI(api: EditorUIApi) {
   const connectors = () => [...state.selection].map(id => state.connectors.get(id)).filter((c): c is Connector => !!c);
   const groupIds = () => selectionRoots(state).filter(id => state.groups.has(id));
   const unlockable=()=>[...state.selection].filter(id=>{const item=state.widgets.get(id)??state.connectors.get(id)??state.strokes.get(id);return !!item?.locked&&!boardLayerFlags(ensureBoardLayers(state),item.layerId??ensureBoardLayers(state).activeId).locked;});
-  const unlockControl=()=>unlockable().length?`<button class="toolbar-button hold-unlock" data-hold-unlock title="Mantenha pressionado para desbloquear" aria-label="Mantenha pressionado para desbloquear">${icon('lock',18)}<span>Desbloquear</span></button>`:`<button class="toolbar-button" disabled title="Desbloqueie a camada no painel Camadas" aria-label="Camada bloqueada">${icon('lock',18)}<span>Camada bloqueada</span></button>`;
+  const unlockControl=()=>{const count=unlockable().length,label=count>1?'Mantenha pressionado para desbloquear selecionados':'Mantenha pressionado para desbloquear';return count?`<button class="toolbar-button hold-unlock" data-hold-unlock title="${label}" aria-label="${label}">${icon('lock',18)}<span>${count>1?`Desbloquear ${count} objetos`:'Desbloquear'}</span></button>`:`<button class="toolbar-button" disabled title="Desbloqueie a camada no painel Camadas" aria-label="Camada bloqueada">${icon('lock',18)}<span>Camada bloqueada</span></button>`;};
   const completeUnlock=()=>{const ids=unlockable();if(ids.length)bus.exec({op:'ENTITY_LOCK',payload:{ids,locked:false}});context.hidden=true;renderKey='';refresh();};
   installHoldAction(context,completeUnlock);
   let renderKey = '', displayedSelection = '', copiedStyle: CopiedStyle | null = null,forceHistoryRefresh=false;
@@ -473,16 +475,26 @@ export function installEditorUI(api: EditorUIApi) {
     if(!connectorPicker.contains(t)&&!t.closest('[data-tool="connector"]'))connectorPicker.hidden=true;
   });
   window.addEventListener('keydown',event=>{if(event.key==='Escape')closePanels();});
-  document.querySelector('#app canvas')?.addEventListener('contextmenu',event=>{
-    if((event as MouseEvent).altKey){event.preventDefault();return;}
-    event.preventDefault();const e=event as MouseEvent,rect=(event.currentTarget as HTMLElement).getBoundingClientRect(),p=api.camera.screenToWorld({x:e.clientX-rect.left,y:e.clientY-rect.top});
-    const hit=api.entityAt?.(p);
+  let suppressNativeContextUntil=0;
+  function cancelContextGesture(){suppressNativeContextUntil=performance.now()+800;context.hidden=true;}
+  function openContextAt(x:number,y:number,options:{preserveSelection?:boolean}={}){
+    suppressNativeContextUntil=performance.now()+800;
+    const canvas=document.querySelector('#app canvas') as HTMLElement|null;if(!canvas)return;
+    const rect=canvas.getBoundingClientRect(),p=api.camera.screenToWorld({x:x-rect.left,y:y-rect.top}),hit=options.preserveSelection?undefined:api.entityAt?.(p);
+    // A direct right click edits a Mind topic. Finishing a right marquee keeps
+    // the complete multi-selection and must never enter an individual topic.
+    if(hit&&!itemLocked(state,hit)&&api.onContextEntity?.(hit)){context.hidden=true;return;}
     if(hit&&!state.selection.has(hit))bus.exec({op:'SELECTION_SET',payload:itemLocked(state,hit)?[hit]:memberSelection(state,hit,api.getGroupScope?.()).filter(id=>!itemLocked(state,id))});
     const locked=[...state.selection].some(id=>itemLocked(state,id));
     const w=selected()[0];
     context.innerHTML=locked?unlockControl():state.selection.size?
       menuAction('duplicate','Duplicar','duplicate','Ctrl+D')+(selectionRoots(state).length>=2?menuAction('group','Agrupar','group','Ctrl+G',locked):'')+(groupIds().length?menuAction('ungroup','Desagrupar','ungroup','Ctrl+Shift+G',locked):'')+'<hr>'+menuAction('front','Trazer para frente','front','',locked)+menuAction('back','Enviar para trás','back','',locked)+menuAction('lock',[...state.selection].every(id=>itemLocked(state,id))?'Desbloquear':'Bloquear','lock')+(w?.type==='image'?'<hr>'+menuAction('crop','Recortar','crop','',locked):'')+'<hr>'+menuAction('copy-style','Copiar estilo','stroke','',state.selection.size!==1)+menuAction('paste-style','Colar estilo','fill','',!canPasteStyle()||locked)+menuAction('copy-image','Copiar como imagem','image')+'<hr>'+menuAction('delete','Excluir','trash','Del',locked):menuAction('image','Inserir imagem','image')+menuAction('undo','Desfazer','undo','Ctrl+Z')+menuAction('redo','Refazer','redo','Ctrl+Shift+Z');
-    for(const b of context.querySelectorAll('button'))b.setAttribute('role','menuitem');context.hidden=false;context.style.left=`${Math.max(8,Math.min(innerWidth-250,e.clientX))}px`;context.style.top=`${Math.max(8,Math.min(innerHeight-context.offsetHeight-8,e.clientY))}px`;
+    for(const b of context.querySelectorAll('button'))b.setAttribute('role','menuitem');context.hidden=false;context.style.left=`${Math.max(8,Math.min(innerWidth-250,x))}px`;context.style.top=`${Math.max(8,Math.min(innerHeight-context.offsetHeight-8,y))}px`;
+  }
+  document.querySelector('#app canvas')?.addEventListener('contextmenu',event=>{
+    const e=event as MouseEvent;e.preventDefault();
+    if(e.altKey||api.contextGestureActive?.()||performance.now()<suppressNativeContextUntil)return;
+    openContextAt(e.clientX,e.clientY);
   });
 
   function refresh() {
@@ -539,5 +551,5 @@ export function installEditorUI(api: EditorUIApi) {
   }
   refresh();
   window.addEventListener('board-brand-colors-changed',()=>{renderKey='';refresh();});
-  return {refresh,openShapes,openConnectors,closePanels,finalizePropertyGestures:finishThicknessGesture,refreshAfterHistory};
+  return {refresh,openShapes,openConnectors,openContextAt,cancelContextGesture,closePanels,finalizePropertyGestures:finishThicknessGesture,refreshAfterHistory};
 }

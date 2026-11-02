@@ -1,5 +1,6 @@
 // @ts-nocheck
 import {test,expect} from '@playwright/test';
+import {editMindTopic} from './helpers/mind-edit';
 import {boardAction} from './helpers/board-actions';
 import {readFile} from 'node:fs/promises';
 async function blank(page){await page.goto('/');await page.waitForFunction(()=>window.__board?.booted);await page.getByRole('button',{name:'Criar board',exact:true}).click();await page.getByRole('dialog',{name:'Criar board'}).getByRole('button',{name:'Criar board',exact:true}).click();await expect(page.locator('#board-home')).toBeHidden();}
@@ -7,7 +8,7 @@ async function menu(page,label){if(['Organização do mapa','Paleta do mapa','Li
 
 test('mind topics preserve notes, icon, map palette and native font formatting through editing and project round-trips',async({page})=>{
  await blank(page);const ids=await page.evaluate(async()=>{const b=window.__board,{createMindMap,addMindChild}=await import('/src/core/mindmap.ts'),root=createMindMap(b.state,b.bus,{x:0,y:0},'Centro'),child=addMindChild(b.state,b.bus,root,'Ramo');b.bus.exec({op:'SELECTION_SET',payload:[child]});return {root,child,size:{width:b.state.widgets.get(child).width,height:b.state.widgets.get(child).height}};});
- await menu(page,'Notas e ícone');await page.getByRole('textbox',{name:'Notas do tópico',exact:true}).fill('Revisar orçamento e conversar com a equipe.');await page.getByRole('textbox',{name:'Notas do tópico',exact:true}).press('Tab');await page.getByRole('textbox',{name:'Ícone do tópico',exact:true}).fill('🚀');await page.getByRole('textbox',{name:'Ícone do tópico',exact:true}).press('Tab');
+ await editMindTopic(page,ids.child);await menu(page,'Notas e ícone');await page.getByRole('textbox',{name:'Notas do tópico',exact:true}).fill('Revisar orçamento e conversar com a equipe.');await page.getByRole('textbox',{name:'Notas do tópico',exact:true}).press('Tab');await page.getByRole('textbox',{name:'Ícone do tópico',exact:true}).fill('🚀');await page.getByRole('textbox',{name:'Ícone do tópico',exact:true}).press('Tab');
  await expect.poll(()=>page.evaluate(child=>window.__board.state.widgets.get(child).mind.icon,ids.child)).toBe('🚀');expect(await page.evaluate(()=>window.__board.state.widgets.size)).toBe(2);await expect(page.getByRole('button',{name:'Abrir notas do tópico',exact:true})).toBeVisible();
  await menu(page,'Paleta do mapa');await page.getByRole('button',{name:'Paleta: Oceano',exact:true}).click();expect(await page.evaluate(root=>window.__board.state.widgets.get(root).mind.theme,ids.root)).toBe('ocean');
  await menu(page,'Texto e aparência');await page.getByRole('button',{name:'Fonte do tópico',exact:true}).click();await page.getByRole('option',{name:'Caveat',exact:true}).click();await expect.poll(()=>page.evaluate(child=>window.__board.state.widgets.get(child).style.fontFamily,ids.child)).toBe('Caveat');

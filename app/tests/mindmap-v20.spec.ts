@@ -1,5 +1,6 @@
 // @ts-nocheck
 import {test,expect} from '@playwright/test';
+import {editMindTopic} from './helpers/mind-edit';
 
 async function blank(page,zoom=1){
   await page.goto('/');await page.waitForFunction(()=>window.__board?.booted);
@@ -9,10 +10,10 @@ async function blank(page,zoom=1){
   await page.evaluate(zoom=>{const b=window.__board;b.camera.x=b.camera.y=0;b.camera.scale=zoom;},zoom);
 }
 async function fixture(page,zoom=1){
-  await blank(page,zoom);return page.evaluate(async zoom=>{
+  await blank(page,zoom);const ids=await page.evaluate(async zoom=>{
     const b=window.__board,m=await import('/src/core/mindmap.ts'),root=m.createMindMap(b.state,b.bus,{x:-300/zoom,y:0},'Projeto',1/zoom),a=m.addMindChild(b.state,b.bus,root,'Planejar','right'),a1=m.addMindChild(b.state,b.bus,a,'Detalhar'),a11=m.addMindChild(b.state,b.bus,a1,'Executar'),a2=m.addMindChild(b.state,b.bus,a,'Revisar'),sibling=m.addMindChild(b.state,b.bus,root,'Produzir','right'),source=m.addMindChild(b.state,b.bus,root,'Publicar','right');
     b.bus.exec({op:'SELECTION_SET',payload:[a]});return {root,a,a1,a11,a2,sibling,source};
-  },zoom);
+  },zoom);await editMindTopic(page,ids.a);return ids;
 }
 async function select(page,id){await page.evaluate(id=>window.__board.bus.exec({op:'SELECTION_SET',payload:[id]}),id);}
 async function openMap(page,label){await page.getByRole('button',{name:'Mapa',exact:true}).click();if(label)await page.getByRole('button',{name:label,exact:true}).click();}

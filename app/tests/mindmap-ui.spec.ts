@@ -1,12 +1,13 @@
 // @ts-nocheck
 import {test,expect} from '@playwright/test';
+import {editMindTopic} from './helpers/mind-edit';
 import {boardAction} from './helpers/board-actions';
 import {readFile} from 'node:fs/promises';
 async function blank(page){await page.goto('/');await page.waitForFunction(()=>window.__board?.booted);await page.getByRole('button',{name:'Criar board',exact:true}).click();await page.getByRole('dialog',{name:'Criar board'}).getByRole('button',{name:'Criar board',exact:true}).click();await expect(page.locator('#board-home')).toBeHidden();}
-async function fixture(page){return page.evaluate(async()=>{
+async function fixture(page){const ids=await page.evaluate(async()=>{
   const b=window.__board,m=await import('/src/core/mindmap.ts'),root=m.createMindMap(b.state,b.bus,{x:0,y:0},'Projeto'),a=m.addMindChild(b.state,b.bus,root,'Planejar','right'),c=m.addMindChild(b.state,b.bus,a,'Detalhar'),d=m.addMindChild(b.state,b.bus,root,'Executar','right');
   b.bus.exec({op:'SELECTION_SET',payload:[a]});return {root,a,c,d};
-});}
+});await editMindTopic(page,ids.a);return ids;}
 async function select(page,id){await page.evaluate(id=>window.__board.bus.exec({op:'SELECTION_SET',payload:[id]}),id);}
 
 test('the mind-map toolbar creates an editable root and Tab/Enter build its hierarchy',async({page})=>{

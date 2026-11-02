@@ -1,12 +1,13 @@
 // @ts-nocheck
 import {test,expect} from '@playwright/test';
+import {editMindTopic} from './helpers/mind-edit';
 
 async function fixture(page,zoom,layout='right',internal=false){
  await page.goto('/');await page.waitForFunction(()=>window.__board?.booted);await page.getByRole('button',{name:'Criar board',exact:true}).click();await page.getByRole('dialog',{name:'Criar board',exact:true}).getByRole('button',{name:'Criar board',exact:true}).click();await expect(page.locator('#board-home')).toBeHidden();
  const ids=await page.evaluate(async({zoom,layout,internal})=>{const b=window.__board,m=await import('/src/core/mindmap.ts');b.camera.x=b.camera.y=0;b.camera.scale=zoom;const root=m.createMindMap(b.state,b.bus,{x:(layout==='left'?0:-280)/zoom,y:0},'Ideia central',1/zoom),branch=m.addMindChild(b.state,b.bus,root,'Novo tópico'),leaf=m.addMindChild(b.state,b.bus,branch,'Subtópico'),other=m.addMindChild(b.state,b.bus,root,'Livre');m.setMindLayout(b.state,b.bus,root,layout);b.bus.exec({op:'SELECTION_SET',payload:[root]});return {root,branch,leaf,other,id:internal?branch:root,child:internal?leaf:branch};},{zoom,layout,internal});
  // A real free drag is the user's path that pins the descendants. No metadata
  // flags are injected by this fixture.
- const from=await point(page,ids.root);await page.keyboard.down('Alt');await page.mouse.move(from.x,from.y);await page.mouse.down();await page.mouse.move(from.x-80,from.y-40,{steps:10});await page.mouse.up();await page.keyboard.up('Alt');await page.evaluate(id=>window.__board.bus.exec({op:'SELECTION_SET',payload:[id]}),ids.id);return ids;
+ const from=await point(page,ids.root);await page.keyboard.down('Alt');await page.mouse.move(from.x,from.y);await page.mouse.down();await page.mouse.move(from.x-80,from.y-40,{steps:10});await page.mouse.up();await page.keyboard.up('Alt');await page.evaluate(id=>window.__board.bus.exec({op:'SELECTION_SET',payload:[id]}),ids.id);await editMindTopic(page,ids.id);return ids;
 }
 async function point(page,id,handle){return page.evaluate(({id,handle})=>{const b=window.__board,w=b.state.widgets.get(id),r=b.app.canvas.getBoundingClientRect(),p=b.camera.worldToScreen(handle?b.geom.handleWorld(w,handle):{x:w.x+w.width/2,y:w.y+w.height/2});return {x:p.x+r.left,y:p.y+r.top};},{id,handle});}
 async function snapshot(page,ids){return page.evaluate(ids=>{const b=window.__board;return {nodes:Object.fromEntries(Object.values(ids).map(id=>[id,b.state.widgets.get(id)])),history:b.bus.undoStack.length};},ids);}

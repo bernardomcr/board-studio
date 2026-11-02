@@ -22,6 +22,7 @@ interface MindmapUIAPI{
   state:BoardState;bus:CommandBus;camera:Camera;
   setTool(tool:'select'):void;getTool?():string;
   onEdit(id:string):void;onChange?():void;onLink?():void;onImage?(parentId:string):void;
+  onFinishEdit?():void;
   onTransition?(before:{widgets:Map<string,Widget>;connectors:Map<string,Connector>},duration:number):void;
   getBoardKey?():string|null;
 }
@@ -113,6 +114,8 @@ export function installMindmapUI(api:MindmapUIAPI){
   const toolbar=document.getElementById('toolbar')!;toolbar.querySelector('[data-tool="shape"]')?.after(toolbarButton);if(!toolbarButton.parentElement)toolbar.append(toolbarButton);
   let renderKey='',selectedId='',drop:MindDrop|null=null,inputEngaged=false,pointerInteraction=false,refreshDeferred=false,forceHistoryRefresh=false,mindPalette:'color'|'fillColor'|'borderColor'|null=null;
   let dragOrigin:{id:string;widgets:Map<string,Widget>}|undefined;
+  // Editing is a board-local UI session. Saved maps reopen ready to use.
+  let editingRootId:string|null=null,editingBoardKey:string|null|undefined;
   const transitionStart=()=>api.onTransition&&!matchMedia('(prefers-reduced-motion: reduce)').matches?{widgets:new Map([...state.widgets].filter(([,node])=>!!node.mind)),connectors:new Map([...state.connectors].filter(([,line])=>!!line.mindBranch))}:undefined;
   const transitionEnd=(before:ReturnType<typeof transitionStart>)=>{if(before)api.onTransition?.(before,250);};
   panel.addEventListener('pointerdown',()=>{pointerInteraction=true;},true);
@@ -122,6 +125,16 @@ export function installMindmapUI(api:MindmapUIAPI){
   const active=()=>!document.body.classList.contains('home-visible')&&(!api.getTool||api.getTool()==='select');
   document.addEventListener('pointerdown',event=>{if(event.button!==0||!(event.target instanceof HTMLCanvasElement)||!active()){dragOrigin=undefined;return;}const node=selected();dragOrigin=node&&!node.locked?{id:node.id,widgets:new Map([...state.widgets].filter(([,widget])=>!!widget.mind))}:undefined;});
   const locked=(node:Widget)=>itemLocked(state,node.id);
+  function isEditing(id:string){return editingRootId!==null&&editingBoardKey===api.getBoardKey?.()&&mindRoot(state,id)?.id===editingRootId;}
+  function openEditor(id:string){
+    const node=state.widgets.get(id),root=node?.mind?mindRoot(state,id):undefined;
+    if(!node||!root||node.hidden||mindNodeHidden(state,id)||locked(node))return false;
+    editingRootId=root.id;editingBoardKey=api.getBoardKey?.();renderKey='';
+    api.setTool('select');bus.exec({op:'SELECTION_SET',payload:[id]});refresh();api.onChange?.();return true;
+  }
+  function finishEditing(){
+    api.onFinishEdit?.();editingRootId=null;closeMenus();clearDrop();renderKey='';refresh();api.onChange?.();
+  }
   const attachments=installMindAttachments({state,bus,getBoardKey:api.getBoardKey,onChange:()=>{renderKey='';refresh();api.onChange?.();}});
   const canUnlock=(node:Widget)=>locked(node)&&!boardLayerFlags(ensureBoardLayers(state),node.layerId??ensureBoardLayers(state).activeId).locked;
   installHoldAction(panel,()=>{const node=selected();if(!node||!canUnlock(node))return;bus.exec({op:'ENTITY_LOCK',payload:{ids:[node.id],locked:false}});renderKey='';refresh();api.onChange?.();});
@@ -132,7 +145,7 @@ export function installMindmapUI(api:MindmapUIAPI){
       const dy=b.y-a.y>camera.height-200?camera.height/2-(a.y+b.y)/2:a.y<120?120-a.y:b.y>camera.height-80?camera.height-80-b.y:0;
       if(dx||dy)camera.panByScreen(dx,dy);
     }
-    if(edit&&node&&!locked(node))api.onEdit(id);refresh();api.onChange?.();
+    if(edit&&node&&!locked(node)){openEditor(id);api.onEdit(id);}refresh();api.onChange?.();
   }
   function create(){const background=state.background?.color??'#fbfaf7',rgb=/^#[a-f\d]{6}$/i.test(background)?parseInt(background.slice(1),16):0xffffff,dark=.2126*(rgb>>16)+.7152*(rgb>>8&255)+.0722*(rgb&255)<135,id=createMindMap(state,bus,{x:camera.x,y:camera.y},'Ideia central',1/camera.scale,{dark});if(state.widgets.has(id))focusNode(id,true);return id;}
   function add(id:string,kind:'child'|'sibling',before=false){
@@ -142,6 +155,7 @@ export function installMindmapUI(api:MindmapUIAPI){
   }
   function collapseAll(id:string){const node=state.widgets.get(id);if(!node||locked(node))return;bus.beginTransaction('Recolher todos os níveis');try{showMindLevels(state,bus,id,1);if(!state.widgets.get(id)?.mind?.collapsed)toggleMindBranch(state,bus,id);}finally{bus.endTransaction();}}
   function perform(action:string){const node=selected();if(!node||locked(node))return;
+    if(action==='done'){finishEditing();return;}
     if(action==='child'||action==='sibling'){add(node.id,action);return;}
     if(action==='edit'){api.onEdit(node.id);return;}
     if(action==='link'){api.onLink?.();return;}
@@ -222,22 +236,24 @@ export function installMindmapUI(api:MindmapUIAPI){
   panel.addEventListener('keydown',event=>{if((event.ctrlKey||event.metaKey)&&['z','y'].includes(event.key.toLowerCase())&&(!(event.target instanceof HTMLInputElement||event.target instanceof HTMLTextAreaElement)||event.target instanceof HTMLInputElement&&event.target.type==='range'))return;if(event.key==='Escape'){event.preventDefault();closeMenus();}event.stopPropagation();});
   function refresh(){
     if(pointerInteraction&&!forceHistoryRefresh){refreshDeferred=true;return;}
-    const node=selected(),visible=!!node&&active();panel.hidden=!visible;controls.hidden=!visible;
-    document.body.classList.toggle('mind-node-selected',visible);if(!visible){renderKey='';return;}
+    if(editingBoardKey!==api.getBoardKey?.()){editingRootId=null;editingBoardKey=api.getBoardKey?.();}
+    const node=selected(),visible=!!node&&active(),editing=!!node&&isEditing(node.id);panel.hidden=!visible||!editing;controls.hidden=!visible;
+    const readySelection=[...state.selection].some(id=>{const widget=state.widgets.get(id),topic=widget?.mind?id:state.connectors.get(id)?.mindBranch;return !!topic&&!isEditing(topic);});
+    document.body.classList.toggle('mind-node-selected',visible||readySelection);if(!visible){renderKey='';return;}
     if(selectedId!==node!.id){selectedId=node!.id;closeMenus();}
     if(document.activeElement?.closest('.font-picker-popover')&&!forceHistoryRefresh)return;
     if(inputEngaged&&!forceHistoryRefresh){positionContextPanel(panel,state,camera);return;}
     const mind=node!.mind!,root=mindRoot(state,node!.id),children=mindChildren(state,node!.id),color=mind.color??node!.style.borderColor??'#4262ff',layout=root?.mind?.layout??'balanced',line=root?.mind?.lineShape??(layout==='org'||layout==='list'?'elbowed':'curved'),isLocked=locked(node!);
-    const key=JSON.stringify([node!.id,color,layout,line,!!mind.collapsed,children.map(child=>child.id),isLocked,canUnlock(node!),node!.style,node!.type==='shape'?node!.shape:null,node!.type==='frame'?node!.title:node!.content,mind.notes,mind.icon,mind.attachments?.map(file=>[file.id,file.name,file.size]),root?.mind?.theme,brandColorRevision()]);
+    const key=JSON.stringify([node!.id,editing,color,layout,line,!!mind.collapsed,children.map(child=>child.id),isLocked,canUnlock(node!),node!.style,node!.type==='shape'?node!.shape:null,node!.type==='frame'?node!.title:node!.content,mind.notes,mind.icon,mind.attachments?.map(file=>[file.id,file.name,file.size]),root?.mind?.theme,brandColorRevision()]);
     if(key!==renderKey){renderKey=key;const separator='<span class="mind-separator" aria-hidden="true"></span>';
       if(isLocked){
         panel.innerHTML=canUnlock(node!)?`<button type="button" class="mind-lock-control" data-hold-unlock aria-label="Mantenha pressionado para desbloquear tópico" title="Mantenha pressionado para desbloquear">${icon('lock',18)}<span>Desbloquear</span></button>`:`<button type="button" class="mind-lock-control" disabled aria-label="Camada bloqueada" title="Desbloqueie a camada no painel Camadas">${icon('lock',18)}<span>Camada bloqueada</span></button>`;
         controls.innerHTML='';
       }else{
-        panel.innerHTML=actionButton('child','Adicionar subtópico','mind-child','Tab')+(mind.parentId?actionButton('sibling','Adicionar tópico irmão','plus','Enter'):'')+separator+formatMenu(node!)+colorMenu(color)+actionButton('link','Adicionar link','link','Ctrl+K')+actionButton('image','Imagem no tópico','image')+attachmentMenu(node!)+detailsMenu(node!)+separator+actionButton('collapse',mind.collapsed?'Expandir ramo':'Recolher ramo',mind.collapsed?'chevron-right':'chevron-down','Espaço')+branchMenu()+mapMenu(layout,line,root?.mind?.theme??'classic')+actionButton('delete','Excluir ramo','trash','Delete');
+        panel.innerHTML=actionButton('child','Adicionar subtópico','mind-child','Tab')+(mind.parentId?actionButton('sibling','Adicionar tópico irmão','plus','Enter'):'')+separator+formatMenu(node!)+colorMenu(color)+actionButton('link','Adicionar link','link','Ctrl+K')+actionButton('image','Imagem no tópico','image')+attachmentMenu(node!)+detailsMenu(node!)+separator+actionButton('collapse',mind.collapsed?'Expandir ramo':'Recolher ramo',mind.collapsed?'chevron-right':'chevron-down','Espaço')+branchMenu()+mapMenu(layout,line,root?.mind?.theme??'classic')+actionButton('delete','Excluir ramo','trash','Delete')+separator+actionButton('done','Concluir edição do mapa mental','check');
         const descendants=mindSubtree(state,node!.id).length-1;
-        controls.innerHTML=(children.length?`<button type="button" data-mind-fold aria-label="${mind.collapsed?'Expandir':'Recolher'} ${children.length} ${children.length===1?'subtópico':'subtópicos'}" aria-expanded="${!mind.collapsed}" title="${mind.collapsed?'Expandir':'Recolher'} ${descendants} ${descendants===1?'subtópico':'subtópicos'} · Espaço"></button>`:'')+`<button type="button" data-mind-add aria-label="Adicionar subtópico no board" title="Adicionar subtópico (Tab)">${icon('plus',16)}</button>`+(mind.parentId?`<button type="button" data-mind-sibling aria-label="Adicionar tópico irmão no board" title="Adicionar tópico irmão (Enter)">${icon('plus',16)}</button>`:'');
-        if(mind.notes)controls.insertAdjacentHTML('beforeend',`<button type="button" data-mind-notes-button aria-label="Abrir notas do tópico" title="${escape(mind.notes.slice(0,150))}">${icon('sticky',14)}</button>`);
+        controls.innerHTML=(children.length?`<button type="button" data-mind-fold aria-label="${mind.collapsed?'Expandir':'Recolher'} ${children.length} ${children.length===1?'subtópico':'subtópicos'}" aria-expanded="${!mind.collapsed}" title="${mind.collapsed?'Expandir':'Recolher'} ${descendants} ${descendants===1?'subtópico':'subtópicos'} · Espaço"></button>`:'')+(editing?`<button type="button" data-mind-add aria-label="Adicionar subtópico no board" title="Adicionar subtópico (Tab)">${icon('plus',16)}</button>`+(mind.parentId?`<button type="button" data-mind-sibling aria-label="Adicionar tópico irmão no board" title="Adicionar tópico irmão (Enter)">${icon('plus',16)}</button>`:''):'');
+        if(editing&&mind.notes)controls.insertAdjacentHTML('beforeend',`<button type="button" data-mind-notes-button aria-label="Abrir notas do tópico" title="${escape(mind.notes.slice(0,150))}">${icon('sticky',14)}</button>`);
         panel.querySelector<HTMLButtonElement>('[data-mind-action="collapse"]')!.disabled=!children.length;
         installFontPickers(panel);
       }
@@ -259,8 +275,8 @@ export function installMindmapUI(api:MindmapUIAPI){
     if(event.altKey){const digit=event.code.match(/^(?:Digit|Numpad)([0-9])$/)?.[1]??(/^[0-9]$/.test(event.key)?event.key:undefined);if(digit!==undefined){event.preventDefault();if(!locked(node)){const motion=transitionStart();showMindLevels(state,bus,node.id,Number(digit));renderKey='';refresh();api.onChange?.();transitionEnd(motion);}return true;}return false;}
     if(event.key===' '){event.preventDefault();if(!locked(node))perform('collapse');return true;}
     if(event.key==='Escape'&&panel.querySelector('details[open]')){event.preventDefault();closeMenus();return true;}
-    if(event.key==='Tab'){event.preventDefault();if(event.shiftKey&&node.mind!.parentId)focusNode(node.mind!.parentId);else if(!locked(node))add(node.id,'child');return true;}
-    if(event.key==='Enter'){event.preventDefault();if(!locked(node))add(node.id,'sibling',event.shiftKey);return true;}
+    if(event.key==='Tab'){if(!isEditing(node.id))return false;event.preventDefault();if(event.shiftKey&&node.mind!.parentId)focusNode(node.mind!.parentId);else if(!locked(node))add(node.id,'child');return true;}
+    if(event.key==='Enter'){event.preventDefault();if(isEditing(node.id)&&!locked(node))add(node.id,'sibling',event.shiftKey);return true;}
     if(event.key==='Delete'||event.key==='Backspace'){event.preventDefault();if(!locked(node))perform('delete');return true;}
     if(event.key.startsWith('Arrow')&&!event.shiftKey){event.preventDefault();const expand=!locked(node)&&node.mind!.collapsed&&event.key===(node.mind!.side==='left'?'ArrowLeft':'ArrowRight'),motion=expand?transitionStart():undefined;if(expand)toggleMindBranch(state,bus,node.id);const target=navigateMindNode(state,node.id,event.key);if(target)focusNode(target);transitionEnd(motion);return true;}
     return false;
@@ -301,5 +317,5 @@ export function installMindmapUI(api:MindmapUIAPI){
   window.addEventListener('resize',refresh);refresh();
   function refreshAfterHistory(){const active=document.activeElement instanceof HTMLInputElement&&panel.contains(document.activeElement)&&document.activeElement.type==='range'?document.activeElement:null,label=active?.getAttribute('aria-label');pointerInteraction=false;refreshDeferred=false;inputEngaged=false;renderKey='';forceHistoryRefresh=true;try{refresh();}finally{forceHistoryRefresh=false;}if(label)[...panel.querySelectorAll<HTMLInputElement>('input[type="range"]')].find(input=>input.getAttribute('aria-label')===label)?.focus({preventScroll:true});}
   window.addEventListener('board-brand-colors-changed',()=>{renderKey='';refresh();});
-  return {refresh,create,selected,handleKey,afterEdit,previewDrop,commitDrop,clearDrop,refreshAfterHistory};
+  return {refresh,create,selected,handleKey,afterEdit,previewDrop,commitDrop,clearDrop,refreshAfterHistory,openEditor,isEditing,finishEditing};
 }

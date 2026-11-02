@@ -1,9 +1,9 @@
 No Teu Cu e Atiro para Windows 10/11 x64.
 
-Correções pontuais do mapa mental.
+Mapa mental com edição explícita e desbloqueio em lote.
 
-- Bolinha de recolher e expandir ampliada para 20 px, com área clicável de 24 px e tamanho estável em qualquer zoom.
-- Reposicionamento dos ramos ao redimensionar um tópico, incluindo os filhos recolhidos, para evitar que entrem na caixa do tópico principal.
+- Botão direito abre a edição do mapa mental; o check conclui e oculta os ajustes e as alças de tamanho. Mover os tópicos e recolher ou expandir ramos continua disponível.
+- Arrastar com o botão direito seleciona também objetos bloqueados. O menu permite manter pressionado para desbloquear os selecionados de uma vez, com uma única ação de desfazer.
 
 - Instalador: arquivo com final `setup.exe`.
 - Sem instalação: arquivo com final `portable.exe`.

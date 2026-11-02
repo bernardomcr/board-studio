@@ -1,5 +1,6 @@
 // @ts-nocheck
 import {test,expect} from '@playwright/test';
+import {editMindTopic} from './helpers/mind-edit';
 import {expectFloatingRail} from './helpers/floating-rail';
 async function blank(page,title='Barra compacta'){await page.goto('/');await page.waitForFunction(()=>window.__board?.booted);await page.getByRole('button',{name:'Criar board',exact:true}).click();const dialog=page.getByRole('dialog',{name:'Criar board',exact:true});await dialog.getByRole('textbox',{name:'Nome do board',exact:true}).fill(title);await dialog.getByRole('button',{name:'Criar board',exact:true}).click();await expect(page.locator('#board-home')).toBeHidden();await expect(page.locator('#board-transition')).toBeHidden();}
 async function settle(page){await page.evaluate(()=>new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve))));}
@@ -28,7 +29,7 @@ test('dark active text styles, alignment, lists, shapes and line options keep re
 
 test('dark mind-map detail controls, typography and transparent fill retain themed backgrounds',async({page})=>{
  await blank(page);await page.getByRole('button',{name:'Ativar tema escuro',exact:true}).click();await page.evaluate(async()=>{const b=window.__board,{createMindMap}=await import('/src/core/mindmap.ts'),id=createMindMap(b.state,b.bus,{x:0,y:0});b.bus.exec({op:'WIDGET_UPDATE',payload:{id,patch:{style:{...b.state.widgets.get(id).style,fontWeight:'normal'}}}});b.bus.exec({op:'SELECTION_SET',payload:[id]});});
- await page.getByRole('button',{name:'Notas e ícone',exact:true}).click();const clear=page.getByRole('button',{name:'Remover ícone',exact:true});await expect(clear).toBeVisible();expect(await clear.evaluate(el=>getComputedStyle(el).backgroundColor)).toBe('rgb(45, 41, 56)');
+ await editMindTopic(page);await page.getByRole('button',{name:'Notas e ícone',exact:true}).click();const clear=page.getByRole('button',{name:'Remover ícone',exact:true});await expect(clear).toBeVisible();expect(await clear.evaluate(el=>getComputedStyle(el).backgroundColor)).toBe('rgb(45, 41, 56)');
  await page.getByRole('button',{name:'Texto e aparência',exact:true}).click();await page.getByRole('button',{name:'Negrito no tópico',exact:true}).click();await expect(page.getByRole('button',{name:'Negrito no tópico',exact:true})).toHaveCSS('background-color','rgb(59, 42, 80)');await page.getByRole('button',{name:'Paleta: cor do fundo do tópico',exact:true}).click();await expect(page.getByRole('button',{name:'Fundo transparente do tópico',exact:true})).toHaveCSS('background-color','rgb(45, 41, 56)');
 });
 

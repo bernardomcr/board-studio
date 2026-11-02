@@ -1,5 +1,6 @@
 // @ts-nocheck
 import {test,expect} from '@playwright/test';
+import {editMindTopic} from './helpers/mind-edit';
 import {boardAction} from './helpers/board-actions';
 import {readFile} from 'node:fs/promises';
 import {existsSync} from 'node:fs';
@@ -37,7 +38,7 @@ test('two different uploaded font files retain separate previews, object familie
 });
 
 test('the shared mind-topic picker applies and keeps the human label of an imported font after rebuilding its menu',async({page})=>{
- await blank(page);await upload(page);await expect.poll(()=>family(page)).toMatch(/^BoardCustom-/);const importedFamily=await family(page),id=await page.evaluate(async()=>{const b=window.__board,{createMindMap}=await import('/src/core/mindmap.ts'),id=createMindMap(b.state,b.bus,{x:100,y:100},'Minha ideia');b.bus.exec({op:'SELECTION_SET',payload:[id]});return id;});const font=page.getByRole('button',{name:'Fonte do tópico',exact:true});if(!await font.isVisible())await page.getByRole('button',{name:'Texto e aparência',exact:true}).click();await font.click();await page.getByRole('combobox',{name:'Buscar fontes',exact:true}).fill('Minha escrita');await page.getByRole('option',{name:'Minha escrita',exact:true}).click();await expect.poll(()=>page.evaluate(id=>window.__board.state.widgets.get(id).style.fontFamily,id)).toBe(importedFamily);if(!await font.isVisible())await page.getByRole('button',{name:'Texto e aparência',exact:true}).click();await expect(font).toContainText('Minha escrita');
+ await blank(page);await upload(page);await expect.poll(()=>family(page)).toMatch(/^BoardCustom-/);const importedFamily=await family(page),id=await page.evaluate(async()=>{const b=window.__board,{createMindMap}=await import('/src/core/mindmap.ts'),id=createMindMap(b.state,b.bus,{x:100,y:100},'Minha ideia');b.bus.exec({op:'SELECTION_SET',payload:[id]});return id;});await editMindTopic(page,id);const font=page.getByRole('button',{name:'Fonte do tópico',exact:true});if(!await font.isVisible())await page.getByRole('button',{name:'Texto e aparência',exact:true}).click();await font.click();await page.getByRole('combobox',{name:'Buscar fontes',exact:true}).fill('Minha escrita');await page.getByRole('option',{name:'Minha escrita',exact:true}).click();await expect.poll(()=>page.evaluate(id=>window.__board.state.widgets.get(id).style.fontFamily,id)).toBe(importedFamily);if(!await font.isVisible())await page.getByRole('button',{name:'Texto e aparência',exact:true}).click();await expect(font).toContainText('Minha escrita');
 });
 
 test('bad font uploads explain the error without changing the selected text or its undo history',async({page})=>{

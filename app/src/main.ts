@@ -307,9 +307,14 @@ function drawGrid(): void {
 const HANDLE_HIT = 7; // px de tela
 const ROTATE_OFFSET = 46; // Clear of the connection dot above the shape.
 
+function readyMindEntity(id:string):boolean{
+  const widget=state.widgets.get(id),topic=widget?.mind?id:state.connectors.get(id)?.mindBranch;
+  return !!topic&&!mindmapUI?.isEditing(topic);
+}
+
 function connectorAt(p: Vec, tolerance: number,includeLocked=false): Connector | undefined {
   for (const connector of [...state.connectors.values()].sort((a,b)=>b.z-a.z)) {
-    if (connector.hidden||!includeLocked&&connector.locked||mindConnectorHidden(state,connector)) continue;
+    if (connector.hidden||!includeLocked&&(connector.locked||readyMindEntity(connector.id))||mindConnectorHidden(state,connector)) continue;
     const geometry = connectorGeometry(connector, state.widgets);
     if (geometry && (connectorContainsPoint(connector,geometry,p,tolerance)||connectorCaptionAt(connector,geometry,p,tolerance)>=0)) return connector;
   }
@@ -450,6 +455,7 @@ function positionEditor(w: Widget): void {
 /** Editor WYSIWYG: mostra o texto formatado, não a marcação. */
 function beginEdit(w: Widget): void {
   if(w.locked||state.widgets.get(w.id)?.locked)return;
+  if(w.mind&&!mindmapUI?.isEditing(w.id))return;
   if(w.type==='sticky_note'&&w.stickyPad)return;
   if(structuredUI?.edit(w))return;
   if (w.type === "image") { images?.cropSelected(); return; }
@@ -563,9 +569,11 @@ function connectorControlVisible(c:Connector,geometry:NonNullable<ReturnType<typ
 function drawSelection(): void {
   overlay.clear();
   requestRender();
+  if(gesture.kind==='marquee'){drawMarquee(gesture.start,gesture.current);return;}
   if(document.body.classList.contains('image-cropping'))return;
   if(['hand','brush','highlighter','eraser'].includes(tool))return;
   if(state.selection.size&&[...state.selection].every(entityHidden))return;
+  if(state.selection.size&&[...state.selection].every(readyMindEntity)){drawGuides();drawConnectPreview();return;}
   const hover=hoveredConnectionWidget?state.widgets.get(hoveredConnectionWidget):undefined;
   if(hover&&(!state.selection.has(hover.id)||state.selection.size!==1)&&(tool==="select"||tool==="connector"))drawConnectionDots(hover);
   if(gesture.kind==='reconnect'){const c=state.connectors.get(gesture.id),other=c?.[gesture.which==='start'?'end':'start'];drawConnectionTargets(gesture.current,other?.kind==='anchor'?other.widgetId:undefined);}
@@ -607,6 +615,7 @@ function drawSelection(): void {
     const only = onlyId;
     const w = state.widgets.get(only);
     if (!w) return;
+    if(w.mind&&!mindmapUI?.isEditing(w.id)){drawGuides();drawConnectPreview();return;}
     const corners = widgetCorners(w).map((p) => camera.worldToScreen(p));
     overlay.poly(corners.flatMap((p) => [p.x, p.y])).stroke({ width: 1.5, color: blue });
 
@@ -636,10 +645,10 @@ function drawSelection(): void {
   const a = camera.worldToScreen({ x: rect.minX, y: rect.minY });
   const b = camera.worldToScreen({ x: rect.maxX, y: rect.maxY });
   overlay.rect(a.x - 2, a.y - 2, b.x - a.x + 4, b.y - a.y + 4).stroke({ width: 1.5, color: blue });
-  if(![...state.selection].some(id=>itemLocked(state,id)))for (const id of ["nw","n","ne","e","se","s","sw","w"] as HandleId[]) {
+  if(selectionHandlesVisible())for (const id of ["nw","n","ne","e","se","s","sw","w"] as HandleId[]) {
     const p = handleScreen(id); if(p) overlay.rect(p.x-4,p.y-4,8,8).fill(0xffffff).stroke({width:1.5,color:blue});
   }
-  const rotationPoint=rotateHandleScreen(),topPoint=handleScreen("n");if(![...state.selection].some(id=>itemLocked(state,id))&&rotationPoint&&topPoint){overlay.moveTo(topPoint.x,topPoint.y).lineTo(rotationPoint.x,rotationPoint.y).stroke({width:1.5,color:blue});overlay.circle(rotationPoint.x,rotationPoint.y,5).fill(0xffffff).stroke({width:1.5,color:blue});}
+  const rotationPoint=rotateHandleScreen(),topPoint=handleScreen("n");if(selectionHandlesVisible()&&rotationPoint&&topPoint){overlay.moveTo(topPoint.x,topPoint.y).lineTo(rotationPoint.x,rotationPoint.y).stroke({width:1.5,color:blue});overlay.circle(rotationPoint.x,rotationPoint.y,5).fill(0xffffff).stroke({width:1.5,color:blue});}
   drawGuides();
   drawConnectPreview();
 }
@@ -682,6 +691,7 @@ function setTool(next: Tool): void {
 }
 
 function updateCursor(): void {
+  if(gesture.kind==='right-select'||gesture.kind==='marquee'){app.canvas.style.cursor='default';return;}
   if(gesture.kind==='pan'||gesture.kind==='drag'||gesture.kind==='sticky-pull'||gesture.kind==='bend'||gesture.kind==='reconnect'||gesture.kind==='caption-drag'){app.canvas.style.cursor='grabbing';return;}
   if(gesture.kind==='resize'||gesture.kind==='multi-resize'){app.canvas.style.cursor=resizeCursor(gesture.handle,gesture.kind==='resize'?gesture.startWidget.rotation:gesture.box.rotation);return;}
   if(gesture.kind==='rotate'||gesture.kind==='multi-rotate'){app.canvas.style.cursor=ROTATE_CURSOR;return;}
@@ -854,7 +864,8 @@ type Gesture =
   | { kind: "pan"; pointerId: number }
   | { kind: "drag"; ids: string[]; start: Vec; delta: Vec; initial:EntitySnapshot; bounds:Rect|null;snapTargets?:Rect[] }
   | {kind:'sticky-pull';start:Vec;current:Vec;widget:Extract<Widget,{type:'sticky_note'}>}
-  | { kind: "marquee"; start: Vec; current: Vec }
+  | { kind: 'right-select'; start:Vec; current:Vec; initialSelection:string[] }
+  | { kind: "marquee"; start: Vec; current: Vec; includeLocked?:boolean; initialSelection?:string[] }
   | { kind: "resize"; id: string; handle: HandleId; startWidget: Widget; moved: boolean;mindResize?:MindResizeSnapshot }
   | { kind: "rotate"; id: string; startWidget: Widget; grabAngle: number; moved: boolean }
   | { kind: "connect"; fromWidget: string; fromAnchor: Endpoint; current: Vec; fixed?: boolean; startedAt?:Vec;shape?:ConnectorShape;arrow?:boolean;snapDisabled?:boolean }
@@ -1004,7 +1015,7 @@ function hoverConnectionTarget(p:Vec):Widget|undefined {
   return [...state.widgets.values()].sort((a,b)=>b.z-a.z).find(w=>{if(w.locked||widgetHidden(w)||w.type==='frame'||tool==='select'&&Math.min(w.width,w.height)*camera.scale<24&&!pointInWidget(w,p))return false;const b=widgetAABB(w);return p.x>=b.minX-margin&&p.x<=b.maxX+margin&&p.y>=b.minY-margin&&p.y<=b.maxY+margin;});
 }
 function connectionHandles(w:Widget):Array<{point:Vec;anchor:Endpoint}> {
-  if(w.type==="frame")return [];
+  if(w.type==="frame"||w.mind&&tool!=='connector')return [];
   return [{x:.5,y:0},{x:1,y:.5},{x:.5,y:1},{x:0,y:.5}].map(a=>{
     const c=widgetCenter(w),towards=anchorWorldOf(w,{x:.5+(a.x-.5)*4,y:.5+(a.y-.5)*4})!;
     const anchor=facingAnchor(w,towards),edge=anchorWorldOf(w,anchor)!,d={x:edge.x-c.x,y:edge.y-c.y},length=Math.hypot(d.x,d.y)||1;
@@ -1052,7 +1063,7 @@ function rotateHandleAtScreen(s: Vec): boolean {
   const p = rotateHandleScreen();
   return Boolean(p && Math.hypot(p.x - s.x, p.y - s.y) <= HANDLE_HIT + 2);
 }
-function selectionHandlesVisible():boolean{const box=selectionBox();return ![...state.selection].some(id=>itemLocked(state,id))&&!!box&&box.width*camera.scale>=32&&box.height*camera.scale>=24;}
+function selectionHandlesVisible():boolean{const box=selectionBox();return ![...state.selection].some(id=>itemLocked(state,id)||readyMindEntity(id))&&!!box&&box.width*camera.scale>=32&&box.height*camera.scale>=24;}
 /** Group membership is one selection unit across shapes, strokes and connectors. */
 function selectClickedEntity(id:string,event:PointerEvent):boolean{
   const base=(event.altKey?[id]:groupMembersOf(id)).filter(member=>!itemLocked(state,member));
@@ -1094,6 +1105,7 @@ function positionCaptionDraft():void{
   Object.assign(draft.input.style,{width:`${width}px`,fontSize:`${font}px`,left:`${Math.max(width/2+8,Math.min(camera.width-width/2-8,p.x))}px`,top:`${Math.max(36,Math.min(camera.height-36,p.y))}px`});
 }
 function openCaptionDraft(c:Connector,fraction?:number):void{
+  if(readyMindEntity(c.id))return;
   closeCaptionDraft(true);endEdit(true);setTool('select');if(c.locked||home?.transitioning())return;
   const patch=appendConnectorCaption(c,''),index=patch.captions!.length-1,input=document.createElement('input');
   input.id='connector-caption-editor';input.type='text';input.placeholder='Texto';input.setAttribute('aria-label','Texto do conector');input.autocomplete='off';
@@ -1150,7 +1162,15 @@ app.canvas.addEventListener("pointerdown", (e) => {
     e.preventDefault();app.canvas.setPointerCapture(e.pointerId);pointers.set(e.pointerId,{x:e.clientX,y:e.clientY});
     gesture=tool==='eraser'?{kind:'eraser-adjust',start:{x:e.clientX,y:e.clientY},radius:drawingUI?.eraserRadius()??12}:{kind:'brush-adjust',start:{x:e.clientX,y:e.clientY},tool:'brush',initial:drawingUI!.settings('brush')};brushCursor?.move(e.clientX,e.clientY);brushCursor?.adjusting(true);return;
   }
-  if(e.button===2)return;
+  if(e.button===2){
+    if(!['brush','highlighter','eraser'].includes(tool)&&gesture.kind==='none'){
+      e.preventDefault();flushGestureUpdate();editorUI?.closePanels();
+      const rect=app.canvas.getBoundingClientRect(),p=camera.screenToWorld({x:e.clientX-rect.left,y:e.clientY-rect.top});
+      app.canvas.setPointerCapture(e.pointerId);pointers.set(e.pointerId,{x:e.clientX,y:e.clientY});
+      gesture={kind:'right-select',start:p,current:p,initialSelection:e.shiftKey?[...state.selection]:[]};
+    }
+    return;
+  }
   flushGestureUpdate();
   clickedObjectLink=null;
   app.canvas.setPointerCapture(e.pointerId);
@@ -1242,7 +1262,7 @@ app.canvas.addEventListener("pointerdown", (e) => {
     // 1a) pontas de conector selecionado (reconectar / soltar)
   const selectedId = [...state.selection][0];
   const selectedConn = selectedId ? state.connectors.get(selectedId) : undefined;
-  if (selectedConn && state.selection.size===1&&!selectedConn.locked) {
+  if (selectedConn && state.selection.size===1&&!selectedConn.locked&&!readyMindEntity(selectedConn.id)) {
     const geometry = connectorGeometry(selectedConn, state.widgets);
     if (geometry) {
       if(!e.shiftKey&&!e.altKey&&frontmostEntityAt(p)?.id===selectedConn.id&&beginCaptionDrag(selectedConn,p))return;
@@ -1378,7 +1398,7 @@ app.canvas.addEventListener("pointermove", (e) => {
     const hover=hoverConnectionTarget(p),nextHover=hover?.id??null;
     if(nextHover!==hoveredConnectionWidget){hoveredConnectionWidget=nextHover;drawSelection();}
     const atDot=hover&&connectionHandles(hover).some(h=>Math.hypot(h.point.x-screen.x,h.point.y-screen.y)<=10);
-    const selected=state.selection.size===1?state.connectors.get([...state.selection][0]!):undefined,geometry=selected&&!selected.locked?connectorGeometry(selected,state.widgets):null;
+    const selected=state.selection.size===1?state.connectors.get([...state.selection][0]!):undefined,geometry=selected&&!selected.locked&&!readyMindEntity(selected.id)?connectorGeometry(selected,state.widgets):null;
     const grab=geometry&&(connectorCaptionAt(selected!,geometry,p,4/camera.scale)>=0||[geometry.points[0]!,geometry.points.at(-1)!,...connectorEditPoints(selected!,geometry)].some(point=>{if(!connectorControlVisible(selected!,geometry,point))return false;const s=camera.worldToScreen(point);return Math.hypot(s.x-screen.x,s.y-screen.y)<=10;}));
     const locked=[...state.selection].some(id=>itemLocked(state,id)),handle=!locked?handleAtScreen(screen):null,rotating=!locked&&rotateHandleAtScreen(screen),box=state.selection.size===1?state.widgets.get([...state.selection][0]!):selectionBox();
     app.canvas.style.cursor=handle?resizeCursor(handle,box?.rotation??0):rotating?ROTATE_CURSOR:atDot?'pointer':grab?'grab':hoveredLink?'pointer':hoveredWidget?(overPaper?'grab':isFreeText(hoveredWidget)&&state.selection.has(hoveredWidget.id)?'text':'move'):tool==='shape'?'crosshair':'default';
@@ -1387,6 +1407,14 @@ app.canvas.addEventListener("pointermove", (e) => {
 
   if(pendingConnection && gesture.kind === "none") {pendingConnection.current=connectionPointer(p,pendingConnection.fromAnchor,e.shiftKey);pendingConnection.snapDisabled=e.ctrlKey||e.metaKey;connectPreview={from:resolveEndpoint(pendingConnection.fromAnchor,state.widgets)!,to:pendingConnection.current};drawSelection();}
   switch (gesture.kind) {
+    case 'right-select':{
+      gesture.current=p;
+      if(Math.hypot(p.x-gesture.start.x,p.y-gesture.start.y)*camera.scale<4)return;
+      gesture={kind:'marquee',start:gesture.start,current:p,includeLocked:true,initialSelection:gesture.initialSelection};
+      // A right drag starts only after the click threshold, so ordinary right
+      // clicks retain the object's menu without creating a selection rectangle.
+      drawMarquee(gesture.start,gesture.current);return;
+    }
     case 'brush-adjust':{
       const dx=e.clientX-gesture.start.x,dy=e.clientY-gesture.start.y;
       drawingUI?.adjust(gesture.tool,{width:gesture.initial.width+dx/Math.max(.02,camera.scale)*.4,opacity:gesture.initial.opacity-dy*.005},false);
@@ -1482,15 +1510,7 @@ app.canvas.addEventListener("pointermove", (e) => {
     }
     case "marquee": {
       gesture.current = p;
-      const r = marqueeRect(gesture.start, gesture.current);
-      const a = camera.worldToScreen({ x: r.minX, y: r.minY });
-      const b = camera.worldToScreen({ x: r.maxX, y: r.maxY });
-      overlay.clear();
-      overlay
-        .rect(a.x, a.y, b.x - a.x, b.y - a.y)
-        .fill({ color: 0xa970f0, alpha: 0.08 })
-        .stroke({ width: 1, color: 0xa970f0 });
-      requestRender();
+      drawMarquee(gesture.start, gesture.current);
       return;
     }
     case "multi-resize": {
@@ -1546,6 +1566,11 @@ function marqueeRect(a: Vec, b: Vec): Rect {
   };
 }
 
+function drawMarquee(start:Vec,current:Vec):void{
+  const r=marqueeRect(start,current),a=camera.worldToScreen({x:r.minX,y:r.minY}),b=camera.worldToScreen({x:r.maxX,y:r.maxY});
+  overlay.clear();overlay.rect(a.x,a.y,b.x-a.x,b.y-a.y).fill({color:0xa970f0,alpha:.08}).stroke({width:1,color:0xa970f0});requestRender();
+}
+
 function endGesture(e: PointerEvent): void {
   flushGestureUpdate();
   stickyMotion.clear();
@@ -1554,13 +1579,15 @@ function endGesture(e: PointerEvent): void {
   if (pointers.size < 2) lastPinch = null;
 
   if(e.type==="pointercancel"){
+    if(gesture.kind==='right-select'||gesture.kind==='marquee'&&gesture.includeLocked)editorUI?.cancelContextGesture();
     mindmapUI?.clearDrop();
     creationPreview.clear();
     brushPreview.clear();brushCursor?.adjusting(false);drawingUI?.commitSettings();
     bus.endTransaction();gesture={kind:"none"};pendingConnection=null;connectPreview=null;activeGuides=[];drawSelection();updateCursor();refreshChrome();return;
   }
-  let completionId:string|undefined;
+  let completionId:string|undefined,contextRequest:{x:number;y:number;preserveSelection:boolean}|undefined;
   switch (gesture.kind) {
+    case 'right-select':contextRequest={x:e.clientX,y:e.clientY,preserveSelection:false};break;
     case 'sticky-pull':{
       const {widget,start,current}=gesture;creationPreview.clear();
       if(Math.hypot(current.x-start.x,current.y-start.y)*camera.scale>4){
@@ -1647,14 +1674,17 @@ function endGesture(e: PointerEvent): void {
     }
     case "marquee": {
       const r = marqueeRect(gesture.start, gesture.current);
+      const includeLocked=!!gesture.includeLocked;
       lastMarqueeRect = r;
       const ids = state.order.filter((id) => {
         const w = state.widgets.get(id);
-        return w&&!w.locked&&!widgetHidden(w) ? rectIntersectsWidget(r, w) : false;
+        return w&&(includeLocked||!w.locked)&&!widgetHidden(w) ? rectIntersectsWidget(r, w) : false;
       });
-      for(const id of state.connectorOrder){const connector=state.connectors.get(id);if(!connector||connector.locked||connector.hidden||mindConnectorHidden(state,connector))continue;const geometry=connectorGeometry(connector,state.widgets);if(geometry&&connectorIntersectsRect(connector,geometry,r))ids.push(id);}
-      for(const id of state.strokeOrder){const stroke=state.strokes.get(id);if(!stroke||stroke.locked||stroke.hidden)continue;const bounds=selectedBounds(state,[id]);if(bounds&&bounds.minX<=r.maxX&&bounds.maxX>=r.minX&&bounds.minY<=r.maxY&&bounds.maxY>=r.minY)ids.push(id);}
-      bus.exec({ op: "SELECTION_SET", payload: [...new Set(ids.flatMap(id=>memberSelection(state,id,isolatedGroup)))].filter(id=>!itemLocked(state,id)) });
+      for(const id of state.connectorOrder){const connector=state.connectors.get(id);if(!connector||!includeLocked&&(connector.locked||readyMindEntity(id))||connector.hidden||mindConnectorHidden(state,connector))continue;const geometry=connectorGeometry(connector,state.widgets);if(geometry&&connectorIntersectsRect(connector,geometry,r))ids.push(id);}
+      for(const id of state.strokeOrder){const stroke=state.strokes.get(id);if(!stroke||!includeLocked&&stroke.locked||stroke.hidden)continue;const bounds=selectedBounds(state,[id]);if(bounds&&bounds.minX<=r.maxX&&bounds.maxX>=r.minX&&bounds.minY<=r.maxY&&bounds.maxY>=r.minY)ids.push(id);}
+      const selected=[...new Set([...(gesture.initialSelection??[]),...ids.flatMap(id=>memberSelection(state,id,isolatedGroup))])].filter(id=>!entityHidden(id)&&(includeLocked||!itemLocked(state,id)));
+      bus.exec({ op: "SELECTION_SET", payload:selected });
+      if(includeLocked)contextRequest={x:e.clientX,y:e.clientY,preserveSelection:true};
       break;
     }
     default:
@@ -1669,6 +1699,7 @@ function endGesture(e: PointerEvent): void {
   connectPreview = null;
   drawSelection();
   if(completionId)connectorCompletion?.show(completionId);
+  if(contextRequest)editorUI?.openContextAt(contextRequest.x,contextRequest.y,{preserveSelection:contextRequest.preserveSelection});
 }
 app.canvas.addEventListener("pointerup", endGesture);
 app.canvas.addEventListener("pointercancel", endGesture);
@@ -1697,6 +1728,9 @@ app.canvas.addEventListener(
 
 window.addEventListener("keydown", (e) => {
   if(document.body.classList.contains("home-visible")||home?.transitioning())return;
+  if(e.key==='Escape'&&(gesture.kind==='right-select'||gesture.kind==='marquee'&&gesture.includeLocked)){
+    e.preventDefault();editorUI?.cancelContextGesture();gesture={kind:'none'};pointers.clear();lastPinch=null;drawSelection();updateCursor();return;
+  }
   if(e.key==="Escape"&&document.querySelector('#selection-properties details[open],#shape-picker:not([hidden]),#connector-picker:not([hidden]),#editor-context:not([hidden])')){
     e.preventDefault();editorUI?.closePanels();return;
   }
@@ -1903,7 +1937,7 @@ layersUI=installLayers({state,bus,camera,getBoardKey:mediaBoardKey,onSelect:()=>
 const mindImagePicker=document.createElement('input');mindImagePicker.type='file';mindImagePicker.accept='image/*';mindImagePicker.multiple=true;
 let mindImageTarget:{parentId:string;boardKey:string|null}|null=null;
 mindImagePicker.addEventListener('change',()=>{const files=Array.from(mindImagePicker.files??[]),target=mindImageTarget;mindImagePicker.value='';mindImageTarget=null;if(!target||!files.length)return;void images?.importFiles(files,{label:'Imagem no mapa mental',canInsert:()=>target.boardKey===mediaBoardKey()&&!!state.widgets.get(target.parentId)?.mind&&!state.widgets.get(target.parentId)?.locked,afterCreate:ids=>{for(const id of ids)attachMindWidget(state,bus,target.parentId,id);}});});
-mindmapUI=installMindmapUI({state,bus,camera,getBoardKey:mediaBoardKey,setTool:t=>setTool(t),getTool:()=>tool,onTransition:(before,duration)=>mindMotion.play(before,duration),onEdit:id=>{const w=state.widgets.get(id);if(w&&!w.locked)beginEdit(w);},onLink:()=>linkUI?.open(),onImage:parentId=>{mindImageTarget={parentId,boardKey:mediaBoardKey()};mindImagePicker.click();},onChange:()=>{syncScene();drawSelection();refreshChrome();}});
+mindmapUI=installMindmapUI({state,bus,camera,getBoardKey:mediaBoardKey,setTool:t=>setTool(t),getTool:()=>tool,onTransition:(before,duration)=>mindMotion.play(before,duration),onEdit:id=>{const w=state.widgets.get(id);if(w&&!w.locked)beginEdit(w);},onFinishEdit:()=>{endEdit(true);editorUI?.closePanels();},onLink:()=>linkUI?.open(),onImage:parentId=>{mindImageTarget={parentId,boardKey:mediaBoardKey()};mindImagePicker.click();},onChange:()=>{syncScene();drawSelection();refreshChrome();}});
 linkUI=installLinkUI({state,bus,camera,getBoardKey:mediaBoardKey,getEditor:()=>editor,commitEditor:()=>endEdit(true),onChange:()=>{syncScene();drawSelection();refreshChrome();}});
 audioUI=installAudio({state,bus,camera,getTool:()=>tool,setTool:t=>setTool(t),getBoardKey:mediaBoardKey,onChange:()=>{syncScene();drawSelection();refreshChrome();}});
 structuredUI=installStructuredTextUI({state,bus,camera,getTool:()=>tool,getBoardKey:mediaBoardKey,isInteracting:()=>gesture.kind!=='none'||momentum.active,setTool:t=>setTool(t as Tool),onChange:()=>{syncScene();drawSelection();refreshChrome();}});
@@ -1914,6 +1948,8 @@ imagePicker.type="file"; imagePicker.accept="image/*"; imagePicker.multiple=true
 imagePicker.addEventListener("change",()=>{const boardKey=imagePickerBoardKey;if(imagePicker.files) void images?.importFiles(imagePicker.files,{canInsert:()=>boardKey===mediaBoardKey()}); imagePicker.value="";});
 editorUI = installEditorUI({state,bus,camera,setTool:t=>setTool(t as Tool),getTool:()=>tool,
   entityAt:p=>frontmostEntityAt(p,true)?.id,
+  contextGestureActive:()=>gesture.kind==='right-select'||gesture.kind==='marquee'&&!!gesture.includeLocked,
+  onContextEntity:id=>mindmapUI?.openEditor(state.connectors.get(id)?.mindBranch??id)??false,
   isTransforming:()=>['drag','resize','multi-resize','rotate','multi-rotate','bend','reconnect','caption-drag'].includes(gesture.kind),
   onNewConnectorCaption:()=>{const c=state.selection.size===1?state.connectors.get([...state.selection][0]!):undefined;if(c)openCaptionDraft(c);},
   canInsertConnectorObject:choice=>{const c=state.selection.size===1?state.connectors.get([...state.selection][0]!):undefined;return !!c&&canInsertConnectorObject(state,c,choice,camera.scale);},

@@ -1,5 +1,6 @@
 // @ts-nocheck
 import {test,expect} from '@playwright/test';
+import {editMindTopic} from './helpers/mind-edit';
 
 async function blank(page,zoom=1){
   await page.goto('/');await page.waitForFunction(()=>window.__board?.booted);
@@ -9,7 +10,7 @@ async function blank(page,zoom=1){
   await page.evaluate(zoom=>{const b=window.__board;b.camera.x=b.camera.y=0;b.camera.scale=zoom;},zoom);
 }
 async function fixture(page,zoom=1){
-  await blank(page,zoom);return page.evaluate(async zoom=>{const b=window.__board,m=await import('/src/core/mindmap.ts'),root=m.createMindMap(b.state,b.bus,{x:-280/zoom,y:0},'Projeto',1/zoom),a=m.addMindChild(b.state,b.bus,root,'Planejar'),leaf=m.addMindChild(b.state,b.bus,a,'Detalhar');b.bus.exec({op:'SELECTION_SET',payload:[a]});return {root,a,leaf};},zoom);
+  await blank(page,zoom);const ids=await page.evaluate(async zoom=>{const b=window.__board,m=await import('/src/core/mindmap.ts'),root=m.createMindMap(b.state,b.bus,{x:-280/zoom,y:0},'Projeto',1/zoom),a=m.addMindChild(b.state,b.bus,root,'Planejar'),leaf=m.addMindChild(b.state,b.bus,a,'Detalhar');b.bus.exec({op:'SELECTION_SET',payload:[a]});return {root,a,leaf};},zoom);await editMindTopic(page,ids.a);return ids;
 }
 async function select(page,id){await page.evaluate(id=>window.__board.bus.exec({op:'SELECTION_SET',payload:[id]}),id);}
 async function screenBox(page,id){return page.evaluate(id=>{const b=window.__board,w=b.state.widgets.get(id),r=b.app.canvas.getBoundingClientRect(),a=b.camera.worldToScreen({x:w.x,y:w.y}),z=b.camera.scale;return {x:a.x+r.left,y:a.y+r.top,width:w.width*z,height:w.height*z};},id);}

@@ -2,6 +2,7 @@
 // when the browser finishes the selected media, never the destination identity.
 // @ts-nocheck
 import {test,expect} from '@playwright/test';
+import {editMindTopic} from './helpers/mind-edit';
 import {boardAction} from './helpers/board-actions';
 import {readFile} from 'node:fs/promises';
 
@@ -156,7 +157,7 @@ test('mind image import cannot attach or leave an orphan after its parent become
     const id=createMindMap(b.state,b.bus,{x:0,y:0},'Destino da imagem');
     b.bus.exec({op:'SELECTION_SET',payload:[id]});return id;
   });
-  const media=await image(page);await delayDecode(page,media.src);
+  await editMindTopic(page,parent);const media=await image(page);await delayDecode(page,media.src);
   await choose(page,page.getByRole('button',{name:'Imagem no tópico',exact:true}),media.file);
   await decoding(page);
   await page.evaluate(id=>window.__board.bus.exec({op:'WIDGET_UPDATE',payload:{id,patch:{locked:true}}}),parent);

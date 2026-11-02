@@ -1,9 +1,10 @@
 // Regressions from the first cold review: actual edit state and rendered hit geometry.
 // @ts-nocheck
 import {test,expect} from '@playwright/test';
+import {editMindTopic} from './helpers/mind-edit';
 import {boardAction} from './helpers/board-actions';
 async function blank(page){await page.goto('/');await page.waitForFunction(()=>window.__board?.booted);await page.getByRole('button',{name:'Criar board',exact:true}).click();await page.getByRole('dialog',{name:'Criar board',exact:true}).getByRole('button',{name:'Criar board',exact:true}).click();await expect(page.locator('#board-home')).toBeHidden();}
-async function fixture(page){return page.evaluate(async()=>{const b=window.__board,m=await import('/src/core/mindmap.ts'),root=m.createMindMap(b.state,b.bus,{x:0,y:0},'Projeto'),first=m.addMindChild(b.state,b.bus,root,'Primeiro'),second=m.addMindChild(b.state,b.bus,root,'Segundo');b.bus.exec({op:'SELECTION_SET',payload:[second]});return {root,first,second};});}
+async function fixture(page){const ids=await page.evaluate(async()=>{const b=window.__board,m=await import('/src/core/mindmap.ts'),root=m.createMindMap(b.state,b.bus,{x:0,y:0},'Projeto'),first=m.addMindChild(b.state,b.bus,root,'Primeiro'),second=m.addMindChild(b.state,b.bus,root,'Segundo');b.bus.exec({op:'SELECTION_SET',payload:[second]});return {root,first,second};});await editMindTopic(page,ids.second);return ids;}
 async function edit(page,id){const p=await page.evaluate(id=>{const b=window.__board,w=b.state.widgets.get(id);return b.camera.worldToScreen({x:w.x+w.width/2,y:w.y+w.height/2});},id);await page.mouse.dblclick(p.x,p.y);await expect(page.locator('#inline-editor')).toBeVisible();}
 
 test('mind editing Escape cancels, Enter commits without a new node, Shift+Enter keeps multiline editing',async({page})=>{
