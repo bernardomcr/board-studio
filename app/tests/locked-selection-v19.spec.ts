@@ -35,7 +35,9 @@ test('right click respects visual stack and unlock requires a completed hold',as
 
 test('cancelled pointer and keyboard holds keep object locked and layers provide unlock without a floating duplicate',async({page})=>{
  await fixture(page);await page.getByRole('button',{name:'Camadas',exact:true}).click();const caret=page.getByRole('button',{name:/^Expandir objetos da camada /}).first();await caret.click();await page.locator('[data-layer-id="backdrop"] [data-layer-select]').click();const unlock=page.locator('[data-layer-id="backdrop"] [data-layer-lock][data-hold-unlock]');await expect(unlock).toBeVisible();await expect(page.locator('#selection-properties')).toBeHidden();await expect(page.locator('#selection-properties [data-hold-unlock]')).toHaveCount(0);
- await page.clock.install();await page.clock.pauseAt(new Date());
+ // Pause at a future instant derived from the installed clock, so transport
+ // latency cannot turn the requested time into the past on slower CI runners.
+ const clockStart=Date.now();await page.clock.install({time:clockStart});await page.clock.pauseAt(clockStart+60_000);
  await unlock.hover();await page.mouse.down();await page.clock.runFor(150);await page.mouse.move(300,800);await page.mouse.up();await page.clock.runFor(760);expect(await page.evaluate(()=>window.__board.state.widgets.get('backdrop').locked)).toBe(true);
  await unlock.focus();await page.keyboard.down('Enter');await page.clock.runFor(760);await page.keyboard.up('Enter');expect(await page.evaluate(()=>window.__board.state.widgets.get('backdrop').locked)).toBe(false);await expect(page.locator('#selection-properties')).toBeVisible();await expect(page.locator('#selection-properties [data-hold-unlock]')).toHaveCount(0);expect(await page.locator('#selection-properties button').count()).toBeGreaterThan(0);
 });
