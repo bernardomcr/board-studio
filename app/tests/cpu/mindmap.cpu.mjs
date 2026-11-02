@@ -8,7 +8,7 @@ import {join,resolve,relative,isAbsolute,basename} from 'node:path';
 import {fileURLToPath,pathToFileURL} from 'node:url';
 
 const directory=await mkdtemp(join(tmpdir(),'board-mindmap-cpu-')),bundle=join(directory,'core.mjs');
-await build({stdin:{contents:`export * from './core/mindmap';export * from './core/groups';export {CommandBus} from './core/commands';export {connectorGeometry} from './core/connectors';export {boxTextInsets,fitBoxText} from './core/text-layout';export {validateBoardFile} from './project-files';`,resolveDir:fileURLToPath(new URL('../../src/',import.meta.url)),loader:'ts'},bundle:true,platform:'node',format:'esm',outfile:bundle});
+await build({stdin:{contents:`export * from './core/mindmap';export * from './core/groups';export {CommandBus} from './core/commands';export {connectorGeometry,resolveEndpoint} from './core/connectors';export {boxTextInsets,fitBoxText} from './core/text-layout';export {validateBoardFile} from './project-files';`,resolveDir:fileURLToPath(new URL('../../src/',import.meta.url)),loader:'ts'},bundle:true,platform:'node',format:'esm',outfile:bundle});
 const m=await import(pathToFileURL(bundle));
 after(async()=>{const absolute=resolve(directory),within=relative(resolve(tmpdir()),absolute);assert.ok(isAbsolute(directory)&&within&&!within.startsWith('..')&&!isAbsolute(within)&&basename(absolute).startsWith('board-mindmap-cpu-'));await rm(absolute,{recursive:true,force:true,maxRetries:5,retryDelay:50});});
 function fixture(scale=1){const state={widgets:new Map(),order:[],connectors:new Map(),connectorOrder:[],strokes:new Map(),strokeOrder:[],groups:new Map(),selection:new Set()},bus=new m.CommandBus(state,()=>{}),root=m.createMindMap(state,bus,{x:0,y:0},'Centro',scale);return {state,bus,root};}
@@ -167,4 +167,49 @@ test('topic resize skips locked descendants, vetoes a locked or removed parent, 
   const {state,bus,root}=fixture(),a=m.addMindChild(state,bus,root,'A'),b=m.addMindChild(state,bus,a,'B');m.markMindManualPosition(state,bus,root);m.addMindAttachments(state,bus,a,[attachedFile()]);bus.exec({op:'ENTITY_LOCK',payload:{ids:[b],locked:true}});const locked=JSON.stringify(state.widgets.get(b)),live=state.widgets.get(a).mind.attachments,src=live[0].src;let reads=0;Object.defineProperty(live[0],'src',{enumerable:true,get(){reads++;return src;}});const capture=m.captureMindTopicResize(state,root),parent=state.widgets.get(root),geometry={x:parent.x,y:parent.y,width:parent.width+300,height:parent.height+100};
   for(let frame=1;frame<=20;frame++)bus.exec({op:'BATCH',payload:{commands:m.mindTopicResizeCommands(state,capture,geometry)}});assert.equal(reads,0);assert.equal(state.widgets.get(a).mind.attachments,live);assert.equal(JSON.stringify(state.widgets.get(b)),locked);
   bus.exec({op:'ENTITY_LOCK',payload:{ids:[root],locked:true}});assert.deepEqual(m.mindTopicResizeCommands(state,capture,geometry),[]);bus.exec({op:'ENTITY_LOCK',payload:{ids:[root,b],locked:false}});bus.exec({op:'WIDGET_REMOVE',payload:root});assert.deepEqual(m.mindTopicResizeCommands(state,capture,geometry),[]);
+});
+
+const compositionSnapshot=state=>JSON.stringify({widgets:[...state.widgets].sort(([a],[b])=>a.localeCompare(b)),order:state.order,connectors:[...state.connectors].sort(([a],[b])=>a.localeCompare(b)),connectorOrder:state.connectorOrder,strokes:[...state.strokes],strokeOrder:state.strokeOrder,groups:[...state.groups],selection:[...state.selection],layers:state.layers});
+const persistedComposition=snapshot=>{const value=JSON.parse(snapshot);delete value.selection;return value;};
+
+test('an unlocked centre deletes its entire locked map atomically through generic and helper routes, including media and detached external links',()=>{
+  for(const scale of [1,50,.05])for(const route of ['direct','helper']){
+    const {state,bus,root}=fixture(scale),a=m.addMindChild(state,bus,root,'A'),leaf=m.addMindChild(state,bus,a,'Leaf'),sibling=m.addMindChild(state,bus,root,'Sibling');
+    m.addMindAttachments(state,bus,leaf,[attachedFile()]);
+    const base=state.widgets.get(root),photo={...base,id:'photo',type:'image',mind:undefined,content:'',src:'data:image/png;base64,aW1hZ2U=',naturalWidth:500,naturalHeight:300,width:200*scale,height:120*scale};
+    bus.exec({op:'WIDGET_CREATE',payload:photo});assert.equal(m.attachMindWidget(state,bus,a,photo.id),true);
+    bus.exec({op:'WIDGET_CREATE',payload:{...base,id:'outside',mind:undefined,x:2000*scale}});
+    bus.exec({op:'CONNECTOR_CREATE',payload:{id:'ordinary-link',type:'connector',shape:'curved',start:{kind:'anchor',widgetId:leaf,x:1,y:.5},end:{kind:'anchor',widgetId:'outside',x:0,y:.5},style:{strokeColor:'#81709a',strokeWidth:4*scale},captions:['Keep this link'],captionPositions:[.37],z:0}});
+    bus.exec({op:'GROUP_CREATE',payload:{id:'composition',items:[root,a,leaf,sibling,photo.id,'ordinary-link','outside']}});
+    const branches=[...state.connectors.values()].filter(c=>c.mindBranch).map(c=>c.id);
+    bus.exec({op:'ENTITY_LOCK',payload:{ids:[a,leaf,photo.id,...branches,'outside','ordinary-link'],locked:true}});
+    bus.exec({op:'SELECTION_SET',payload:[root,leaf]});
+    const point=m.resolveEndpoint(state.connectors.get('ordinary-link').start,state.widgets),before=compositionSnapshot(state),history=bus.undoStack.length;
+    if(route==='direct')bus.exec({op:'WIDGET_REMOVE',payload:root});else assert.equal(m.deleteMindSubtree(state,bus,root),true);
+    assert.deepEqual([...state.widgets.keys()],['outside']);assert.deepEqual([...state.connectors.keys()],['ordinary-link']);assert.deepEqual(state.groups.get('composition'),['ordinary-link','outside']);
+    const line=state.connectors.get('ordinary-link');assert.deepEqual(line.start,{kind:'point',...point});assert.deepEqual(line.end,{kind:'anchor',widgetId:'outside',x:0,y:.5});assert.equal(line.locked,true);assert.deepEqual(line.captions,['Keep this link']);assert.deepEqual(line.captionPositions,[.37]);assert.equal(state.widgets.get('outside').locked,true);
+    assert.equal(bus.undoStack.length,history+1);assert.deepEqual([...state.selection],[]);m.validateMindMapGraph([...state.widgets.values()],[...state.connectors.values()]);
+    const deleted=compositionSnapshot(state);bus.undo();assert.equal(compositionSnapshot(state),before);assert.equal(state.widgets.get(leaf).mind.attachments[0].src,attachedFile().src);assert.equal(state.widgets.get(photo.id).src,photo.src);bus.redo();assert.equal(compositionSnapshot(state),deleted);
+    const journal=JSON.parse(JSON.stringify(bus.snapshot())),replayed={widgets:new Map(),order:[],connectors:new Map(),connectorOrder:[],strokes:new Map(),strokeOrder:[],groups:new Map(),selection:new Set()},restoredBus=new m.CommandBus(replayed,()=>{});restoredBus.restore(journal.applied,journal.undone);assert.equal(compositionSnapshot(replayed),deleted);restoredBus.undo();
+    // Standalone selection commands are intentionally absent from saved journals.
+    // Live Undo above checks exact selection; replay checks every persisted field.
+    assert.deepEqual(persistedComposition(compositionSnapshot(replayed)),persistedComposition(before));restoredBus.redo();assert.equal(compositionSnapshot(replayed),deleted);
+  }
+});
+
+test('locked centres and locally deleted branches retain their protections while the centre permission never escapes into other commands',()=>{
+  const {state,bus,root}=fixture(),branch=m.addMindChild(state,bus,root,'Branch'),leaf=m.addMindChild(state,bus,branch,'Leaf'),line=[...state.connectors.values()].find(c=>c.mindBranch===leaf),outside={...state.widgets.get(root),id:'outside',mind:undefined};bus.exec({op:'WIDGET_CREATE',payload:outside});
+  bus.exec({op:'ENTITY_LOCK',payload:{ids:[leaf,line.id,'outside'],locked:true}});const before=compositionSnapshot(state),history=bus.undoStack.length;
+  assert.equal(m.canDeleteMindSubtree(state,branch),false);assert.equal(m.deleteMindSubtree(state,bus,branch),false);bus.exec({op:'WIDGET_REMOVE',payload:branch});bus.exec({op:'WIDGET_UPDATE',payload:{id:leaf,patch:{content:'Forbidden'}}});bus.exec({op:'CONNECTOR_REMOVE',payload:line.id});assert.equal(compositionSnapshot(state),before);assert.equal(bus.undoStack.length,history);
+  bus.exec({op:'ENTITY_LOCK',payload:{ids:[root],locked:true}});const locked=compositionSnapshot(state),lockedHistory=bus.undoStack.length;assert.equal(m.canDeleteMindSubtree(state,root),false);assert.equal(m.deleteMindSubtree(state,bus,root),false);bus.exec({op:'WIDGET_REMOVE',payload:root});assert.equal(compositionSnapshot(state),locked);assert.equal(bus.undoStack.length,lockedHistory);
+  bus.exec({op:'ENTITY_LOCK',payload:{ids:[root],locked:false}});const outsideBefore=JSON.stringify(state.widgets.get('outside'));bus.exec({op:'BATCH',payload:{label:'Map removal with unrelated blocked edit',commands:[{op:'WIDGET_REMOVE',payload:root},{op:'WIDGET_UPDATE',payload:{id:'outside',patch:{content:'Forbidden'}}}]}});assert.equal(state.widgets.size,1);assert.equal(JSON.stringify(state.widgets.get('outside')),outsideBefore);
+});
+
+test('the centre effective layer lock governs whole-map deletion while child layer flags and layer documents are restored by Undo',()=>{
+  for(const route of ['direct','helper']){
+    const {state,bus,root}=fixture(),child=m.addMindChild(state,bus,root,'Child'),document=structuredClone(state.layers),baseLayer=document.activeId;document.nodes.push({id:'protected-children',kind:'layer',name:'Protected children'});
+    bus.exec({op:'LAYERS_SET',payload:{document,assignments:[[child,'protected-children']]}});bus.exec({op:'LAYERS_LOCK',payload:{ids:['protected-children'],locked:true}});assert.equal(state.widgets.get(child).locked,true);assert.equal(state.widgets.get(root).locked,false);const before=compositionSnapshot(state),history=bus.undoStack.length;
+    if(route==='direct')bus.exec({op:'WIDGET_REMOVE',payload:root});else assert.equal(m.deleteMindSubtree(state,bus,root),true);assert.equal(state.widgets.size,0);assert.equal(bus.undoStack.length,history+1);bus.undo();assert.equal(compositionSnapshot(state),before);assert.equal(state.widgets.get(child).locked,true);
+    bus.exec({op:'LAYERS_LOCK',payload:{ids:[baseLayer],locked:true}});const locked=compositionSnapshot(state),depth=bus.undoStack.length;assert.equal(m.deleteMindSubtree(state,bus,root),false);bus.exec({op:'WIDGET_REMOVE',payload:root});assert.equal(compositionSnapshot(state),locked);assert.equal(bus.undoStack.length,depth);
+  }
 });

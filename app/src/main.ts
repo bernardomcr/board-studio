@@ -353,14 +353,14 @@ function isSingleSelection(): boolean {
 function handleScreen(id: HandleId): Vec | null {
   const only = [...state.selection][0];
   const w = only ? state.widgets.get(only) : undefined;
-  if (state.selection.size > 1) { const box = selectionBox(); return box ? camera.worldToScreen(handleWorld(box,id)) : null; }
+  if (state.selection.size > 1||only&&state.strokes.has(only)) { const box = selectionBox(); return box ? camera.worldToScreen(handleWorld(box,id)) : null; }
   if (!w) return null;
   return camera.worldToScreen(handleWorld(w, id));
 }
 
 function rotateHandleScreen(): Vec | null {
   const only = [...state.selection][0];
-  const w = state.selection.size>1?selectionBox():only ? state.widgets.get(only) : undefined;
+  const w = state.selection.size>1||only&&state.strokes.has(only)?selectionBox():only ? state.widgets.get(only) : undefined;
   if (!w) return null;
   const top = handleWorld(w, "n");
   const c = widgetCenter(w);
@@ -611,7 +611,7 @@ function drawSelection(): void {
     return;
   }
 
-  if (isSingleSelection()) {
+  if (isSingleSelection()&&state.widgets.has(onlyId)) {
     const only = onlyId;
     const w = state.widgets.get(only);
     if (!w) return;
@@ -1050,12 +1050,12 @@ function frontmostEntityAt(p:Vec,includeLocked=false){
 
 function handleAtScreen(s: Vec): HandleId | null {
   if (state.selection.size < 1||!selectionHandlesVisible()) return null;
-  const only=state.selection.size===1?state.widgets.get([...state.selection][0]!):undefined;
+  let nearest:HandleId|null=null,distance=HANDLE_HIT;
   for (const id of ["nw", "n", "ne", "e", "se", "s", "sw", "w"] as HandleId[]) {
     const p = handleScreen(id);
-    if (p && Math.hypot(p.x - s.x, p.y - s.y) <= HANDLE_HIT) return id;
+    if(p){const candidate=Math.hypot(p.x-s.x,p.y-s.y);if(candidate<=distance){nearest=id;distance=candidate;}}
   }
-  return null;
+  return nearest;
 }
 
 function rotateHandleAtScreen(s: Vec): boolean {
@@ -1063,7 +1063,7 @@ function rotateHandleAtScreen(s: Vec): boolean {
   const p = rotateHandleScreen();
   return Boolean(p && Math.hypot(p.x - s.x, p.y - s.y) <= HANDLE_HIT + 2);
 }
-function selectionHandlesVisible():boolean{const box=selectionBox();return ![...state.selection].some(id=>itemLocked(state,id)||readyMindEntity(id))&&!!box&&box.width*camera.scale>=32&&box.height*camera.scale>=24;}
+function selectionHandlesVisible():boolean{const ids=[...state.selection],box=selectionBox(),onlyStrokes=ids.length>0&&ids.every(id=>state.strokes.has(id));return !ids.some(id=>itemLocked(state,id)||readyMindEntity(id))&&!!box&&(onlyStrokes?box.width>0&&box.height>0:box.width*camera.scale>=32&&box.height*camera.scale>=24);}
 /** Group membership is one selection unit across shapes, strokes and connectors. */
 function selectClickedEntity(id:string,event:PointerEvent):boolean{
   const base=(event.altKey?[id]:groupMembersOf(id)).filter(member=>!itemLocked(state,member));
@@ -1288,7 +1288,7 @@ app.canvas.addEventListener("pointerdown", (e) => {
     }
   }
 
-if (state.selection.size > 1) {
+if (state.selection.size > 1||state.selection.size===1&&state.strokes.has([...state.selection][0]!)) {
     const handle = handleAtScreen(screen), box = selectionBox();
     if(box&&rotateHandleAtScreen(screen)&&![...state.selection].some(id=>itemLocked(state,id))){const center=widgetCenter(box);bus.beginTransaction("Girar seleção");gesture={kind:"multi-rotate",initial:captureSelection(state),center,angle:Math.atan2(p.y-center.y,p.x-center.x)};return;}
     if(handle && box && ![...state.selection].some(id=>itemLocked(state,id))) {
@@ -1514,9 +1514,10 @@ app.canvas.addEventListener("pointermove", (e) => {
       return;
     }
     case "multi-resize": {
-      const box = resizeWidget(gesture.box,gesture.handle,p,e.shiftKey);
+      const initial=gesture.initial,startBox=gesture.box,onlyStrokes=initial.widgets.length===0&&initial.connectors.length===0;
+      const box = resizeWidget(startBox,gesture.handle,p,e.shiftKey,onlyStrokes?Number.EPSILON:24);
       const sx = box.width/gesture.box.width, sy=box.height/gesture.box.height;
-      bus.exec({op:"BATCH",payload:{label:"Redimensionar seleção",commands:transformSnapshot(state,gesture.initial,box.x-gesture.box.x,box.y-gesture.box.y,sx,sy,{x:gesture.box.x,y:gesture.box.y})}});
+      queueGestureUpdate(()=>bus.exec({op:"BATCH",payload:{label:"Redimensionar seleção",commands:transformSnapshot(state,initial,box.x-startBox.x,box.y-startBox.y,sx,sy,{x:startBox.x,y:startBox.y})}}));
       return;
     }
     case "resize": {

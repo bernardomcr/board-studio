@@ -1,9 +1,10 @@
 No Teu Cu e Atiro para Windows 10/11 x64.
 
-Mapa mental com edição explícita e desbloqueio em lote.
+Fundo dos tópicos e exclusão do mapa mental.
 
-- Botão direito abre a edição do mapa mental; o check conclui e oculta os ajustes e as alças de tamanho. Mover os tópicos e recolher ou expandir ramos continua disponível.
-- Arrastar com o botão direito seleciona também objetos bloqueados. O menu permite manter pressionado para desbloquear os selecionados de uma vez, com uma única ação de desfazer.
+- Controle de fundo diretamente no menu do tópico central e dos subtópicos, com cores, opacidade e opção transparente.
+- Excluir pelo centro desbloqueado remove o mapa inteiro, mesmo com subtópicos bloqueados. Desfazer restaura os tópicos, as conexões e seus bloqueios.
+- Desenhos individuais do pincel podem ser redimensionados pelas alças, incluindo traços finos, com espessura e recortes acompanhando a escala.
 
 - Instalador: arquivo com final `setup.exe`.
 - Sem instalação: arquivo com final `portable.exe`.

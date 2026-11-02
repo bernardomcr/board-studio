@@ -309,13 +309,24 @@ export function moveMindSubtree(state:BoardState,bus:CommandBus,id:string,dx:num
   const ids=mindSubtree(state,id);if(!ids.length||!Number.isFinite(dx)||!Number.isFinite(dy)||ids.some(id=>state.widgets.get(id)?.locked))return false;
   return run(bus,'Mover ramo',ids.map(nodeId=>{const node=state.widgets.get(nodeId)!;return {op:'WIDGET_UPDATE',payload:{id:nodeId,patch:{x:node.x+dx,y:node.y+dy}}};}));
 }
+/** The editable centre owns deletion of its complete map. Local branch deletion
+ * still respects every descendant/branch lock; other edits never inherit this
+ * permission. Effective layer locks are already projected onto each widget. */
+export function canDeleteMindSubtree(state:BoardState,id:string):boolean{
+  const node=state.widgets.get(id);if(!node?.mind||node.locked)return false;
+  if(node.mind.parentId===null&&node.mind.rootId===id)return true;
+  const ids=mindSubtree(state,id),removed=new Set(ids);
+  return !!ids.length&&!ids.some(nodeId=>state.widgets.get(nodeId)?.locked)&&![...state.connectors.values()].some(connector=>connector.locked&&connector.mindBranch&&removed.has(connector.mindBranch));
+}
 export function deleteMindSubtree(state:BoardState,bus:CommandBus,id:string):boolean{
-  const node=state.widgets.get(id),ids=mindSubtree(state,id),removed=new Set(ids);if(!node?.mind||!ids.length||ids.some(id=>state.widgets.get(id)?.locked))return false;
-  if([...state.connectors.values()].some(connector=>connector.locked&&connector.mindBranch&&removed.has(connector.mindBranch)))return false;
-  const copy=staged(state),commands:Command[]=[];
-  for(const connector of copy.connectors.values())if(connector.mindBranch&&removed.has(connector.mindBranch)){commands.push({op:'CONNECTOR_REMOVE',payload:connector.id});copy.connectors.delete(connector.id);}
-  for(const nodeId of [...ids].reverse()){commands.push({op:'WIDGET_REMOVE',payload:nodeId});copy.widgets.delete(nodeId);}
-  copy.order=copy.order.filter(id=>!removed.has(id));commands.push(...mindLayoutCommands(copy,node.mind.rootId),{op:'SELECTION_SET',payload:node.mind.parentId?[node.mind.parentId]:[]});return run(bus,'Excluir ramo',commands);
+  const node=state.widgets.get(id);if(!node?.mind||!canDeleteMindSubtree(state,id))return false;
+  // WIDGET_REMOVE is authoritative for both the toolbar and generic/Layers
+  // deletion. Keep its expansion private to the bus and its inverse atomic.
+  run(bus,node.mind.parentId?'Excluir ramo':'Excluir mapa mental',[
+    {op:'WIDGET_REMOVE',payload:id},
+    {op:'SELECTION_SET',payload:node.mind.parentId?[node.mind.parentId]:[]},
+  ]);
+  return !state.widgets.has(id);
 }
 export function navigateMindNode(state:BoardState,id:string,key:string):string|null{
   const node=state.widgets.get(id);if(!node?.mind)return null;

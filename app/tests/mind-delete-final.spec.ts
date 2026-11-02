@@ -3,22 +3,25 @@ import {test,expect} from '@playwright/test';
 
 async function ready(page){await page.goto('/');await page.waitForFunction(()=>window.__board?.booted);}
 
-test('generic widget removal preserves a mind branch with a locked descendant',async({page})=>{
+for(const route of ['direct','helper'])test(`${route} removal respects locked branches but an unlocked centre deletes the whole map with one undo`,async({page})=>{
   await ready(page);
-  const result=await page.evaluate(async()=>{
+  const result=await page.evaluate(async route=>{
     const m=await import('/src/core/mindmap.ts'),{CommandBus}=await import('/src/core/commands.ts');
     const state={widgets:new Map(),order:[],connectors:new Map(),connectorOrder:[],strokes:new Map(),strokeOrder:[],groups:new Map(),selection:new Set()},bus=new CommandBus(state,()=>{});
     const root=m.createMindMap(state,bus,{x:0,y:0},'Root'),branch=m.addMindChild(state,bus,root,'Branch'),leaf=m.addMindChild(state,bus,branch,'Locked leaf');
-    bus.exec({op:'WIDGET_UPDATE',payload:{id:leaf,patch:{locked:true}}});
-    const snapshot=()=>JSON.stringify({widgets:[...state.widgets],order:state.order,connectors:[...state.connectors],connectorOrder:state.connectorOrder,groups:[...state.groups],selection:[...state.selection]});
+    bus.exec({op:'ENTITY_LOCK',payload:{ids:[leaf,...state.connectors.keys()],locked:true}});
+    bus.exec({op:'SELECTION_SET',payload:[root]});
+    const snapshot=()=>JSON.stringify({widgets:[...state.widgets].sort(([a],[b])=>a.localeCompare(b)),order:state.order,connectors:[...state.connectors].sort(([a],[b])=>a.localeCompare(b)),connectorOrder:state.connectorOrder,groups:[...state.groups],selection:[...state.selection]});
     const before=snapshot(),history=bus.undoStack.length;
     bus.exec({op:'WIDGET_REMOVE',payload:branch});
-    const branchUnchanged=snapshot()===before;
-    bus.exec({op:'WIDGET_REMOVE',payload:root});
+    const branchUnchanged=snapshot()===before&&!m.deleteMindSubtree(state,bus,branch)&&bus.undoStack.length===history;
+    const helperResult=route==='helper'?m.deleteMindSubtree(state,bus,root):(bus.exec({op:'WIDGET_REMOVE',payload:root}),true),removed=state.widgets.size===0&&state.connectors.size===0,historyDelta=bus.undoStack.length-history;
     m.validateMindMapGraph([...state.widgets.values()],[...state.connectors.values()]);
-    return {branchUnchanged,rootUnchanged:snapshot()===before,historyUnchanged:bus.undoStack.length===history};
-  });
-  expect(result).toEqual({branchUnchanged:true,rootUnchanged:true,historyUnchanged:true});
+    bus.undo();const restored=snapshot()===before;bus.redo();const redone=state.widgets.size===0&&state.connectors.size===0;
+    bus.undo();bus.exec({op:'ENTITY_LOCK',payload:{ids:[root],locked:true}});const locked=snapshot(),lockedHistory=bus.undoStack.length;bus.exec({op:'WIDGET_REMOVE',payload:root});const lockedVeto=!m.deleteMindSubtree(state,bus,root)&&snapshot()===locked&&bus.undoStack.length===lockedHistory;
+    return {branchUnchanged,helperResult,removed,historyDelta,restored,redone,lockedVeto};
+  },route);
+  expect(result).toEqual({branchUnchanged:true,helperResult:true,removed:true,historyDelta:1,restored:true,redone:true,lockedVeto:true});
 });
 
 test('generic branch removal retains ordinary links as detached geometry and restores all composition data in one undo',async({page})=>{

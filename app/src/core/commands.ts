@@ -16,7 +16,7 @@ import {inheritStrokeFittingCache,type Stroke} from "./strokes";
 import { DEFAULT_BACKGROUND, validateBoardBackground, copyBoardBackground, type BoardBackground, type BackgroundPatch } from "./background";
 import { isFreeText,naturalText } from './text-layout';
 import { relativeBorderScale } from './style-scale';
-import { mindLayoutCommands, mindSubtree } from './mindmap';
+import { canDeleteMindSubtree, mindLayoutCommands, mindSubtree } from './mindmap';
 import {ensureBoardLayers,projectLayerItem,prepareLayerPatch,syncBoardLayers,validateBoardLayers,ownLayerFlags,boardLayerFlags,boardLayerOrder,layerDescendants,LAYER_Z_STRIDE,type BoardLayers} from './board-layers';
 
 export type CommandOp =
@@ -327,9 +327,9 @@ export class CommandBus {
         if (!widget) return null;
         if(widget.mind){
           const ids=mindSubtree(s,id),removed=new Set(ids);
-          if(ids.some(nodeId=>s.widgets.get(nodeId)?.locked))return null;
+          const wholeMap=widget.mind.parentId===null&&widget.mind.rootId===id;
+          if(respectLocks&&!canDeleteMindSubtree(s,id))return null;
           const branches=[...s.connectors.values()].filter(connector=>connector.mindBranch&&removed.has(connector.mindBranch));
-          if(respectLocks&&branches.some(branch=>branch.locked))return null;
           if(ids.length>1||branches.length){
             const copy={...s,widgets:new Map(s.widgets),order:s.order.filter(nodeId=>!removed.has(nodeId)),connectors:new Map(s.connectors)};
             for(const nodeId of ids)copy.widgets.delete(nodeId);
@@ -341,7 +341,10 @@ export class CommandBus {
               ...[...ids].reverse().map(nodeId=>({op:'WIDGET_REMOVE' as const,payload:nodeId})),
               ...mindLayoutCommands(copy,widget.mind.rootId),
             ];
-            const selectionBefore=[...s.selection],entry=this.execute({op:'BATCH',payload:{label:'Excluir ramo',commands}},respectLocks)!;
+            // The unlocked centre authorizes exactly this generated deletion
+            // batch. Descendant locks stay untouched and all unrelated command
+            // paths retain their ordinary interactive guards.
+            const selectionBefore=[...s.selection],entry=this.execute({op:'BATCH',payload:{label:wholeMap?'Excluir mapa mental':'Excluir ramo',commands}},respectLocks&&!wholeMap)!;
             return {...entry,command,undo:()=>{entry.undo();s.selection=new Set(selectionBefore);}};
           }
         }

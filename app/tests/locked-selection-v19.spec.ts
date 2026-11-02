@@ -88,16 +88,17 @@ test('locked layer ancestors cannot be escaped by reparenting ungrouping or docu
  await hold(page,folder.locator('[data-board-layer-lock]'));expect(await page.evaluate(()=>window.__board.state.widgets.get('one').locked)).toBe(false);await page.evaluate(()=>window.__board.bus.undo());expect(await page.evaluate(()=>window.__board.state.widgets.get('one').locked)).toBe(true);await page.evaluate(()=>window.__board.bus.redo());expect(await page.evaluate(()=>window.__board.state.widgets.get('one').locked)).toBe(false);
 });
 
-test('a locked mind branch vetoes complete subtree deletion before any sibling can be removed',async({page})=>{
+test('an unlocked mind centre owns whole-map deletion even with a locked internal branch, while a locked centre vetoes it',async({page})=>{
  await fixture(page);const result=await page.evaluate(async()=>{
   const b=window.__board,{createWidget}=await import('/src/core/model.ts'),{deleteMindSubtree}=await import('/src/core/mindmap.ts');
   for(const [id,parent,order]of [['root',null,0],['child','root',0],['sibling','root',1]])b.bus.exec({op:'WIDGET_CREATE',payload:{...createWidget('shape',{x:400+order*50,y:-200+order*90,width:100,height:60,content:id}),id,mind:{rootId:'root',parentId:parent,side:'right',order}}});
   for(const child of ['child','sibling'])b.bus.exec({op:'CONNECTOR_CREATE',payload:{id:'branch-'+child,type:'connector',mindBranch:child,shape:'curved',start:{kind:'anchor',widgetId:'root',x:1,y:.5},end:{kind:'anchor',widgetId:child,x:0,y:.5},style:{strokeColor:'#b68aff',strokeWidth:2},z:0}});
-  b.bus.exec({op:'ENTITY_LOCK',payload:{ids:['branch-child'],locked:true}});const snapshot=()=>JSON.stringify({widgets:[...b.state.widgets],connectors:[...b.state.connectors],selection:[...b.state.selection]}),before=snapshot(),n=b.bus.undoStack.length;
-  b.bus.exec({op:'WIDGET_REMOVE',payload:'root'});const directSame=snapshot()===before,helper=deleteMindSubtree(b.state,b.bus,'root'),helperSame=snapshot()===before,history=b.bus.undoStack.length-n;
-  b.bus.exec({op:'ENTITY_LOCK',payload:{ids:['branch-child'],locked:false}});const allowed=deleteMindSubtree(b.state,b.bus,'root'),removed=['root','child','sibling'].every(id=>!b.state.widgets.has(id));b.bus.undo();const restored=['root','child','sibling'].every(id=>b.state.widgets.has(id))&&['branch-child','branch-sibling'].every(id=>b.state.connectors.has(id));
-  return {directSame,helper,helperSame,history,allowed,removed,restored};
- });expect(result).toEqual({directSame:true,helper:false,helperSame:true,history:0,allowed:true,removed:true,restored:true});
+  b.bus.exec({op:'ENTITY_LOCK',payload:{ids:['branch-child'],locked:true}});const snapshot=()=>JSON.stringify({widgets:[...b.state.widgets].sort(([a],[b])=>a.localeCompare(b)),order:b.state.order,connectors:[...b.state.connectors].sort(([a],[b])=>a.localeCompare(b)),connectorOrder:b.state.connectorOrder,selection:[...b.state.selection]}),before=snapshot(),n=b.bus.undoStack.length;
+  b.bus.exec({op:'WIDGET_REMOVE',payload:'root'});const directRemoved=['root','child','sibling'].every(id=>!b.state.widgets.has(id))&&['branch-child','branch-sibling'].every(id=>!b.state.connectors.has(id)),history=b.bus.undoStack.length-n;b.bus.undo();const directRestored=snapshot()===before;
+  const helper=deleteMindSubtree(b.state,b.bus,'root'),removed=['root','child','sibling'].every(id=>!b.state.widgets.has(id));b.bus.undo();const restored=snapshot()===before&&b.state.connectors.get('branch-child').locked===true;
+  b.bus.exec({op:'ENTITY_LOCK',payload:{ids:['root'],locked:true}});const locked=snapshot(),depth=b.bus.undoStack.length;b.bus.exec({op:'WIDGET_REMOVE',payload:'root'});const rootVeto=!deleteMindSubtree(b.state,b.bus,'root')&&snapshot()===locked&&b.bus.undoStack.length===depth;
+  return {directRemoved,directRestored,history,helper,removed,restored,rootVeto};
+ });expect(result).toEqual({directRemoved:true,directRestored:true,history:1,helper:true,removed:true,restored:true,rootVeto:true});
 });
 
 test('text creation refused by a locked active layer completes the gesture without opening a missing object',async({page})=>{
