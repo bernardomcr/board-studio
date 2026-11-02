@@ -21,6 +21,9 @@ const draft=editor=>editor.locator('[data-image-crop-frame]').evaluate(element=>
 async function drag(page,from,to){await page.mouse.move(from.x,from.y);await page.mouse.down();await page.mouse.move(to.x,to.y,{steps:8});await page.mouse.up();}
 
 for(const zoom of [.02,1,20])test(`inline crop at ${zoom*100}% moves pixels inside a fixed frame and has one persistent undo action`,async({page})=>{
+ // This complete persistence scenario includes two app boots, native crop
+ // interaction, Undo/Redo and an IndexedDB save before checking the reload.
+ test.setTimeout(60000);
  await blank(page);const original=await image(page,zoom),before=await page.evaluate(()=>({undo:window.__board.bus.undoStack.length,camera:{x:window.__board.camera.x,y:window.__board.camera.y,scale:window.__board.camera.scale}}));
  const editor=await open(page,'square'),initial=await draft(editor),box=await editor.locator('[data-image-crop-frame]').boundingBox();
  expect(initial.frame.width/initial.frame.height).toBeCloseTo(1,10);expect(initial.crop).toEqual({x:.25,y:0,width:.5,height:1});

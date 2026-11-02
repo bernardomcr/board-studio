@@ -12,6 +12,7 @@ Referência: Miro aberto no Chrome em 2 de novembro de 2026. A comparação usa 
 - Ao terminar de criar um objeto, o aplicativo volta a Selecionar (V). Outra criação exige escolher a ferramenta novamente; pincel e borracha continuam sendo ferramentas contínuas de desenho.
 - A Home perdeu o banner, a marca gigante e os textos decorativos. Busca, criação, importação, projetos, preferências e perfil permanecem disponíveis, inclusive em largura estreita.
 - “Organizar” está disponível também para traços e conectores. Imagens têm apenas uma entrada de recorte; os formatos ficam dentro dela. O menu de áudio ganhou foco inicial, navegação por setas e retorno de foco com Escape.
+- A borracha de precisão deixou de reconstruir toda a máscara em cada atualização: reutiliza trechos de 32 segmentos e atualiza a cauda. O teste de interseção reaproveita a análise dos recortes antigos, rejeita regiões distantes e verifica áreas visíveis antes do cálculo exato. As amostras originais e o SVG persistido permanecem iguais.
 
 ## Comparação por funcionalidade
 
@@ -46,6 +47,18 @@ Referência: Miro aberto no Chrome em 2 de novembro de 2026. A comparação usa 
 - Perfil e boards continuam locais. Login online e sincronização com Google Drive ficaram para uma etapa posterior, por decisão do usuário.
 - Não se declara comportamento idêntico em toda combinação de modificadores, encaixes e obstáculos de roteamento. Foram comparados os menus principais e verificados os fluxos implementados.
 - Uma revisão não transforma o editor em garantia de 60 FPS em qualquer máquina. A pausa de serialização de um board pesado, medida na v0.18.0, não foi eliminada por esta rodada de interface.
+- A máscara ainda percorre e desenha seus trechos existentes. Uniões de muitos cortes distintos podem exigir o cálculo geométrico exato; a otimização reduz a repetição desse cálculo, sem estabelecer desempenho constante para qualquer desenho.
+
+## Borracha: medição antes e depois
+
+Mesmo computador, Chromium 145 headless, builds de produção, seis traços com 10.800 amostras e 100 segmentos de borracha, incluindo a volta sobre a região já apagada. Tempo de execução do apagamento, atualização da cena e envio da renderização; não é uma medição de FPS da tela.
+
+| Zoom | p95 anterior | p95 corrigido | Maior atualização anterior / corrigida |
+| --- | ---: | ---: | ---: |
+| 100% | 90,1 ms | 20,4 ms | 119,4 / 23,3 ms |
+| 2% | 91,6 ms | 20,4 ms | 119,8 / 30,3 ms |
+
+O teste preservou os seis traços, todas as 10.800 amostras e o desfazer/refazer. As máscaras foram comparadas com Canvas 2D em três escalas, inclusive com mais de 256 sobreposições. A revisão independente confirmou a união do stencil e a liberação dos recursos dos trechos descartados.
 
 ## Evidência e validação
 
@@ -63,6 +76,7 @@ As capturas privadas, relatórios de navegador e arquivos de trabalho permanecem
 - Foco de bloqueio/camadas/mapa mental: 34 cenários aprovados.
 - Foco de compatibilidade e menus: 45 cenários aprovados, preservando verificações de estado, sincronização de cena, contenção e Undo/Redo.
 - Após os ajustes finais, 108 cenários de criação, colagem, menus, notas, imagens, tabelas e bloqueios passaram sem falhas, repetições ou casos ignorados. TypeScript também passou.
-- A suíte completa desta revisão contém 470 cenários. O resultado integral deve ser conferido no relatório de publicação e no workflow do commit liberado.
+- Na revisão adicional da borracha, quatro testes CPU e 65 cenários de navegador passaram, sem falhas ou casos ignorados. Também foram feitas 600 comparações determinísticas com o cálculo exato anterior.
+- A suíte completa desta revisão contém 472 cenários de navegador e quatro testes CPU. O resultado integral deve ser conferido no relatório de publicação e no workflow do commit liberado.
 
 Os testes usaram dados sintéticos. Não leram a área de transferência real nem gravaram o microfone do usuário. No Miro, o teste de manter pressionado alternou o bloqueio de uma forma vazia e a devolveu ao estado desbloqueado; conteúdo, geometria, cores e conexões não foram editados.

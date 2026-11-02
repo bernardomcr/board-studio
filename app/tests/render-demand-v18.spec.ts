@@ -1,6 +1,7 @@
 // @ts-nocheck
 import {test,expect} from '@playwright/test';
 import {createRequire} from 'node:module';
+import {nativeFling} from './helpers/native-fling';
 const {PNG}=createRequire(import.meta.url)('../node_modules/playwright-core/lib/utilsBundle.js');
 async function settle(page){await page.evaluate(()=>new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(()=>requestAnimationFrame(resolve)))));}
 async function blank(page){await page.goto('/');await page.waitForFunction(()=>window.__board?.booted);await page.getByRole('button',{name:'Criar board',exact:true}).click();await page.getByRole('dialog',{name:'Criar board',exact:true}).getByRole('button',{name:'Criar board',exact:true}).click();await expect(page.locator('#board-home')).toBeHidden();await page.evaluate(()=>window.__board.bus.exec({op:'BACKGROUND_UPDATE',payload:{color:'#ffffff',grid:false}}));await settle(page);}
@@ -41,7 +42,12 @@ test('triangle creation preview repaints its silhouette and clearing it leaves n
 });
 
 test('Space momentum keeps rendering through its final camera pose and then stops GPU submissions',async({page})=>{
- await blank(page);await shape(page,{x:-350,y:-30,width:100,height:60,color:'#0fad48'});await instrument(page);await page.keyboard.down('Space');await page.mouse.move(500,800);await page.mouse.down();for(let i=1;i<=8;i++){await page.waitForTimeout(16);await page.mouse.move(500+i*12,800);}await page.mouse.up();await page.keyboard.up('Space');const released=await page.evaluate(()=>({x:window.__board.camera.x,active:window.__board.navigation.active(),draws:window.__renderSubmissions}));expect(released.active).toBe(true);await expect.poll(()=>page.evaluate(()=>window.__board.navigation.active())).toBe(false);await settle(page);const final=await page.evaluate(()=>({x:window.__board.camera.x,draws:window.__renderSubmissions,point:window.__board.camera.worldToScreen({x:-300,y:0})}));expect(final.x).toBeLessThan(released.x);expect(final.draws).toBeGreaterThan(released.draws);expect(await pixel(page,final.point.x,final.point.y)).toEqual([15,173,72]);await reset(page);await page.waitForTimeout(200);expect(await page.evaluate(()=>window.__renderSubmissions)).toBe(0);expect(await page.evaluate(()=>window.__rafTicks)).toBeGreaterThan(5);
+ await blank(page);await shape(page,{x:-350,y:-30,width:100,height:60,color:'#0fad48'});await instrument(page);await page.keyboard.down('Space');
+ // Capture the release pose and draw count after the application's pointerup
+ // listener, before host/GPU acknowledgement latency can age the observation.
+ const observed=await nativeFling(page,{x:500,y:800,dx:12,captureReleaseState:true});await page.keyboard.up('Space');
+ const released={x:observed.cameraAtRelease.x,active:observed.activeAtRelease,draws:observed.drawsAtRelease};expect(Number.isFinite(released.x)).toBe(true);expect(Number.isFinite(released.draws)).toBe(true);expect(released.active).toBe(true);
+ await expect.poll(()=>page.evaluate(()=>window.__board.navigation.active())).toBe(false);await settle(page);const final=await page.evaluate(()=>({x:window.__board.camera.x,draws:window.__renderSubmissions,point:window.__board.camera.worldToScreen({x:-300,y:0})}));expect(final.x).toBeLessThan(released.x);expect(final.draws).toBeGreaterThan(released.draws);expect(await pixel(page,final.point.x,final.point.y)).toEqual([15,173,72]);await reset(page);await page.waitForTimeout(200);expect(await page.evaluate(()=>window.__renderSubmissions)).toBe(0);expect(await page.evaluate(()=>window.__rafTicks)).toBeGreaterThan(5);
 });
 
 test('DPR resize and visibility, focus and pageshow wakes render once without restarting continuous drawing',async({page})=>{

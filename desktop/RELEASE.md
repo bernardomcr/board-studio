@@ -8,6 +8,7 @@ Revisão de interação, seleção e menus, mantendo a identidade em cinza escur
 - Bloqueios herdados de camadas e ramos de mapas mentais são preservados, com Undo e Redo.
 - Ferramentas na lateral, Home sem banner decorativo e menus de recorte e organização consistentes.
 - Ao criar um objeto, a ferramenta volta automaticamente a Selecionar (V).
+- A borracha de precisão reutiliza a geometria dos cortes e evita recalcular a mesma área apagada para cada amostra do pincel.
 
 - Instalador: arquivo com final `setup.exe`.
 - Sem instalação: arquivo com final `portable.exe`.

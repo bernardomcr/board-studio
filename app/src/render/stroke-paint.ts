@@ -1,7 +1,8 @@
-import {AlphaFilter,Graphics,StencilMask} from 'pixi.js';
+import {AlphaFilter,Container,Graphics,StencilMask} from 'pixi.js';
 import {strokeGeometry,strokeGeometryRange,strokeOpacity,strokeBounds,type Stroke,type StrokeGeometry} from '../core/strokes';
 import type {Vec} from '../core/geometry';
 import {strokeRenderPoints,strokeScreenCoverage,strokeMinimumWidth} from './stroke-lod';
+import {destroyDisplayTree} from './destroy-tree';
 export {strokeScreenCoverage,strokeRenderKey} from './stroke-lod';
 
 interface PaintOptions {
@@ -19,20 +20,25 @@ interface PaintOptions {
   endSegment?:number;
 }
 const opacityFilters=new WeakMap<Graphics,AlphaFilter>();
-const eraserMasks=new WeakMap<Graphics,Graphics>();
+interface EraserMaskChunk {graphics:Graphics;points:Array<Vec&{r:number}>;density:number;radius:number}
+interface EraserMask {container:Container;chunks:EraserMaskChunk[]}
+const eraserMasks=new WeakMap<Graphics,EraserMask>();
+/** Bound tessellation work to the changing tail of a live eraser path. */
+const ERASER_CHUNK_SEGMENTS=32;
+const identityPoint=(point:Vec):Vec=>point;
 const maskCleanupInstalled=new WeakSet<Graphics>();
 const retainedPaints=new WeakMap<Graphics,{geometry:StrokeGeometry;key:string;instruction:unknown}>();
 /** Pixi's standard stencil bounds intersect with the mask's bounds even when the
  * mask is inverse. That crops AlphaFilter to the erased hole. An inverse mask
  * only subtracts pixels and must preserve the painted object's original bounds. */
 class StrokeInverseMask extends StencilMask{
-  constructor(mask:Graphics){super({mask});}
+  constructor(mask:Container){super({mask});}
   override addBounds():void{}
   override addLocalBounds():void{}
   override containsPoint(...args:Parameters<StencilMask['containsPoint']>):boolean{return !super.containsPoint(...args);}
 }
 const eraserEffects=new WeakMap<Graphics,StrokeInverseMask>();
-function removeEraserMask(graphics:Graphics):void{const effect=eraserEffects.get(graphics);if(effect){graphics.removeEffect(effect);effect.destroy();eraserEffects.delete(graphics);}const mask=eraserMasks.get(graphics);if(mask){mask.destroy();eraserMasks.delete(graphics);}}
+function removeEraserMask(graphics:Graphics):void{const effect=eraserEffects.get(graphics);if(effect){graphics.removeEffect(effect);effect.destroy();eraserEffects.delete(graphics);}const mask=eraserMasks.get(graphics);if(mask){destroyDisplayTree(mask.container);eraserMasks.delete(graphics);}}
 export function clearStrokePaint(graphics:Graphics):void{retainedPaints.delete(graphics);graphics.clear();graphics.filters=null;removeEraserMask(graphics);}
 
 function arcSteps(radius:number,angle:number,density:number):number{
@@ -54,16 +60,46 @@ function capsulePath(graphics:Graphics,points:Array<Vec&{r:number}>,density:numb
 
 function updateEraserMask(graphics:Graphics,stroke:Stroke,transform:(point:Vec)=>Vec,scale:number,zoom:number):void{
   if(!stroke.erasures?.length){removeEraserMask(graphics);return;}
-  let mask=eraserMasks.get(graphics);if(!mask){mask=new Graphics();mask.label='brush-erasure-mask';mask.eventMode='none';mask.measurable=false;graphics.addChild(mask);eraserMasks.set(graphics,mask);if(!maskCleanupInstalled.has(graphics)){maskCleanupInstalled.add(graphics);graphics.on('destroyed',()=>{eraserEffects.get(graphics)?.destroy();eraserEffects.delete(graphics);const current=eraserMasks.get(graphics);if(current&&!current.destroyed)current.destroy();eraserMasks.delete(graphics);});}}mask.clear();
-  for(const area of stroke.erasures)capsulePath(mask,area.points.map(p=>({...transform(p),r:area.radius*scale})),zoom);
-  mask.fill(0xffffff);if(!eraserEffects.has(graphics)){const effect=new StrokeInverseMask(mask);eraserEffects.set(graphics,effect);graphics.setMask({inverse:true});graphics.addEffect(effect);}
+  let mask=eraserMasks.get(graphics);
+  if(!mask){
+    const container=new Container();container.label='brush-erasure-mask';container.eventMode='none';container.measurable=false;
+    mask={container,chunks:[]};graphics.addChild(container);eraserMasks.set(graphics,mask);
+    if(!maskCleanupInstalled.has(graphics)){
+      maskCleanupInstalled.add(graphics);
+      graphics.on('destroyed',()=>{eraserEffects.get(graphics)?.destroy();eraserEffects.delete(graphics);const current=eraserMasks.get(graphics);if(current)destroyDisplayTree(current.container);eraserMasks.delete(graphics);});
+    }
+  }
+  const density=zoom*Math.min(3,globalThis.devicePixelRatio||1);let index=0;
+  for(const area of stroke.erasures){
+    const radius=area.radius*scale;
+    for(let start=0;start<area.points.length;start+=ERASER_CHUNK_SEGMENTS){
+      const end=Math.min(start+ERASER_CHUNK_SEGMENTS,area.points.length-1),length=end-start+1;
+      let chunk=mask.chunks[index++];
+      if(!chunk){const child=new Graphics();child.eventMode='none';child.measurable=false;mask.container.addChild(child);chunk={graphics:child,points:[],radius:NaN,density:NaN};mask.chunks.push(chunk);}
+      // Commands own a fresh clone of erasures. Comparing the actual coordinates
+      // retains completed GPU geometry across those copies, while also detecting
+      // same-length edits, Undo/Redo and mutable transform closures correctly.
+      let changed=chunk.radius!==radius||chunk.density!==density||chunk.points.length!==length;
+      if(!changed)for(let i=0;i<length;i++){const point=transform(area.points[start+i]!),old=chunk.points[i]!;if(old.x!==point.x||old.y!==point.y){changed=true;break;}}
+      if(changed){
+        chunk.points=area.points.slice(start,end+1).map(point=>({...transform(point),r:radius}));chunk.radius=radius;chunk.density=density;
+        chunk.graphics.clear();capsulePath(chunk.graphics,chunk.points,density);chunk.graphics.fill(0xffffff);
+      }
+      if(end===area.points.length-1)break;
+    }
+  }
+  for(const chunk of mask.chunks.splice(index))destroyDisplayTree(chunk.graphics);
+  // One shared stencil pass is essential: Pixi's EQUAL/increment-clamp mask
+  // state unions overlapping children. Separate inverse effects per chunk
+  // would instead nest stencil levels and break overlapping erasures.
+  if(!eraserEffects.has(graphics)){const effect=new StrokeInverseMask(mask.container);eraserEffects.set(graphics,effect);graphics.setMask({inverse:true});graphics.addEffect(effect);}
 }
 
 /** A stroked centerline is triangulated locally, so loops can never fill their interior. */
 export function paintStroke(graphics:Graphics,stroke:Stroke,options:PaintOptions={}):void{
   if(!stroke.points.length){clearStrokePaint(graphics);return;}
   const ranged=options.startSegment!==undefined||options.endSegment!==undefined;
-  const geometry=options.geometry??(ranged?strokeGeometryRange(stroke,options.startSegment??0,options.endSegment??stroke.points.length-1):strokeGeometry(stroke)),transform=options.transform??((p:Vec)=>p),color=stroke.color;
+  const geometry=options.geometry??(ranged?strokeGeometryRange(stroke,options.startSegment??0,options.endSegment??stroke.points.length-1):strokeGeometry(stroke)),transform=options.transform??identityPoint,color=stroke.color;
   const scale=Math.abs(options.scale??1),zoom=Math.abs(options.zoom??1),minimum=strokeMinimumWidth(zoom),firstWidth=(stroke.points[0]?.r??0)*2*scale;
   const coverage=options.applyCoverage===false||!geometry.uniform?1:strokeScreenCoverage(firstWidth,zoom),opacity=strokeOpacity(stroke)*coverage;
   const retain=!ranged&&!options.transform&&options.clear!==false,key=[color,scale,zoom,globalThis.devicePixelRatio||1,opacity].join('|'),cached=retainedPaints.get(graphics);

@@ -7,7 +7,8 @@
     "dev": "vite",
     "build": "tsc --noEmit && vite build",
     "preview": "vite preview",
-    "test": "playwright test",
+    "test:cpu": "node --test tests/cpu/eraser.cpu.mjs",
+    "test": "npm run test:cpu && playwright test",
     "test:headed": "playwright test --headed"
   },
   "dependencies": {

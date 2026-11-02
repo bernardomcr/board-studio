@@ -1,5 +1,5 @@
 import type { Vec } from "./geometry";
-import {strokeGeometry,visitStrokeSegmentsInBounds,type Stroke,type StrokePoint} from "./strokes";
+import {strokeBounds,strokeGeometry,visitStrokeSegmentsInBounds,type Stroke,type StrokePoint} from "./strokes";
 
 const EPS = 1e-9;
 const copy = (point: StrokePoint): StrokePoint => ({ ...point });
@@ -20,9 +20,13 @@ type Bounds={minX:number;minY:number;maxX:number;maxY:number};
 type Edge={kind:'line';a:Vec;b:Vec}|Disk;
 const cross2=(a:Vec,b:Vec)=>a.x*b.y-a.y*b.x;
 const sub=(a:Vec,b:Vec):Vec=>({x:a.x-b.x,y:a.y-b.y});
+const primitiveBoxes=new WeakMap<Primitive,Bounds>();
 function primitiveBounds(p:Primitive):Bounds{
-  if(p.kind==='disk')return {minX:p.center.x-p.radius,minY:p.center.y-p.radius,maxX:p.center.x+p.radius,maxY:p.center.y+p.radius};
-  return {minX:Math.min(...p.points.map(v=>v.x)),minY:Math.min(...p.points.map(v=>v.y)),maxX:Math.max(...p.points.map(v=>v.x)),maxY:Math.max(...p.points.map(v=>v.y))};
+  const cached=primitiveBoxes.get(p);if(cached)return cached;
+  let bounds:Bounds;
+  if(p.kind==='disk')bounds={minX:p.center.x-p.radius,minY:p.center.y-p.radius,maxX:p.center.x+p.radius,maxY:p.center.y+p.radius};
+  else {let minX=Infinity,minY=Infinity,maxX=-Infinity,maxY=-Infinity;for(const point of p.points){minX=Math.min(minX,point.x);minY=Math.min(minY,point.y);maxX=Math.max(maxX,point.x);maxY=Math.max(maxY,point.y);}bounds={minX,minY,maxX,maxY};}
+  primitiveBoxes.set(p,bounds);return bounds;
 }
 const boundsOverlap=(a:Bounds,b:Bounds)=>a.minX<b.maxX&&b.minX<a.maxX&&a.minY<b.maxY&&b.minY<a.maxY;
 function segmentPolygon(a:Vec,b:Vec,ar:number,br:number):Polygon|undefined{
@@ -46,6 +50,13 @@ function primitiveContains(p:Primitive,point:Vec,strict=false):boolean{
   if(p.kind==='polygon')return polygonContains(p,point,strict);
   const distance=Math.hypot(point.x-p.center.x,point.y-p.center.y);return strict?distance<p.radius:distance<=p.radius;
 }
+/** Convex containment is an exact rejection, not a paint/eraser dilation. */
+function primitiveCovers(outer:Primitive,inner:Primitive):boolean{
+  const a=primitiveBounds(outer),b=primitiveBounds(inner);if(a.minX>b.minX||a.minY>b.minY||a.maxX<b.maxX||a.maxY<b.maxY)return false;
+  if(inner.kind==='polygon')return inner.points.every(point=>primitiveContains(outer,point));
+  if(outer.kind==='disk')return Math.hypot(inner.center.x-outer.center.x,inner.center.y-outer.center.y)+inner.radius<=outer.radius;
+  return polygonContains(outer,inner.center)&&outer.points.every((point,i)=>distanceToSegment(inner.center,point,outer.points[(i+1)%outer.points.length]!)>=inner.radius);
+}
 function primitivesIntersect(a:Primitive,b:Primitive):boolean{
   if(!boundsOverlap(primitiveBounds(a),primitiveBounds(b)))return false;
   if(a.kind==='disk'&&b.kind==='disk')return Math.hypot(a.center.x-b.center.x,a.center.y-b.center.y)<a.radius+b.radius;
@@ -61,7 +72,8 @@ function primitivesIntersect(a:Primitive,b:Primitive):boolean{
   }
   return true;
 }
-function edges(p:Primitive):Edge[]{return p.kind==='disk'?[p]:p.points.map((a,i)=>({kind:'line' as const,a,b:p.points[(i+1)%p.points.length]!}));}
+const primitiveEdges=new WeakMap<Primitive,Edge[]>();
+function edges(p:Primitive):Edge[]{let result=primitiveEdges.get(p);if(!result){result=p.kind==='disk'?[p]:p.points.map((a,i)=>({kind:'line' as const,a,b:p.points[(i+1)%p.points.length]!}));primitiveEdges.set(p,result);}return result;}
 function edgeBounds(e:Edge):Bounds{return e.kind==='disk'?primitiveBounds(e):{minX:Math.min(e.a.x,e.b.x),minY:Math.min(e.a.y,e.b.y),maxX:Math.max(e.a.x,e.b.x),maxY:Math.max(e.a.y,e.b.y)};}
 function edgeIntersections(a:Edge,b:Edge):Vec[]{
   if(a.kind==='line'&&b.kind==='line'){
@@ -86,25 +98,55 @@ function verticalInterval(p:Primitive,x:number):Interval|undefined{
   for(let i=0;i<p.points.length;i++){const a=p.points[i]!,b=p.points[(i+1)%p.points.length]!;if(a.x===b.x||x<Math.min(a.x,b.x)||x>Math.max(a.x,b.x))continue;values.push(a.y+(b.y-a.y)*(x-a.x)/(b.x-a.x));}
   return values.length?{lo:Math.min(...values),hi:Math.max(...values)}:undefined;
 }
+interface VisibilityQuery {paint:Primitive;holes:Primitive[];boundaries?:Edge[];edgeBoxes?:Bounds[];xs?:number[]}
+/** Old-mask crossings are independent of brush segments. Construct their exact
+ * arrangement lazily once per eraser primitive, rather than once per paint cap. */
+function visibilityEvents(query:VisibilityQuery):number[]{
+  if(query.xs)return query.xs;
+  const bounds=primitiveBounds(query.paint),boundaries=[query.paint,...query.holes].flatMap(edges),edgeBoxes=boundaries.map(edgeBounds),xs=[bounds.minX,bounds.maxX],addX=(x:number)=>{if(x>bounds.minX&&x<bounds.maxX)xs.push(x);};
+  for(const edge of boundaries)if(edge.kind==='disk'){addX(edge.center.x-edge.radius);addX(edge.center.x+edge.radius);}else{addX(edge.a.x);addX(edge.b.x);}
+  const order=boundaries.map((_,i)=>i).sort((i,j)=>edgeBoxes[i]!.minX-edgeBoxes[j]!.minX);
+  for(let i=0;i<order.length;i++)for(let j=i+1;j<order.length;j++){
+    const a=order[i]!,b=order[j]!,left=edgeBoxes[a]!,right=edgeBoxes[b]!;if(right.minX>left.maxX)break;if(left.maxY<right.minY||right.maxY<left.minY)continue;
+    for(const point of edgeIntersections(boundaries[a]!,boundaries[b]!))addX(point.x);
+  }
+  xs.sort((x,y)=>x-y);query.boundaries=boundaries;query.edgeBoxes=edgeBoxes;query.xs=xs;return xs;
+}
+/** Positive witnesses avoid decomposing a growing cut's old, densely sampled
+ * tail. Every witness is verified against both real interiors and every hole;
+ * failure still falls through to the exact arrangement below. */
+function visibleWitness(paint:Primitive,query:Primitive,holes:Primitive[]):boolean{
+  const uncovered=(point:Vec)=>primitiveContains(paint,point,true)&&primitiveContains(query,point,true)&&!holes.some(h=>primitiveContains(h,point));
+  for(const primitive of [paint,query]){
+    if(primitive.kind==='disk'){
+      if(uncovered(primitive.center))return true;
+      for(const factor of [.5,.999999])for(let i=0;i<8;i++){const angle=i*Math.PI/4;if(uncovered({x:primitive.center.x+Math.cos(angle)*primitive.radius*factor,y:primitive.center.y+Math.sin(angle)*primitive.radius*factor}))return true;}
+    }else{
+      const center=primitive.points.reduce((sum,p)=>({x:sum.x+p.x/primitive.points.length,y:sum.y+p.y/primitive.points.length}),{x:0,y:0});if(uncovered(center))return true;
+      for(const point of primitive.points)if(uncovered({x:center.x+(point.x-center.x)*.999999,y:center.y+(point.y-center.y)*.999999}))return true;
+    }
+  }
+  return false;
+}
 /** Exact vertical decomposition of paint ∩ eraser minus the complete old mask
  * union. Boundary crossings and extrema partition x into slabs of fixed topology;
  * one interior scanline per slab is sufficient. This also finds uncovered islands
  * surrounded by several old cuts, without sampling pixels or dilating geometry. */
-function visibleIntersection(paint:Primitive,query:Primitive,allHoles:Primitive[]):boolean{
+function visibleIntersection(paint:Primitive,context:VisibilityQuery):boolean{
+  const query=context.paint;
   if(!primitivesIntersect(paint,query))return false;
-  const a=primitiveBounds(paint),b=primitiveBounds(query),bounds={minX:Math.max(a.minX,b.minX),minY:Math.max(a.minY,b.minY),maxX:Math.min(a.maxX,b.maxX),maxY:Math.min(a.maxY,b.maxY)},holes=allHoles.filter(h=>boundsOverlap(primitiveBounds(h),bounds));
+  const a=primitiveBounds(paint),b=primitiveBounds(query),bounds={minX:Math.max(a.minX,b.minX),minY:Math.max(a.minY,b.minY),maxX:Math.min(a.maxX,b.maxX),maxY:Math.min(a.maxY,b.maxY)},holes=context.holes.filter(h=>boundsOverlap(primitiveBounds(h),bounds));
   if(!holes.length)return true;
+  if(holes.some(h=>primitiveCovers(h,paint)||primitiveCovers(h,query)))return false;
+  if(visibleWitness(paint,query,holes))return true;
   // Confirm a real interior witness before a destructive hit. This rejects
   // numerical boundary slivers without enlarging cuts by a geometric epsilon.
   const uncovered=(x:number,lo:number,hi:number)=>{const y=lo+(hi-lo)/2,point={x,y};return y>lo&&y<hi&&primitiveContains(paint,point,true)&&primitiveContains(query,point,true)&&!holes.some(h=>primitiveContains(h,point));};
-  const boundaries=[paint,query,...holes].flatMap(edges),edgeBoxes=boundaries.map(edgeBounds),xs=[bounds.minX,bounds.maxX],addX=(x:number)=>{if(x>bounds.minX&&x<bounds.maxX)xs.push(x);};
-  for(const edge of boundaries)if(edge.kind==='disk'){addX(edge.center.x-edge.radius);addX(edge.center.x+edge.radius);}else{addX(edge.a.x);addX(edge.b.x);}
-  const order=boundaries.map((_,i)=>i).sort((i,j)=>edgeBoxes[i]!.minX-edgeBoxes[j]!.minX);
-  for(let i=0;i<order.length;i++)for(let j=i+1;j<order.length;j++){
-    const a=order[i]!,b=order[j]!,left=edgeBoxes[a]!,right=edgeBoxes[b]!;
-    if(right.minX>left.maxX)break;
-    if(left.maxY<right.minY||right.maxY<left.minY)continue;
-    for(const point of edgeIntersections(boundaries[a]!,boundaries[b]!))addX(point.x);
+  const xs=visibilityEvents(context).filter(x=>x>bounds.minX&&x<bounds.maxX);xs.push(bounds.minX,bounds.maxX);const addX=(x:number)=>{if(x>bounds.minX&&x<bounds.maxX)xs.push(x);};
+  if(paint!==query)for(const edge of edges(paint)){
+    if(edge.kind==='disk'){addX(edge.center.x-edge.radius);addX(edge.center.x+edge.radius);}else{addX(edge.a.x);addX(edge.b.x);}
+    const box=edgeBounds(edge);
+    for(let i=0;i<context.boundaries!.length;i++){const other=context.edgeBoxes![i]!;if(box.maxX<other.minX||other.maxX<box.minX||box.maxY<other.minY||other.maxY<box.minY)continue;for(const point of edgeIntersections(edge,context.boundaries![i]!))addX(point.x);}
   }
   xs.sort((x,y)=>x-y);
   for(let i=1;i<xs.length;i++){
@@ -120,15 +162,28 @@ function visibleIntersection(paint:Primitive,query:Primitive,allHoles:Primitive[
 /** A continuous sweep catches a stroke even when no input event lands on it. */
 export function strokeIntersectsEraser(stroke:Stroke,from:Vec,to:Vec,radius:number):boolean{
   if(![from.x,from.y,to.x,to.y,radius].every(Number.isFinite)||radius<=0)return false;
+  const queryBounds={minX:Math.min(from.x,to.x)-radius,minY:Math.min(from.y,to.y)-radius,maxX:Math.max(from.x,to.x)+radius,maxY:Math.max(from.y,to.y)+radius},bounds=strokeBounds(stroke);
+  if(!boundsOverlap(bounds,queryBounds))return false;
   // A sweep contained in an existing erased capsule touches no visible paint.
   for(const area of stroke.erasures??[]){const margin=area.radius-radius;if(margin<0)continue;if(area.points.length===1){const p=area.points[0]!;if(Math.hypot(from.x-p.x,from.y-p.y)<=margin&&Math.hypot(to.x-p.x,to.y-p.y)<=margin)return false;}for(let i=1;i<area.points.length;i++)if(distanceToSegment(from,area.points[i-1]!,area.points[i]!)<=margin&&distanceToSegment(to,area.points[i-1]!,area.points[i]!)<=margin)return false;}
   const points=strokeGeometry(stroke).points;if(!points.length)return false;
-  const query=segmentPrimitives(from,to,radius,radius),queryBounds={minX:Math.min(from.x,to.x)-radius,minY:Math.min(from.y,to.y)-radius,maxX:Math.max(from.x,to.x)+radius,maxY:Math.max(from.y,to.y)+radius},holes:Primitive[]=[];
+  const query=segmentPrimitives(from,to,radius,radius),holes:Primitive[]=[],seen=new Set<string>();
   for(const area of stroke.erasures??[]){for(let i=1;i<Math.max(2,area.points.length);i++){
     const a=area.points[i-1],b=area.points[Math.min(i,area.points.length-1)];if(!a||!b)continue;
-    for(const primitive of segmentPrimitives(a,b,area.radius,area.radius))if(boundsOverlap(primitiveBounds(primitive),queryBounds))holes.push(primitive);
+    // Reject distant old cuts before allocating their disks/quadrilateral.
+    if(Math.max(a.x,b.x)+area.radius<=queryBounds.minX||Math.min(a.x,b.x)-area.radius>=queryBounds.maxX||Math.max(a.y,b.y)+area.radius<=queryBounds.minY||Math.min(a.y,b.y)-area.radius>=queryBounds.maxY)continue;
+    for(const primitive of segmentPrimitives(a,b,area.radius,area.radius))if(boundsOverlap(primitiveBounds(primitive),queryBounds)){
+      // Adjacent capsules share caps; repeated/zero-length samples share whole
+      // primitives. Removing exact duplicates preserves the complete old union.
+      const key=primitive.kind==='disk'?`d:${primitive.center.x},${primitive.center.y},${primitive.radius}`:`p:${primitive.points.map(p=>`${p.x},${p.y}`).join(';')}`;
+      if(!seen.has(key)){seen.add(key);holes.push(primitive);}
+    }
   }}
-  const hits=(paint:Primitive)=>query.some(part=>visibleIntersection(paint,part,holes));
+  const contexts:VisibilityQuery[]=query.map(paint=>({paint,holes:holes.filter(h=>primitivesIntersect(h,paint))}));
+  // Prove a fully erased sweep once. Previously the same old-cut union was
+  // decomposed again for every overlapping segment in a dense brush scribble.
+  const visible=contexts.filter(context=>visibleIntersection(context.paint,context));if(!visible.length)return false;
+  const hits=(paint:Primitive)=>visible.some(context=>visibleIntersection(paint,context));
   if(points.length===1)return hits({kind:'disk',center:points[0]!,radius:points[0]!.r});
   return visitStrokeSegmentsInBounds(stroke,queryBounds,(a,b)=>{
     // A cheap conservative phase precedes the actual tapered coverage test.
