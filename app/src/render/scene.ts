@@ -350,8 +350,9 @@ export class BoardScene {
     const content = w.type === "frame" ? w.title : mindTopicText(w);
     node.decorations=!!w.style.textDecoration&&w.style.textDecoration!=='none'||content.includes('__')||content.includes('~~');
     let fit:BoxTextFit|undefined;
+    const kind=w.mind?`mind:${w.type==='shape'?w.shape:w.type}:${w.mind.layoutScale??1}`:w.type==='shape'?w.shape:w.type;
     if(isBoxText(w)){
-      const cached=node.boxFit,kind=w.mind?'mind':w.type==='shape'?w.shape:w.type;
+      const cached=node.boxFit;
       if(cached&&cached.kind===kind&&cached.content===content&&cached.style===w.style&&cached.width===w.width&&cached.height===w.height)fit=cached.fit;
       else{fit=fitBoxText(w,content);node.boxFit={content,kind,style:w.style,width:w.width,height:w.height,fit};}
     }else node.boxFit=undefined;
@@ -360,7 +361,7 @@ export class BoardScene {
     const maxWidth = Math.max(Number.MIN_VALUE, w.width - left - right);
 
     const sig = [
-      content,
+      content,kind,
       w.style.fontFamily,
       w.style.fontSize,
       w.style.fontWeight,

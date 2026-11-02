@@ -7,6 +7,7 @@ Campos, navegação e mapa mental refinados, mantendo a identidade em cinza escu
 - Mapas mentais criados com proporções legíveis no zoom atual; novos tópicos preservam tema, forma, tipografia e estilo do ramo.
 - Arraste de ramos com prévia para inserir como filho, irmão acima/abaixo ou no lado da raiz permitido pelo layout.
 - Menus de tópico, mapa e ramos organizados; controle dos níveis por Alt+0 a Alt+9 e seleção de subtópicos.
+- Texto ajustado ao contorno de círculos e losangos, inclusive após converter um tópico existente.
 - Tópicos bloqueados oferecem somente desbloqueio por pressão; herança de bloqueios e Undo/Redo preservados.
 - Mantidas as correções de conectores, seleção e borracha de precisão da v0.19.0.
 

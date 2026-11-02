@@ -19,9 +19,9 @@ export interface BoxTextFit {fontSize:number;lines:Run[][];lineHeight:number;pad
  * our MindMeister-style topics retain their own compact padding. */
 export function boxTextInsets(w:Widget):BoxTextInsets{
   if(!isBoxText(w))return {left:0,right:0,top:0,bottom:0};
-  const width=w.width,height=w.height,short=Math.min(width,height);let left=short*.05,right=left,top=left,bottom=left;
+  const width=w.width,height=w.height,short=Math.min(width,height),mindPadding=w.mind?Math.min(10*(w.mind.layoutScale??1),Math.max(0,short)/4):undefined;
+  let left=mindPadding??short*.05,right=left,top=left,bottom=left;
   if(w.type==='sticky_note'){left=right=top=bottom=Math.max(0,short)/16;}
-  else if(w.mind){left=right=top=bottom=Math.min(10*(w.mind.layoutScale??1),Math.max(0,short)/4);}
   else if(w.type==='shape'){
     const shape=canonicalShape(w.shape);
     switch(shape){
@@ -43,6 +43,9 @@ export function boxTextInsets(w:Widget):BoxTextInsets{
       case 'brace_left':case 'brace_right':left=right=width*.05;top=bottom=height*.05;if(shape==='brace_left')right+=15+borderWidthFor(w)/2;else left+=15+borderWidthFor(w)/2;break;
       case 'text_block':left=right=top=bottom=0;break;
     }
+    // Topics keep compact padding in rectangular boxes, while their shaped
+    // variants share the same safe glyph region as ordinary board shapes.
+    if(mindPadding!==undefined){left=Math.max(left,mindPadding);right=Math.max(right,mindPadding);top=Math.max(top,mindPadding);bottom=Math.max(bottom,mindPadding);}
   }
   // A tiny box or an extreme brace border must still have a finite positive area.
   left=Math.max(0,Math.min(width,left));right=Math.max(0,Math.min(width,right));top=Math.max(0,Math.min(height,top));bottom=Math.max(0,Math.min(height,bottom));
